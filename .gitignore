@@ -1,0 +1,7 @@
+*.json
+*.jsonl
+*.ttl
+envs/
+__pycache__/
+.ipynb_checkpoints/
+data/
