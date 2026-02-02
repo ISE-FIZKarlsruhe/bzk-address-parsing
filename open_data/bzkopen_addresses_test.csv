@@ -1,0 +1,148 @@
+filename,field,FullAddress,Unknown,UnitNumber,HouseNumber,StreetName,Neighborhood,City,District,Region,State,Country,PostalCode,Other
+test_0.jpg,VictimDeathPlace,Herleshausen,,,,,,Herleshausen,,,,,,
+test_1.jpg,ApplicantCurrentAddress,Dellingen,,,,,,Dellingen,,,,,,
+test_1.jpg,VictimBirthPlace,Altenschönbach,,,,,,Altenschönbach,,,,,,
+test_2.jpg,VictimBirthPlace,Neybator,Neybator,,,,,,,,,,,
+test_3.jpg,ApplicantBirthPlace,Klein-Vernick,,,,,,Klein-Vernick,,,,,,
+test_3.jpg,ApplicantCurrentAddress,"Brühl b. Köln, Kempishofstr. 6",,,6,Kempishofstr.,,Brühl b. Köln,,,,,,
+test_4.jpg,ApplicantBirthPlace,Friedrichsrode,,,,,,Friedrichsrode,,,,,,
+test_4.jpg,ApplicantCurrentAddress,"Hildesheim, Lademühle 56",,,56,Lademühle,,Hildesheim,,,,,,
+test_4.jpg,VictimDeathPlace,Auschwitz,,,,,,,,,,,,Auschwitz
+test_5.jpg,VictimDeathPlace,Auschwitz,,,,,,,,,,,,Auschwitz
+test_6.jpg,ApplicantBirthPlace,Aschbach,,,,,,Aschbach,,,,,,
+test_6.jpg,ApplicantCurrentAddress,"Saarbrücken, Graf Johannstr. 28",,,28,Graf Johannstr.,,Saarbrücken,,,,,,
+test_6.jpg,VictimDeathPlace,der Emigration,,,,,,,,,,,,der Emigration
+test_7.jpg,VictimBirthPlace,Gumbinnen/Ostpreussen,,,,,,Gumbinnen,,,,,,Ostpreussen
+test_8.jpg,ApplicantBirthPlace,Weimar,,,,,,Weimar,,,,,,
+test_8.jpg,ApplicantCurrentAddress,Neston i. Wirral Cheshar,,,,,,Neston i. Wirral,Cheshar,,,,,
+test_9.jpg,ApplicantBirthPlace,Brätz/Posen,,,,,,Brätz,,,,,,Posen
+test_9.jpg,ApplicantCurrentAddress,"Cedera/Israel Altersheim, Beth Meir von Malben",,,,,,Cedera,,,,Israel,,Altersheim Beth Meir von Malben
+test_10.jpg,VictimBirthPlace,Helfta b. Eisleben,,,,,,Helfta b. Eisleben,,,,,,
+test_11.jpg,ApplicantBirthPlace,Kossow,,,,,,,,,,Kossow,,
+test_11.jpg,ApplicantCurrentAddress,Tel Aviv Schech Schapira Re<UNK> Schiwat Zion 18,________ Schech Schapira Re<UNK> ____________ __,,18,Schiwat Zion,,Tel Aviv,,,,,,
+test_11.jpg,VictimDeathPlace,K.Z.,,,,,,,,,,,,K.Z.
+test_12.jpg,ApplicantBirthPlace,Tulcea,,,,,,Tulcea,,,,,,
+test_12.jpg,ApplicantCurrentAddress,Jaffa Avodat Israel 4,,,4,Avodat Israel,,Jaffa,,,,,,
+test_13.jpg,ApplicantBirthPlace,Witten a.d. Ruhr,,,,,,Witten a.d. Ruhr,,,,,,
+test_13.jpg,ApplicantCurrentAddress,"Rego Park 74/USA, 6282 Saunders Street",,,6282,Saunders Street,Rego Park 74,,,,,USA,,
+test_13.jpg,VictimDeathPlace,Hannover,,,,,,Hannover,,,,,,
+test_14.jpg,VictimBirthPlace,Bamberg,,,,,,Bamberg,,,,,,
+test_15.jpg,VictimBirthPlace,Johannisthal,,,,,Johannisthal,,,,,,,
+test_16.jpg,ApplicantCurrentAddress,Ansbach,,,,,,Ansbach,,,,,,
+test_16.jpg,VictimBirthPlace,Dudenhofen,,,,,,Dudenhofen,,,,,,
+test_16.jpg,VictimDeathPlace,Straßburg,,,,,,Straßburg,,,,,,
+test_17.jpg,ApplicantBirthPlace,Braila (Rumänien),,,,,,Braila,,,,Rumänien,,
+test_17.jpg,ApplicantCurrentAddress,"Vichy (Allier) 74, Avenue Poncet",,,74,Avenue Poncet,,Vichy,,,,,,Allier
+test_18.jpg,ApplicantBirthPlace,Plovdiv Bulgarien,,,,,,Plovdiv,,,,Bulgarien,,
+test_18.jpg,ApplicantCurrentAddress,"Jaffa, Schdret Jeruschlaim/Ole Hadasch)","_____, Schdret Jeruschlaim/Ole Hadasch)",,,,,Jaffa,,,,,,
+test_19.jpg,ApplicantBirthPlace,"Lespezi, Rumänien",,,,,,Lespezi,,,,Rumänien,,
+test_19.jpg,ApplicantCurrentAddress,"Kirjath Jam, Israel Hajam Hatichon 11/9",,,11/9,Hajam Hatichon,,Kirjath Jam,,,,Israel,,
+test_20.jpg,ApplicantBirthPlace,Warschau Polen,,,,,,Warschau,,,,Polen,,
+test_20.jpg,ApplicantCurrentAddress,Nathania Shikun Vatikim 136,Nathania ______________ ___,,136,,Shikun Vatikim,,,,,,,
+test_21.jpg,ApplicantBirthPlace,"Küstendil, Bulgarien",,,,,,Küstendil,,,,Bulgarien,,
+test_21.jpg,ApplicantCurrentAddress,"Jaffo, Rh. 43 Nr. 14",,,Nr. 14,Rh. 43,,Jaffo,,,,,,
+test_22.jpg,ApplicantCurrentAddress,"Nürnberg, Am Maxfeld 144",,,144,Am Maxfeld,,Nürnberg,,,,,,
+test_22.jpg,VictimBirthPlace,Stuttgart,,,,,,Stuttgart,,,,,,
+test_22.jpg,VictimDeathPlace,KZ. Straßenhof b. Riga,,,,,,Riga,,,,,,KZ. Straßenhof
+test_23.jpg,ApplicantBirthPlace,Naugard/Pom.,,,,,,Naugard,,,,,,Pom.
+test_23.jpg,ApplicantCurrentAddress,"Hannover, Am Grasweg 18",,,18,Am Grasweg,,Hannover,,,,,,
+test_23.jpg,VictimDeathPlace,Frankfurt,,,,,,Frankfurt,,,,,,
+test_24.jpg,ApplicantBirthPlace,Hoof/Krs. Kassel,,,,,,Hoof,Krs. Kassel,,,,,
+test_24.jpg,ApplicantCurrentAddress,"75 Fort Washington Ave., New York 32, N.Y. USA",,,75,Fort Washington Ave.,,New York,,,N.Y.,USA,,
+test_25.jpg,ApplicantBirthPlace,Arzberg/Ofr.,,,,,,Arzberg,,,,,,Ofr.
+test_25.jpg,ApplicantCurrentAddress,"Arzberg, Schulgasse 3/Kreis Wunsiedel/Ofr.",,,3,Schulgasse,,Arzberg,Kreis Wunsiedel,,,,,Ofr.
+test_26.jpg,ApplicantBirthPlace,Dab/Polen,,,,,,Dab,,,,Polen,,
+test_26.jpg,ApplicantCurrentAddress,AMSTERDAM Oranje Nassaulaan 2,,,2,Oranje Nassaulaan,,AMSTERDAM,,,,,,
+test_27.jpg,VictimBirthPlace,Zenyczkiwici/Ukraine,,,,,,Zenyczkiwici,,,,Ukraine,,
+test_28.jpg,ApplicantCurrentAddress,60 Thayer Str. New York 34,,,60,Thayer Str.,,New York,,,,,,
+test_29.jpg,VictimBirthPlace,Olgut,Olgut,,,,,,,,,,,
+test_30.jpg,VictimBirthPlace,Hausen/Offenbach-Main,,,,,,Hausen,,,,,,Offenbach-Main
+test_31.jpg,VictimBirthPlace,Unna,,,,,,Unna,,,,,,
+test_32.jpg,ApplicantBirthPlace,Zaborze b. Auschwitz,,,,,,,,,,,,Zaborze b. Auschwitz
+test_32.jpg,ApplicantCurrentAddress,Peabody Mass. 112 Main Street USA,,,112,Main Street,,Peabody,,,Mass.,USA,,
+test_33.jpg,VictimBirthPlace,Warnsdorf,,,,,,Warnsdorf,,,,,,
+test_34.jpg,ApplicantBirthPlace,Galizien,,,,,,,,,,,,Galizien
+test_34.jpg,ApplicantCurrentAddress,"831 Alameda, San Mateo, Calif.",,,831,Alameda,,San Mateo,,,Calif.,,,
+test_34.jpg,VictimDeathPlace,San Mateo,,,,,,San Mateo,,,,,,
+test_35.jpg,ApplicantBirthPlace,Esslingen/N.,,,,,,Esslingen/N.,,,,,,
+test_35.jpg,ApplicantCurrentAddress,"Stuttgart-Stammheim, Charlottenstr. 22.",,,22,Charlottenstr.,Stammheim,Stuttgart,,,,,,
+test_36.jpg,ApplicantBirthPlace,"Izdebki, Polen",,,,,,Izdebki,,,,Polen,,
+test_37.jpg,ApplicantBirthPlace,Czernowitz/Rum.,,,,,,Czernowitz,,,,Rum.,,
+test_37.jpg,ApplicantCurrentAddress,"Nathania/Israel, Schderot Benjamin 35",,,35,Schderot Benjamin,,Nathania,,,,Israel,,
+test_38.jpg,ApplicantCurrentAddress,"Paris, 12 passage de Clichy",,,12,passage de Clichy,,Paris,,,,,,
+test_39.jpg,ApplicantBirthPlace,Berlin,,,,,,Berlin,,,,,,
+test_39.jpg,ApplicantCurrentAddress,Hameln Friedrichstr. 14,,,14,Friedrichstr.,,Hameln,,,,,,
+test_40.jpg,ApplicantBirthPlace,Steinsfurt,,,,,,Steinsfurt,,,,,,
+test_40.jpg,ApplicantCurrentAddress,"Hoffenheim b. Sinsheim/Elsemz, Sinsheimerstr. 13",,,13,Sinsheimerstr.,,Hoffenheim b. Sinsheim,,,,,,Elsemz
+test_40.jpg,VictimBirthPlace,Hoffenheim,,,,,,Hoffenheim,,,,,,
+test_41.jpg,ApplicantCurrentAddress,"Delmenhorst, Oldenburgerlandstr. 75",,,75,Oldenburgerlandstr.,,Delmenhorst,,,,,,
+test_42.jpg,VictimBirthPlace,Heppenheim,,,,,,Heppenheim,,,,,,
+test_43.jpg,VictimBirthPlace,Hamburg,,,,,,Hamburg,,,,,,
+test_44.jpg,ApplicantBirthPlace,Kadenbach,,,,,,Kadenbach,,,,,,
+test_44.jpg,ApplicantCurrentAddress,Niederlahnstein Bahnhofsstr. 13a,,,13a,Bahnhofsstr.,Niederlahnstein,,,,,,,
+test_45.jpg,VictimBirthPlace,Altona/Elbe,,,,,,Altona,,,,,,Elbe
+test_46.jpg,VictimBirthPlace,Hamburg,,,,,,Hamburg,,,,,,
+test_47.jpg,ApplicantBirthPlace,SAMARA RUSSLAND,,,,,,SAMARA,,,,RUSSLAND,,
+test_48.jpg,ApplicantBirthPlace,Koblenz,,,,,,Koblenz,,,,,,
+test_48.jpg,ApplicantCurrentAddress,Peine Damm 41,,,41,,Damm,Peine,,,,,,
+test_49.jpg,ApplicantBirthPlace,Trier,,,,,,Trier,,,,,,
+test_49.jpg,ApplicantCurrentAddress,Fuveau ( Bouches du Rhone ) Frankreich,,,,,,Fuveau,Bouches du Rhone,,,Frankreich,,
+test_50.jpg,ApplicantBirthPlace,Berg,,,,,,Berg,,,,,,
+test_50.jpg,ApplicantCurrentAddress,Berg Ludwigstr. 27,,,27,Ludwigstr.,,Berg,,,,CSR.,,
+test_51.jpg,ApplicantBirthPlace,Tiaveco/CSR.,Tiaveco/,,,,,,,,,,,
+test_51.jpg,ApplicantCurrentAddress,Belo-Horizonte/BRASILIEN,,,,,,,,,Belo-Horizonte,BRASILIEN,,
+test_51.jpg,VictimDeathPlace,?,,,,,,,,,,,,?
+test_52.jpg,ApplicantBirthPlace,Chorzów-Batory,,,,,Batory,Chorzów,,,,,,
+test_52.jpg,ApplicantCurrentAddress,"Chorzów-Batory, ul. Odrowazow nr. 34 woj. Stalinogród/Polen",,,nr. 34,ul. Odrowazow,Batory,Chorzów,,,,Polen,,woj. Stalinogród
+test_52.jpg,VictimBirthPlace,Swiba (Luisenhof) Posen,,,,,,Swiba (Luisenhof),,,,,,Posen
+test_52.jpg,VictimDeathPlace,in Deportation,,,,,,,,,,,,in Deportation
+test_53.jpg,ApplicantBirthPlace,Cannstatt,,,,,,Cannstatt,,,,,,
+test_53.jpg,ApplicantCurrentAddress,"22 A Thomas Drive, Monroe Park, Wilmington 6, Delaware USA","__ A ____________, Monroe Park, __________ 6, ________ ___",,22,Thomas Drive,,Wilmington,,,Delaware,USA,,
+test_54.jpg,ApplicantBirthPlace,St. Ryj Ukrainien,,,,,,St. Ryj,,,,Ukrainien,,
+test_55.jpg,ApplicantBirthPlace,Jena/Thüringen,,,,,,Jena,,,Thüringen,,,
+test_55.jpg,ApplicantCurrentAddress,"Weinsberg b. Heilbronn, Stadtseestr. 25",,,25,Stadtseestr.,,Weinsberg b. Heilbronn,,,,,,
+test_56.jpg,VictimBirthPlace,Kothan,Kothan,,,,,,,,,,,
+test_57.jpg,ApplicantBirthPlace,"Nyitra, CSR",,,,,,Nyitra,,,,CSR,,
+test_57.jpg,ApplicantCurrentAddress,"5735 Cote des Neiges, Montreal, Que.Canada",,,5735,Cote des Neiges,,Montreal,,,,Canada,,Que.
+test_58.jpg,ApplicantBirthPlace,Becherbach,,,,,,Becherbach,,,,,,
+test_58.jpg,ApplicantCurrentAddress,"300 Riverside Drive, Apt. 4 D, New York 24, N.Y.",,Apt. 4 D,300,Riverside Drive,,New York,,,N.Y.,,,
+test_59.jpg,ApplicantBirthPlace,Becherbach,,,,,,Becherbach,,,,,,
+test_59.jpg,ApplicantCurrentAddress,"300 Riverside Drive Apt. 4D, New York 24 NY.",,Apt. 4D,300,Riverside Drive,,New York,,,NY,,,
+test_59.jpg,VictimDeathPlace,New York,,,,,,New York,,,,,,
+test_60.jpg,ApplicantBirthPlace,Visaul de sus Romania.,,,,,,Visaul de sus,,,,Romania,,
+test_60.jpg,ApplicantCurrentAddress,"Denver, Colorado, 844 Ogden Street USA.",,,844,Ogden Street,,Denver,,,Colorado,USA,,
+test_61.jpg,ApplicantBirthPlace,Warschau/Polen,,,,,,Warschau,,,,Polen,,
+test_61.jpg,ApplicantCurrentAddress,"Giwat Rambam, Hana Senesz 26 Israel",,,26,Hana Senesz,Giwat Rambam,,,,,Israel,,
+test_62.jpg,ApplicantBirthPlace,Nisiniec,Nisiniec,,,,,,,,,,,
+test_62.jpg,ApplicantCurrentAddress,Kiriath Ono. Boulev Keren Kajemeth 29 Isr.,,,29,Boulev Keren Kajemeth,Kiriath Ono.,,,,,Isr.,,
+test_63.jpg,ApplicantBirthPlace,Wiesbaden,,,,,,Wiesbaden,,,,,,
+test_63.jpg,ApplicantCurrentAddress,"Audincourt/Doubs/France, 3, Rue de la Yvotte",,,3,Rue de la Yvotte,,Audincourt,,,,France,,Doubs
+test_63.jpg,VictimDeathPlace,KZ,,,,,,,,,,,,KZ
+test_64.jpg,VictimBirthPlace,Hagen,,,,,,Hagen,,,,,,
+test_65.jpg,ApplicantBirthPlace,Mannheim,,,,,,Mannheim,,,,,,
+test_65.jpg,ApplicantCurrentAddress,TEL AVIV Israel Arlosoroffstr. 31,,,31,Arlosoroffstr.,,TEL AVIV,,,,Israel,,
+test_66.jpg,VictimBirthPlace,Krasnojarsk/Russland,,,,,,Krasnojarsk,,,,Russland,,
+test_67.jpg,ApplicantBirthPlace,Krasnojarsk/Russland,,,,,,Krasnojarsk,,,,Russland,,
+test_67.jpg,ApplicantCurrentAddress,"Ulm/Donau, Strassburgerstr. 14.",,,14,Strassburgerstr.,,Ulm,,,,,,Donau
+test_67.jpg,VictimBirthPlace,?,,,,,,,,,,,,?
+test_67.jpg,VictimDeathPlace,Warschau/Ghetto/,,,,,,Warschau,,,,,,Ghetto
+test_68.jpg,VictimBirthPlace,Sata-Mare,,,,,,Sata-Mare,,,,,,
+test_69.jpg,ApplicantBirthPlace,Walsdorf b. Bamberg,,,,,,Walsdorf b. Bamberg,,,,,,
+test_69.jpg,ApplicantCurrentAddress,"Yonkers, New York, 81 Bruce Avenue U.S.A.",,,81,Bruce Avenue,,Yonkers,,,New York,U.S.A.,,
+test_70.jpg,ApplicantBirthPlace,Warschau,,,,,,Warschau,,,,,,
+test_70.jpg,ApplicantCurrentAddress,"Petach Tikwa, Nachlat Zwi/Israel","____________, Nachlat Zwi/______",,,,Petach Tikwa,,,,,Israel,,
+test_71.jpg,ApplicantBirthPlace,Opladen,,,,,,Opladen,,,,,,
+test_71.jpg,ApplicantCurrentAddress,"Opladen, Bielertstr. 32",,,32,Bielertstr.,,Opladen,,,,,,
+test_72.jpg,ApplicantBirthPlace,Worms,,,,,,Worms,,,,,,
+test_72.jpg,ApplicantCurrentAddress,"Genf/Schweiz, 11, Rue Marignac",,,11,Rue Marignac,,Genf,,,,Schweiz,,
+test_73.jpg,ApplicantBirthPlace,Ichenhausen/Schw.,,,,,,Ichenhausen,,,,,,Schw.
+test_73.jpg,ApplicantCurrentAddress,Olivos/Prov. Buenos-Aires Sarmiento 2147 Argentinien,,,2147,Sarmiento,,Olivos,,,,Argentinien,,Prov. Buenos-Aires
+test_74.jpg,ApplicantBirthPlace,"Königstadtl, Böhmen",,,,,,Königstadtl,,,,,,Böhmen
+test_74.jpg,ApplicantCurrentAddress,Buenos Aires/Argent. Ciudad de la Paz 1482 Jpiso,,Jpiso,1482,Ciudad de la Paz,,Buenos Aires,,,,Argent.,,
+test_75.jpg,ApplicantBirthPlace,Rosvegovo CSR,,,,,,Rosvegovo,,,,CSR,,
+test_75.jpg,ApplicantCurrentAddress,"Buenos Aires, Chivilcoy 4491, Argentinien",,,4491,Chivilcoy,,Buenos Aires,,,,Argentinien,,
+test_76.jpg,ApplicantBirthPlace,Berlin,,,,,,Berlin,,,,,,
+test_76.jpg,ApplicantCurrentAddress,"Tiberias/Israel, Box 90",,,Box 90,,,Tiberias,,,,Israel,,
+test_77.jpg,ApplicantBirthPlace,Delmenhorst,,,,,,Delmenhorst,,,,,,
+test_77.jpg,ApplicantCurrentAddress,"East-Ormund - Melbourne - Vic./Australia, 53 Lancaster Str.",,,53,Lancaster Str.,East-Ormund,Melbourne,,,Vic.,Australia,,
+test_77.jpg,VictimBirthPlace,Berne,,,,,,Berne,,,,,,
