@@ -1,9 +1,9 @@
 version: '3.8'
 
 services:
-  postal-jupyter:
+  libpostal-server:
     build: .
     ports:
-      - "8888:8888"
+      - "7272:7272"
     volumes:
       - .:/workspace

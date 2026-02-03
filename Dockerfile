@@ -18,7 +18,7 @@ RUN conda tos accept --override-channels --channel https://repo.anaconda.com/pkg
 RUN conda update -q conda
 
 # Install JupyterLab
-RUN conda install conda-forge::jupyterlab
+#RUN conda install conda-forge::jupyterlab # No longer needed, this is now a libpostal server only
 
 # Install libpostal and python bindings
 RUN cd / && git clone https://github.com/openvenues/libpostal && \
@@ -29,5 +29,7 @@ RUN cd / && git clone https://github.com/openvenues/libpostal && \
     make install && \
     ldconfig
 RUN pip install postal
+
 WORKDIR /workspace
-CMD ["jupyter", "lab", "--allow-root", "--ip=0.0.0.0", "--no-browser"]
+COPY libpostal_server.py /workspace/libpostal_server.py
+CMD ["python", "libpostal_server.py"]
