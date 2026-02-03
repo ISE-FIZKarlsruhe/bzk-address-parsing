@@ -33,7 +33,7 @@ class LibpostalServer(BaseHTTPRequestHandler):
             return
         
         results = None
-        if parsed_path.path in ["/", "/parse_address"]:
+        if parsed_path.path in ["/", "/parse_addresses"]:
             results = [parse_address(addr) for addr in input_addresses]
         else:
             logging.error(f"Method not implemented yet: {parsed_path.path}")
@@ -47,6 +47,7 @@ class LibpostalServer(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+        self.wfile.flush()
 
     def log_message(self, format, *args):
         logging.info("%s - - [%s] %s\n" %
