@@ -127,7 +127,7 @@ validation_72.jpg,ApplicantCurrentAddress,Schikun Nowe-Nejman Doar Ramat aim 54 
 validation_73.jpg,ApplicantBirthPlace,Zarki/Polen,,,,,,Zarki,,,,Polen,,
 validation_73.jpg,ApplicantCurrentAddress,Berschewa/Israel,,,,,,Berschewa,,,,Israel,,
 validation_74.jpg,ApplicantBirthPlace,Sosnowice/Polen,,,,,,Sosnowice,,,,Polen,,
-validation_74.jpg,ApplicantCurrentAddress,2114-79 St. Jackson Heights. N.Y. USA,,,,,,St. Jackson Heights,,,N.Y.,USA,2114-79,
+validation_74.jpg,ApplicantCurrentAddress,2114-79 St. Jackson Heights. N.Y. USA,,,2114,79 St.,Jackson Heights,N.Y.,,,,USA,2114-79,
 validation_75.jpg,VictimBirthPlace,Losone CSR,,,,,,Losone,,,,CSR,,
 validation_76.jpg,ApplicantBirthPlace,Rum.,,,,,,,,,,Rum.,,
 validation_76.jpg,ApplicantCurrentAddress,Bnei Brack Isr. Raw Oto St. 16,,,16,Raw Oto St.,Bnei Brack,,,,,Isr.,,

@@ -28,7 +28,7 @@ RUN cd / && git clone https://github.com/openvenues/libpostal && \
     make && \
     make install && \
     ldconfig
-RUN pip install postal
+RUN pip install postal bottle
 
 WORKDIR /workspace
 COPY libpostal_server.py /workspace/libpostal_server.py

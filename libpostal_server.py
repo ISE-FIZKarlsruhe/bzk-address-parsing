@@ -1,59 +1,91 @@
 import json
-from http.server import BaseHTTPRequestHandler, HTTPServer
-from urllib.parse import urlparse
-from argparse import ArgumentParser
 import logging
+import time
+from argparse import ArgumentParser
+
+from bottle import Bottle, HTTPResponse, request, run, HTTPError
 from postal.parser import parse_address
+from postal.expand import expand_address
+
 logging.basicConfig(level=logging.INFO)
 
-class LibpostalServer(BaseHTTPRequestHandler):
-    """
-    Wrapper server for libpostal API, allowing the library to be accessed on a Docker container via HTTP requests.
-    """
-    def _read_body(self):
-        length = int(self.headers.get("Content-Length", "0"))
-        if length <= 0:
-            return b""
-        return self.rfile.read(length)
+app = Bottle()
 
-    def do_GET(self):
-        parsed_path = urlparse(self.path)
-        if parsed_path.path == "/health":
-            self.send_response(204)
-            self.end_headers()
-            return
-        raw_body = self._read_body()
-        body_text = raw_body.decode("utf-8", errors="replace") if raw_body else ""
-        try:
-            input_addresses = json.loads(body_text)
-        except json.JSONDecodeError as e:
-            logging.error(f"Bad request - JSON decode error: {e}")
-            self.send_response(400)
-            self.end_headers()
-            return
+
+@app.get("/health")
+def health():
+    return HTTPResponse(status=204)
+
+
+def _parse_request_body():
+    raw_body = request.body.read() or b""
+    body_text = raw_body.decode("utf-8", errors="replace") if raw_body else ""
+    try:
+        return json.loads(body_text)
+    except json.JSONDecodeError as exc:
+        logging.error(f"Bad request - JSON decode error: {exc}")
+        raise HTTPError(status=400, body="Invalid JSON in request body", exception=exc)
+
+
+@app.route("/", method=["GET", "POST"])
+@app.route("/parse_addresses", method=["GET", "POST"])
+def parse_addresses():
+    input_addresses = _parse_request_body()
+    expand_first = request.query.get("expandFirst", "false").lower() == "true"
+    def parse_function(addr):
+        if expand_first:
+            expanded = expand_address(addr)
+            if isinstance(expanded, list) and len(expanded) > 0:
+                addr = expanded[0]
+            elif isinstance(expanded, str):
+                addr = expanded
+            else:
+                logging.warning(f"Unexpected result from expand_address: {expanded}")
+        return parse_address(addr)
         
-        results = None
-        if parsed_path.path in ["/", "/parse_addresses"]:
-            results = [parse_address(addr) for addr in input_addresses]
-        else:
-            logging.error(f"Method not implemented yet: {parsed_path.path}")
-            self.send_response(404)
-            self.end_headers()
-            return
+    results = [parse_function(addr) for addr in input_addresses]
+    body = json.dumps(results, ensure_ascii=False)
+    return HTTPResponse(
+        body=body,
+        status=200,
+        headers={"Content-Type": "application/json; charset=utf-8"},
+    )
 
-        body = json.dumps(results, ensure_ascii=False).encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-        self.wfile.flush()
+@app.route("/expand_addresses", method=["GET", "POST"])
+def expand_addresses():
+    input_addresses = _parse_request_body()
 
-    def log_message(self, format, *args):
-        logging.info("%s - - [%s] %s\n" %
-                     (self.client_address[0],
-                      self.log_date_time_string(),
-                      format % args))
+    results = [expand_address(addr) for addr in input_addresses]
+    body = json.dumps(results, ensure_ascii=False)
+    return HTTPResponse(
+        body=body,
+        status=200,
+        headers={"Content-Type": "application/json; charset=utf-8"},
+    )
+
+
+@app.hook("before_request")
+def log_request_start():
+    request.environ["request_start_time"] = time.time()
+
+
+@app.hook("after_request")
+def log_request_end():
+    start_time = request.environ.get("request_start_time")
+    duration_ms = None
+    if start_time is not None:
+        duration_ms = (time.time() - start_time) * 1000
+    duration_text = f"{duration_ms:.1f}ms" if duration_ms is not None else "n/a"
+    logging.info(
+        "%s %s %s",
+        request.method,
+        request.path,
+        duration_text,
+    )
+
+@app.error(404)
+def not_found(_):
+    return HTTPResponse(status=404)
 
 
 if __name__ == "__main__":
@@ -61,6 +93,5 @@ if __name__ == "__main__":
     arg_parser.add_argument("--host", type=str, default="0.0.0.0")
     arg_parser.add_argument("--port", type=int, default=7272)
     args = arg_parser.parse_args()
-    httpd = HTTPServer((args.host, args.port), LibpostalServer)
     logging.info(f"Listening on http://{args.host}:{args.port}")
-    httpd.serve_forever()
+    run(app, host=args.host, port=args.port)
