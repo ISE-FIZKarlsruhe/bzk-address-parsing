@@ -1,3 +1,7 @@
+"""
+Heavy AI assitance on the creation of this script
+"""
+
 import json
 import logging
 import time
