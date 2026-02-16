@@ -67,7 +67,8 @@ class ParsedAddressResultBuilder:
 
 
 # Adapted Mahsa's code for levenshtein distance
-def levenshtein(a: str, b: str, case_insensitive=True) -> int:
+def levenshtein(a: str, b: str, case_insensitive=True, max_distance=None) -> int:
+    if max_distance is None: max_distance = float('inf')
     # If one of the strings is empty
     if len(a) == 0:
         return len(b)
@@ -89,6 +90,7 @@ def levenshtein(a: str, b: str, case_insensitive=True) -> int:
 
     # Fill in matrix
     for i in range(1, len(a) + 1):
+        all_exceeded = True
         for j in range(1, len(b) + 1):
             cost = 0 if a[i - 1] == b[j - 1] else 1
             dp[i][j] = min(
@@ -96,6 +98,10 @@ def levenshtein(a: str, b: str, case_insensitive=True) -> int:
                 dp[i][j - 1] + 1,      # insertion
                 dp[i - 1][j - 1] + cost # substitution
             )
+            if dp[i][j] <= max_distance:
+                all_exceeded = False
+        if all_exceeded:
+            return max_distance + 1
     distance = dp[-1][-1]
 
     return distance
@@ -163,36 +169,38 @@ def compare_preds(preds : pd.DataFrame, labels : pd.DataFrame, target_columns, i
     return results
 
 # Adapted code for partial levenshtein distance
-def partial_levenshtein(containing_string: str, substring: str, case_insensitive=True) -> tuple[int, int]:
+def partial_levenshtein(key: str, query: str, case_insensitive=True) -> tuple[int, tuple[int, int]]:
     # If one of the strings is empty
-    if len(containing_string) == 0:
-        return len(substring), 0
-    if len(substring) == 0:
-        return 0, 0
+    if len(key) == 0:
+        return len(query), (0, 0)
+    if len(query) == 0:
+        return 0, (0, 0)
     
     if case_insensitive:
-        containing_string = containing_string.lower()
-        substring = substring.lower()
-    # Create distance matrix (size: (len(containing_string)+1) x (len(substring)+1))
-    dp = [[0] * (len(containing_string) + 1) for _ in range(len(substring) + 1)]
-    start =[[0] * (len(containing_string) + 1) for _ in range(len(substring) + 1)]
+        key = key.lower()
+        query = query.lower()
+    # Create distance matrix (size: (len(key)+1) x (len(query)+1))
+    dp = [[0] * (len(key) + 1) for _ in range(len(query) + 1)]
+    start =[[0] * (len(key) + 1) for _ in range(len(query) + 1)]
     # Initialize first row/column
-    for i in range(len(substring) + 1):
+    for i in range(len(query) + 1):
         dp[i][0] = i
         # start[i][0] = 0
-    for j in range(len(containing_string) + 1):
-        # The cost of starting later on the containing string is 0 as we are looking for the best partial match
+    for j in range(len(key) + 1):
+        # The cost of starting later on the key string is 0 as we are looking for the best partial match
         # dp[0][j] = 0
         start[0][j] = j
 
     # Fill in matrix
-    for i in range(1, len(substring) + 1):
-        for j in range(1, len(containing_string) + 1):
-            cost = 0 if substring[i - 1] == containing_string[j - 1] else 1
+    for i in range(1, len(query) + 1):
+        for j in range(1, len(key) + 1):
+            cost = 0 if query[i - 1] == key[j - 1] else 1
             dp[i][j], start[i][j] = min(
                 (dp[i - 1][j] + 1, start[i - 1][j]),      # deletion
                 (dp[i][j - 1] + 1, start[i][j - 1]),      # insertion
                 (dp[i - 1][j - 1] + cost, start[i - 1][j - 1]) # substitution
             )
-    distance, selected_start = min((dp[-1][j], start[-1][j]) for j in range(len(containing_string) + 1))
-    return distance, selected_start
+    distance_spans = [(dp[-1][j], (start[-1][j], j-1)) for j in range(len(key) + 1)]
+    distance, span = min(distance_spans, key=lambda x: (x[0], x[1][0] - x[1][1])) # prefer smaller distance, then larger span
+    return distance, span
+

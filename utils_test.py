@@ -12,13 +12,13 @@ def test_levenshtein():
     print("levenshtein tests passed.")
 
 def test_partial_levenshtein():
-    assert partial_levenshtein("Fort Washington Avenue", "Washington Avenue") == (0, 5)
-    assert partial_levenshtein("Fort Washington Avenue", "Washington Ave") == (0, 5)
-    assert partial_levenshtein("Fort Washington Avenue", "Washington Ave.") == (1, 5)
-    assert partial_levenshtein("Fort Washington Avenue", "Washington Street") == (5, 5)
-    assert partial_levenshtein("Fort Washington Avenue, New York", "Washington Street") == (5, 5)
-    assert partial_levenshtein("Fort Washington Avenue, New York", "washington Street") == (5, 5)
-    assert partial_levenshtein("Fort Washington Avenue, New York", "washington Street", case_insensitive=False) == (6, 5)
+    assert partial_levenshtein("Fort Washington Avenue", "Washington Avenue") == (0, (5, 21))
+    assert partial_levenshtein("Fort Washington Avenue", "Washington Ave") == (0, (5, 18))
+    assert partial_levenshtein("Fort Washington Avenue", "Washington Ave.") == (1, (5, 19))
+    assert partial_levenshtein("Fort Washington Avenue", "Washington Street") == (5, (5, 20))
+    assert partial_levenshtein("Fort Washington Avenue, New York", "Washington Street") == (5, (5, 20))
+    assert partial_levenshtein("Fort Washington Avenue, New York", "washington Street") == (5, (5, 20))
+    assert partial_levenshtein("Fort Washington Avenue, New York", "washington Street", case_insensitive=False) == (6, (5, 20))
     print("partial_levenshtein tests passed.")
 
 if __name__ == "__main__":
