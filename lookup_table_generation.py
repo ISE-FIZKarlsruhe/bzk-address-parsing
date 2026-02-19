@@ -325,11 +325,22 @@ def _extend_data_tables():
                 data_table.loc[rid, "parent_city_id"] = possible_parent_cities.iloc[0]["geonameId"]
         data_table.to_csv(data_table_path, index=False)
 
-
+def __extract_tables(archive_path, dest_directory):
+    if archive_path.exists():
+        with zipfile.ZipFile(archive_path, 'r') as zf:
+            zf.extractall(dest_directory)
+        return True
+    else: return False
 
 def compile_tables(cleanup=False):
     tables_path = Path(LOOKUP_TABLE_DIRECTORY)
-    if True: #not tables_path.exists():
+    archive_path = tables_path.with_suffix(".zip")
+    if tables_path.exists():
+        return
+    elif archive_path.exists():
+        print("Extracting place lookup tables from archive...")
+        __extract_tables(archive_path, tables_path)
+    else:
         print("Compiling place lookup tables...")
         print("Transferring dump files of place databases...")
         retrieve_dumps()
@@ -342,8 +353,9 @@ def compile_tables(cleanup=False):
             german_speaking_countries["ISO"].tolist() + # redundant since german speaking countries are in europe, but to be sure not to miss any relevant countries
             SPECIAL_INCLUDED_COUNTRIES
         )
-        #_initalize_tables(countries, main_table_countries)
+        _initalize_tables(countries, main_table_countries)
         print("Extending lookup tables with GND for german speaking countries...")
+        # TODO Currently not working but probably not needed
         #_extend_lookup_with_gnd(german_speaking_countries)
         print("Extending data table with new information...")
         _extend_data_tables()
