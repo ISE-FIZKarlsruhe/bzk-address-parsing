@@ -4,6 +4,19 @@ General utility classes and functions for handling the parsing of addresses.
 import pandas as pd
 from collections import OrderedDict
 
+SEPARATOR_CHARS = ",. -()/\\ \t"
+
+def findall(string, sub):
+    """Find all occurrences of `sub` in `string` and return their start indices."""
+    indices = []
+    start = 0
+    while start < len(string):
+        start = string.find(sub, start)
+        if start == -1: break
+        indices.append(start)
+        start += len(sub)  # Move past the last found substring
+    return indices
+
 class ParsedAddressResultBuilder:
     """
     Build the prediction dictionary handling key conflicts
@@ -27,20 +40,22 @@ class ParsedAddressResultBuilder:
             return conflict
         
         # Try to merge if both are consecutive
-        conflict_start = self.original_address.find(conflict[0])
-        new_component_start = self.original_address.find(new_component)
-        if conflict_start != -1 and new_component_start != -1:
-            if conflict_start < new_component_start:
-                start = conflict_start
-                between = self.original_address[conflict_start + len(conflict[0]) : new_component_start]
-                end = new_component_start + len(new_component)
-            else:
-                start = new_component_start
-                between = self.original_address[new_component_start + len(new_component) : conflict_start]
-                end = conflict_start + len(conflict[0])
-            ignored_chars = set(",. -/\\ \t") # set of separator characters that can be ignored when checking for consecutivity
-            if all(x in ignored_chars for x in between):
-                return self.original_address[start:end]
+        conflict_starts = findall(self.original_address, conflict)
+        new_component_starts = findall(self.original_address, new_component)
+        if not conflict_starts or not new_component_starts:
+            return conflict + separator + new_component
+        for conflict_start in conflict_starts:
+            for new_component_start in new_component_starts:
+                if conflict_start < new_component_start:
+                    start = conflict_start
+                    between = self.original_address[conflict_start + len(conflict) : new_component_start]
+                    end = new_component_start + len(new_component)
+                else:
+                    start = new_component_start
+                    between = self.original_address[new_component_start + len(new_component) : conflict_start]
+                    end = conflict_start + len(conflict)
+                if all(x in SEPARATOR_CHARS for x in between):
+                    return self.original_address[start:end]
             
         # Failure to solve conflict; set prediction to a combination of both components to at least not lose the information
         return conflict + separator + new_component
