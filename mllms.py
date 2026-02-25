@@ -108,7 +108,10 @@ class LlamaAddressParsingModel:
             model_name, padding_side='left', device=device)
         self.pipe = transformers.pipeline("text-generation", model=model_name, 
                                           batch_size=batch_size, tokenizer=tokenizer)
-        self.pipe.tokenizer.pad_token_id = self.pipe.model.config.eos_token_id[0]
+        if getattr(self.pipe.tokenizer, "pad_token_id", None) is None:
+            eos_token_id = self.pipe.model.config.eos_token_id
+            if not isinstance(eos_token_id, int): eos_token_id = eos_token_id[0]
+            self.pipe.tokenizer.pad_token_id = eos_token_id
         self.example_strategy = example_strategy
         self.prompt = prompt
 
