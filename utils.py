@@ -17,13 +17,63 @@ def findall(string, sub):
         start += len(sub)  # Move past the last found substring
     return indices
 
+def merge_parts(address : str, part1 : str, part1_start : int, part2 : str, part2_start : int) -> str:
+    if part1_start < part2_start:
+        start = part1_start
+        between = address[part1_start + len(part1) : part2_start]
+        end = part2_start + len(part2)
+    else:
+        start = part2_start
+        between = address[part2_start + len(part2) : part1_start]
+        end = part1_start + len(part1)
+    if all(x in SEPARATOR_CHARS for x in between):
+        return address[start:end]
+    else:
+        return None
+    
+class StrictMergeParsedResultBuilder:
+    """
+    Build the prediction dictionary handling key conflicts by only merging if one match is fully contained in the other, otherwise keeping them separate to at least not lose information. This is a more strict version of the merging strategy that does not attempt to merge consecutive matches if they are not contained within each other, as this can lead to incorrect merges.
+    """
+    def __init__(self, original_address):
+        self.inner = {}
+        self.starts = {}
+        self.original_address = original_address
+
+    def add_part(self, label, part, start):
+        if not part: # ignore None or empty
+            return
+        part = str(part)
+        if label in ["fullConversation", "model-fullAddress", "error"]:
+            print(f"ERROR: Attempt to add reserved label: {label} for address: {self.original_address}")
+            return
+        if label == "fullAddress":
+            label = "model-fullAddress" # avoid collision but keep the wrongfully generated field
+        conflict = self.inner.get(label, None)
+        if conflict is None:
+            self.inner[label] = part
+            self.starts[label] = start
+        else:
+            conflict_start = self.starts[label]
+            merged = merge_parts(self.original_address, conflict, conflict_start, part, start)
+            if merged is not None:
+                self.inner[label] = merged
+                self.starts[label] = min(start, conflict_start)
+    
+    def set_reserved(self, label, value):
+        self.inner[label] = value
+
+    def build(self) -> dict:
+        return self.inner
+
 class ParsedAddressResultBuilder:
     """
     Build the prediction dictionary handling key conflicts
     """
-    def __init__(self, original_address):
+    def __init__(self, original_address, discard_ignorable_conflicts = False):
         self.inner = {}
         self.original_address = original_address
+        self.discard_ignorable_conflicts = discard_ignorable_conflicts
 
     def _merge_components(self, conflict : str, new_component : str, separator = "___") -> str:
         if not conflict:
@@ -42,21 +92,18 @@ class ParsedAddressResultBuilder:
         # Try to merge if both are consecutive
         conflict_starts = findall(self.original_address, conflict)
         new_component_starts = findall(self.original_address, new_component)
-        if not conflict_starts or not new_component_starts:
-            return conflict + separator + new_component
-        for conflict_start in conflict_starts:
-            for new_component_start in new_component_starts:
-                if conflict_start < new_component_start:
-                    start = conflict_start
-                    between = self.original_address[conflict_start + len(conflict) : new_component_start]
-                    end = new_component_start + len(new_component)
-                else:
-                    start = new_component_start
-                    between = self.original_address[new_component_start + len(new_component) : conflict_start]
-                    end = conflict_start + len(conflict)
-                if all(x in SEPARATOR_CHARS for x in between):
-                    return self.original_address[start:end]
-            
+        if conflict_starts and new_component_starts:
+            for conflict_start in conflict_starts:
+                for new_component_start in new_component_starts:
+                    merged = merge_parts(self.original_address, conflict, conflict_start, new_component, new_component_start)
+                    if merged is not None:
+                        return merged
+        if self.discard_ignorable_conflicts:
+            if all(c in SEPARATOR_CHARS for c in conflict):
+                return new_component
+            elif all(c in SEPARATOR_CHARS for c in new_component):
+                return conflict
+        
         # Failure to solve conflict; set prediction to a combination of both components to at least not lose the information
         return conflict + separator + new_component
 
