@@ -132,8 +132,12 @@ class ParsedAddressResultBuilder:
 def levenshtein(a: str, b: str, case_insensitive=True, max_distance=None) -> int:
     if max_distance is None: max_distance = float('inf')
     # If one of the strings is empty
-    if len(a) == 0:
-        return len(b)
+    try:
+        if len(a) == 0:
+            return len(b)
+    except TypeError:
+        print(f"TypeError: a is not a string: {a}")
+        raise
     if len(b) == 0:
         return len(a)
     
@@ -170,6 +174,7 @@ def levenshtein(a: str, b: str, case_insensitive=True, max_distance=None) -> int
 
 def compare_preds(preds : pd.DataFrame, labels : pd.DataFrame, target_columns, ignore_trash_columns = True):
     # Drop meta columns that may be included in the preds dataframe
+    assert len(preds) == len(labels), f"Length mismatch between preds and labels"
     labels = labels.astype(str)
 
     tolerance_levels = 5
@@ -204,10 +209,8 @@ def compare_preds(preds : pd.DataFrame, labels : pd.DataFrame, target_columns, i
             levenshtein_scores = strings_to_compare.apply(
                 lambda row: levenshtein(row.iloc[0], row.iloc[1]), axis=1
             )
-            levenshtein_bounds = strings_to_compare.apply(
-                lambda row: max(len(row.iloc[0]), len(row.iloc[1])), axis=1
-            )
-            similarity = ((levenshtein_bounds - levenshtein_scores) / levenshtein_bounds).fillna(1.0) # nan => div by 0 => both are empty strings => similarity 1.0
+            max_lens = strings_to_compare.apply(lambda col: col.str.len()).max(axis=1)
+            similarity = ((max_lens - levenshtein_scores) / max_lens).fillna(1.0) # nan => div by 0 => both are empty strings => similarity 1.0
             sum_levenshtein += levenshtein_scores.sum()
             sum_similarity += similarity.sum()
             sum_levenshtein_match += levenshtein_scores[similarity >= 0].sum()

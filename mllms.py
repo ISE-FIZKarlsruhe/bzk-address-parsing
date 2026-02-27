@@ -5,8 +5,14 @@ import json
 from abc import ABC, abstractmethod
 from utils import ParsedAddressResultBuilder
 import transformers
+import sentence_transformers
+import pandas as pd
+from collections import OrderedDict
 
 class ExampleMatchingStrategy(ABC):
+    def bulk_find_examples(self, addresses: list[str]) -> list[list[tuple[str, dict]]]:
+        return [self.find_examples(addr) for addr in addresses]
+
     @abstractmethod
     def find_examples(self, address: str) -> list[tuple[str, dict]]:
         raise Exception("Not implemented")
@@ -17,6 +23,57 @@ class FixedExamples(ExampleMatchingStrategy):
 
     def find_examples(self, address: str) -> list[tuple[str, dict]]:
         return self.examples
+
+class SimilarExamples(ExampleMatchingStrategy):
+    def __init__(self,
+                 example_addresses: pd.Series,
+                 example_labels: pd.DataFrame,
+                 num_examples : int,
+                 labels_to_include: list[str],
+                 embeeding_model="all-MiniLM-L6-v2",
+                 try_match_order : bool = True,
+                 device=None):
+        self.example_addresses = example_addresses
+        self.example_labels = example_labels[labels_to_include]
+        assert len(self.example_addresses) == len(self.example_labels), "example_addresses and example_labels must have the same length"
+        if len(self.example_labels) < num_examples:
+            print(f"Warning: num_examples {num_examples} is greater than "
+                  f"the number of available examples {len(self.example_labels)}. "
+                  f"Reducing num_examples to {len(self.example_labels)}.")
+            self.num_examples = len(self.example_labels)
+        else:
+            self.num_examples = num_examples
+        self.device = device
+        self.model = sentence_transformers.SentenceTransformer(embeeding_model, device=device)
+        self.example_embeddings = self.model.encode(self.example_addresses, convert_to_tensor=True)
+        self.example_embeddings = self.example_embeddings.to(device)
+        self.example_embeddings = sentence_transformers.util.normalize_embeddings(self.example_embeddings)
+
+    def _get_example(self, index):
+        address = self.example_addresses.iloc[index]
+        labels = []
+        for label, part in self.example_labels.iloc[index].items():
+            if not pd.isna(part):
+                address_start = address.find(part)
+                labels.append((address_start, label, part))
+        labels.sort()
+        labels = OrderedDict((x[1], x[2]) for x in labels)
+        return address, labels
+
+    def bulk_find_examples(self, addresses):
+        address_embeddings = self.model.encode(addresses, convert_to_tensor=True)
+        address_embeddings = address_embeddings.to(self.device)
+        address_embeddings = sentence_transformers.util.normalize_embeddings(address_embeddings)
+        bulk_hits = sentence_transformers.util.semantic_search(
+            address_embeddings, self.example_embeddings, top_k=self.num_examples)
+        return [
+            [self._get_example(hit["corpus_id"]) for hit in address_hits] 
+            for address_hits in bulk_hits
+        ]
+
+
+    def find_examples(self, address: str) -> list[tuple[str, dict]]:
+        return self.bulk_find_examples([address])[0]
     
 class ZeroShot(ExampleMatchingStrategy):
     def find_examples(self, address: str) -> list[tuple[str, dict]]:
@@ -50,6 +107,7 @@ def extract_json_block(model_response : str):
     limit_chars = [('{', '}'), ('[', ']'), ('"', '"')]
     json_str = model_response
     parts = model_response.split("```")
+    parts = [subpart for part in parts for subpart in part.split("`")]
     if len(parts) >= 2: # single code block or malformed code block
         json_str = parts[1]
     elif len(parts) >= 3:
@@ -64,7 +122,7 @@ def extract_json_block(model_response : str):
 
 class JsonDictPromptTemplate(PromptTemplate):
     def format_example(self, example):
-        return "```json" + json.dumps(example) + "```"
+        return "```json" + json.dumps(example, ensure_ascii=False) + "```"
     
     def parse_output(self, response, original_address):
         json_str = extract_json_block(response)
@@ -84,7 +142,7 @@ class JSONTuplesPromptTemplate(PromptTemplate):
         self.ignore_other = ignore_other
 
     def format_example(self, example):
-        return "```json" + json.dumps([[v, k] for k, v in example.items()]) + "```"
+        return "```json" + json.dumps([[v, k] for k, v in example.items()], ensure_ascii=False) + "```"
     
     def parse_output(self, response, original_address):
         ignore_key = None
@@ -103,7 +161,12 @@ class JSONTuplesPromptTemplate(PromptTemplate):
 
 
 class LlamaAddressParsingModel:
-    def __init__(self, model_name, prompt : PromptTemplate, example_strategy : ExampleMatchingStrategy, batch_size=32, device=None):
+    def __init__(self, 
+                 model_name, 
+                 prompt : PromptTemplate, 
+                 example_strategy : ExampleMatchingStrategy | dict, 
+                 batch_size=32, 
+                 device=None):
         tokenizer = transformers.AutoTokenizer.from_pretrained(
             model_name, padding_side='left', device=device)
         self.pipe = transformers.pipeline("text-generation", model=model_name, 
@@ -112,7 +175,14 @@ class LlamaAddressParsingModel:
             eos_token_id = self.pipe.model.config.eos_token_id
             if not isinstance(eos_token_id, int): eos_token_id = eos_token_id[0]
             self.pipe.tokenizer.pad_token_id = eos_token_id
-        self.example_strategy = example_strategy
+        self.example_strategy : ExampleMatchingStrategy
+        if isinstance(example_strategy, dict):
+            self.example_strategy = example_strategy["factory"](
+                *example_strategy.get("factory_args", []),
+                **example_strategy.get("factory_kargs", {})
+            )
+        else:
+            self.example_strategy = example_strategy
         self.prompt = prompt
 
     def _parse_output(self, conversation, original_address: str):
@@ -120,7 +190,7 @@ class LlamaAddressParsingModel:
         try:
             model_response = conversation[0]["generated_text"][1]["content"]
             parsed = self.prompt.parse_output(model_response, original_address=original_address)
-            parsed["fullConversation"] = json.dumps(conversation)
+            parsed["fullConversation"] = json.dumps(conversation, ensure_ascii=False)
             return parsed
         except Exception as e:
             print(f"Error parsing model output for address '{original_address}': {e}\n"
@@ -129,12 +199,13 @@ class LlamaAddressParsingModel:
             return {"error": str(e), "fullConversation": json.dumps(conversation)}
 
     def parse_addresses(self, addresses : list[str]) -> str:
+        bulk_examples = self.example_strategy.bulk_find_examples(addresses)
         messages = [[
             {
                 "role": "user", 
-                "content": self.prompt.make_prompt(address, self.example_strategy.find_examples(address))
+                "content": self.prompt.make_prompt(address, address_examples)
             }
-        ] for address in addresses]
+        ] for address, address_examples in zip(addresses, bulk_examples)]
         result = self.pipe(messages)
         responses = [self._parse_output(r, original_address=addr) for r, addr in zip(result, addresses)]
         return responses
