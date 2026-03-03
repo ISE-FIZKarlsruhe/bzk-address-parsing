@@ -45,6 +45,7 @@ class SimilarExamples(ExampleMatchingStrategy):
             self.num_examples = num_examples
         self.device = device
         self.model = sentence_transformers.SentenceTransformer(embeeding_model, device=device)
+        self.try_match_order = try_match_order
         self.example_embeddings = self.model.encode(self.example_addresses, convert_to_tensor=True)
         self.example_embeddings = self.example_embeddings.to(device)
         self.example_embeddings = sentence_transformers.util.normalize_embeddings(self.example_embeddings)
@@ -56,7 +57,8 @@ class SimilarExamples(ExampleMatchingStrategy):
             if not pd.isna(part):
                 address_start = address.find(part)
                 labels.append((address_start, label, part))
-        labels.sort()
+        if self.try_match_order:
+            labels.sort()
         labels = OrderedDict((x[1], x[2]) for x in labels)
         return address, labels
 
@@ -82,18 +84,22 @@ class ZeroShot(ExampleMatchingStrategy):
 class PromptTemplate(ABC):
     def __init__(self, template: str, 
                  examples_prefix = "Consider the following examples:\n", 
-                 example_template = "Address: {address}\n{example}\n"):
+                 example_template = "Address: %(address)s\n%(example)s\n"):
         self.template = template
         self.examples_prefix = examples_prefix
         self.example_template = example_template
 
     def make_prompt(self, address: str, examples : list[tuple[str, dict]]) -> dict:
-        formatted_examples = [self.example_template.format(address=addr, example=self.format_example(example)) for addr, example in examples]
+        formatted_examples = [
+            self.example_template % {"address": addr, "example": self.format_example(example)} 
+            for addr, example in examples
+        ]
         if len(formatted_examples) > 0:
             examples = self.examples_prefix + "".join(formatted_examples)
         else:
             examples = ""
-        return self.template % {"address": address, "examples": examples}
+        template_parameters = {"address": address, "examples": examples}
+        return self.template % template_parameters
 
     @abstractmethod
     def format_example(self, example) -> str:
@@ -136,7 +142,7 @@ class JsonDictPromptTemplate(PromptTemplate):
 class JSONTuplesPromptTemplate(PromptTemplate):
     def __init__(self, template: str, 
                  examples_prefix = "Consider the following examples:\n", 
-                 example_template = "Address: {address}\n{example}\n",
+                 example_template = "Address: %(address)s\n%(example)s\n",
                  ignore_other = True):
         super().__init__(template, examples_prefix, example_template)
         self.ignore_other = ignore_other
