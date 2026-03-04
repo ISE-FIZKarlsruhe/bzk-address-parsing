@@ -74,10 +74,11 @@ class LibpostalClient:
         print("This may take a long time on first run since the docker image needs to be built.")
         import subprocess
         import shutil
-        compose_program = shutil.which("docker-compose") or shutil.which("podman-compose")
-        if compose_program is None: raise Exception("Cannot start libpostal-server service because neither 'docker-compose' nor 'podman-compose' is available.")
+        self.compose_program = shutil.which("docker-compose") or shutil.which("podman-compose")
+        if self.compose_program is None: 
+            raise Exception("Cannot start libpostal-server service because neither 'docker-compose' nor 'podman-compose' is available.")
         result = subprocess.run(
-            [compose_program, "-f", "docker-compose.yml", "up", "-d", "libpostal-server"],
+            [self.compose_program, "-f", "docker-compose.yml", "up", "-d", "libpostal-server"],
             capture_output=True, text=True)
         if result.returncode != 0:
             print(f"Failed to start libpostal-server docker container (exit code {result.returncode}):")
@@ -113,4 +114,4 @@ class LibpostalClient:
         if self.auto_started:
             print("Stopping auto-started libpostal-server docker container...")
             import subprocess
-            subprocess.run(["docker-compose", "-f", "docker-compose.yml", "down", "libpostal-server"])
+            subprocess.run([self.compose_program, "-f", "docker-compose.yml", "down", "libpostal-server"])
