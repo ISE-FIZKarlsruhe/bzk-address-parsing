@@ -30,7 +30,8 @@ class SimilarExamples(ExampleMatchingStrategy):
                  example_labels: pd.DataFrame,
                  num_examples : int,
                  labels_to_include: list[str],
-                 embeeding_model="all-MiniLM-L6-v2",
+                 embeeding_model="multi-qa-mpnet-base-dot-v1",
+                 similarity_threshold: float = None,
                  try_match_order : bool = True,
                  device=None):
         self.example_addresses = example_addresses
@@ -45,6 +46,7 @@ class SimilarExamples(ExampleMatchingStrategy):
             self.num_examples = num_examples
         self.device = device
         self.model = sentence_transformers.SentenceTransformer(embeeding_model, device=device)
+        self.similarity_threshold = similarity_threshold
         self.try_match_order = try_match_order
         self.example_embeddings = self.model.encode(self.example_addresses, convert_to_tensor=True)
         self.example_embeddings = self.example_embeddings.to(device)
@@ -62,6 +64,11 @@ class SimilarExamples(ExampleMatchingStrategy):
         labels = OrderedDict((x[1], x[2]) for x in labels)
         return address, labels
 
+    def _hit_filter(self, hit):
+        if self.similarity_threshold is not None and hit["score"] < self.similarity_threshold:
+            return False
+        return True
+
     def bulk_find_examples(self, addresses):
         address_embeddings = self.model.encode(addresses, convert_to_tensor=True)
         address_embeddings = address_embeddings.to(self.device)
@@ -69,7 +76,7 @@ class SimilarExamples(ExampleMatchingStrategy):
         bulk_hits = sentence_transformers.util.semantic_search(
             address_embeddings, self.example_embeddings, top_k=self.num_examples)
         return [
-            [self._get_example(hit["corpus_id"]) for hit in address_hits] 
+            [self._get_example(hit["corpus_id"]) for hit in address_hits if self._hit_filter(hit)] 
             for address_hits in bulk_hits
         ]
 

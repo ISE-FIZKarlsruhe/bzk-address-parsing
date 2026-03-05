@@ -1,5 +1,3 @@
-*.json
-*.jsonl
 *.ttl
 envs/
 __pycache__/
