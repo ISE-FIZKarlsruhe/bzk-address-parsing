@@ -44,7 +44,7 @@ class StrictMergeParsedResultBuilder:
         if not part: # ignore None or empty
             return
         part = str(part)
-        if label in ["fullConversation", "model-fullAddress", "error"]:
+        if label.startswith("___") or label in ["fullConversation", "model-fullAddress", "error"]:
             print(f"ERROR: Attempt to add reserved label: {label} for address: {self.original_address}")
             return
         if label == "fullAddress":
@@ -112,7 +112,7 @@ class ParsedAddressResultBuilder:
         if not part: # ignore None or empty
             return
         part = str(part)
-        if label in ["fullConversation", "model-fullAddress", "error"]:
+        if label.startswith("___") or label in ["fullConversation", "model-fullAddress", "error"]:
             print(f"ERROR: Attempt to add reserved label: {label} for address: {self.original_address}")
             return
         if label == "fullAddress":
@@ -125,6 +125,56 @@ class ParsedAddressResultBuilder:
 
     def build(self) -> dict:
         return self.inner
+
+class Aggregator:
+    def __init__(self):
+        self.sum = 0.0
+        self.count = 0.0
+        self.max = None
+        self.min = None
+
+    def aggregate_single(self, value):
+        if not pd.isna(value):
+            self.sum += value
+            self.count += 1
+            if self.max is None or value > self.max:
+                self.max = value
+            if self.min is None or value < self.min:
+                self.min = value
+    
+    def aggregate(self, values):
+        if isinstance(values, pd.DataFrame):
+            self.sum += values.sum().sum()
+            self.count += values.count().sum()
+            max_value = values.max().max()
+            min_value = values.min().min()
+            self.max = max_value if self.max is None else max(self.max, max_value)
+            self.min = min_value if self.min is None else min(self.min, min_value)
+        elif isinstance(values, pd.Series):
+            self.sum += values.sum()
+            self.count += values.count()
+            self.max = values.max() if self.max is None else max(self.max, values.max())
+            self.min = values.min() if self.min is None else min(self.min, values.min())
+        else:
+            for value in values:
+                self.aggregate_single(value)
+
+    @property
+    def mean(self):
+        return self.sum / self.count if self.count > 0 else float('nan')
+    
+    def get_all(self):
+        return self.get(["mean", "max", "min"])
+
+    def get(self, keys):
+        result = {}
+        if "mean" in keys:
+            result["mean"] = self.mean
+        if "max" in keys:
+            result["max"] = self.max
+        if "min" in keys:
+            result["min"] = self.min
+        return result
 
 
 
