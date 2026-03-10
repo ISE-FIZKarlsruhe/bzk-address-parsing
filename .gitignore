@@ -5,3 +5,4 @@ __pycache__/
 data/
 dumps/
 place_lookup_tables/
+venv/
