@@ -8,21 +8,26 @@ import transformers
 import sentence_transformers
 import pandas as pd
 from collections import OrderedDict
+from typing import Any
 
 class ExampleMatchingStrategy(ABC):
-    def bulk_find_examples(self, addresses: list[str]) -> list[list[tuple[str, dict]]]:
+    def bulk_find_examples(self, addresses: list[str]) -> list[tuple[list[tuple[str, dict]], Any | None]]:
         return [self.find_examples(addr) for addr in addresses]
 
     @abstractmethod
-    def find_examples(self, address: str) -> list[tuple[str, dict]]:
+    def find_examples(self, address: str) -> tuple[list[tuple[str, dict]], Any | None]:
         raise Exception("Not implemented")
     
 class FixedExamples(ExampleMatchingStrategy):
     def __init__(self, examples: list[tuple[str, dict]]):
         self.examples = examples
 
-    def find_examples(self, address: str) -> list[tuple[str, dict]]:
-        return self.examples
+    def find_examples(self, address: str) -> tuple[list[tuple[str, dict]], Any | None]:
+        return self.examples, None
+
+class ZeroShot(ExampleMatchingStrategy):
+    def find_examples(self, address: str) -> tuple[list[tuple[str, dict]], Any | None]:
+        return [], None
 
 class SimilarExamples(ExampleMatchingStrategy):
     def __init__(self,
@@ -75,18 +80,23 @@ class SimilarExamples(ExampleMatchingStrategy):
         address_embeddings = sentence_transformers.util.normalize_embeddings(address_embeddings)
         bulk_hits = sentence_transformers.util.semantic_search(
             address_embeddings, self.example_embeddings, top_k=self.num_examples)
-        return [
-            [self._get_example(hit["corpus_id"]) for hit in address_hits if self._hit_filter(hit)] 
-            for address_hits in bulk_hits
-        ]
+        bulk_examples = []
+        for example_hits in bulk_hits:
+            examples = []
+            metadatas = []
+            for hit in example_hits:
+                example = self._get_example(hit["corpus_id"])
+                metadata = hit | {"address": example[0], "example": example[1], "included": False}
+                if self._hit_filter(hit):
+                    examples.append(self._get_example(hit["corpus_id"]))
+                    metadata["included"] = True
+                metadatas.append(metadata)
+            bulk_examples.append((examples, metadatas))
+        return bulk_examples
 
 
-    def find_examples(self, address: str) -> list[tuple[str, dict]]:
+    def find_examples(self, address: str):
         return self.bulk_find_examples([address])[0]
-    
-class ZeroShot(ExampleMatchingStrategy):
-    def find_examples(self, address: str) -> list[tuple[str, dict]]:
-        return []
 
 class PromptTemplate(ABC):
     def __init__(self, template: str, 
@@ -198,18 +208,22 @@ class LlamaAddressParsingModel:
             self.example_strategy = example_strategy
         self.prompt = prompt
 
-    def _parse_output(self, conversation, original_address: str):
+    def _parse_output(self, conversation, original_address: str, example_metadata=None):
         model_response = None
+        output_dict = None
         try:
             model_response = conversation[0]["generated_text"][1]["content"]
             parsed = self.prompt.parse_output(model_response, original_address=original_address)
             parsed["fullConversation"] = json.dumps(conversation, ensure_ascii=False)
-            return parsed
+            output_dict = parsed
         except Exception as e:
             print(f"Error parsing model output for address '{original_address}': {e}\n"
                   f"Full Conversation: {conversation}\n"
                   f"Model response: {repr(model_response)}")
-            return {"error": str(e), "fullConversation": json.dumps(conversation)}
+            output_dict = {"error": str(e), "fullConversation": json.dumps(conversation)}
+        if example_metadata is not None:
+            output_dict["___example_metadata"] = example_metadata
+        return output_dict
 
     def parse_addresses(self, addresses : list[str]) -> str:
         bulk_examples = self.example_strategy.bulk_find_examples(addresses)
@@ -218,7 +232,10 @@ class LlamaAddressParsingModel:
                 "role": "user", 
                 "content": self.prompt.make_prompt(address, address_examples)
             }
-        ] for address, address_examples in zip(addresses, bulk_examples)]
+        ] for address, (address_examples, _) in zip(addresses, bulk_examples)]
+        bulk_examples_metadata = [metadata for _, metadata in bulk_examples]
         result = self.pipe(messages)
-        responses = [self._parse_output(r, original_address=addr) for r, addr in zip(result, addresses)]
+        responses = [
+            self._parse_output(r, original_address=addr, example_metadata=example_metadata) 
+            for r, addr, example_metadata in zip(result, addresses, bulk_examples_metadata)]
         return responses
