@@ -9,6 +9,7 @@ import sentence_transformers
 import pandas as pd
 from collections import OrderedDict
 from typing import Any
+import re
 
 class ExampleMatchingStrategy(ABC):
     def bulk_find_examples(self, addresses: list[str]) -> list[tuple[list[tuple[str, dict]], Any | None]]:
@@ -143,15 +144,38 @@ def extract_json_block(model_response : str):
         json_str = json_str[4:].strip()
     return json_str
 
+def _compile_tuple_regex(separator):
+    separator_escaped = re.escape(separator)
+    # \"(?P<key>.*)\"\s*,\s*\"(?P<value>.*)\"
+    return re.compile(
+        r"\"(?P<key>.*)\"\s*" + 
+        separator_escaped + 
+        r"\s*\"(?P<value>.*)\""
+    )
+
+PRE_COMPILED_REGEXES = {s : _compile_tuple_regex(s) for s in [":", ","]}
+
+def extract_tuples(model_response : str, separator=":"):
+    regex = PRE_COMPILED_REGEXES.get(separator)
+    if regex is None:
+        regex = _compile_tuple_regex(separator)
+    tuples = []
+    for match in regex.finditer(model_response):
+        tuples.append((match.group("key"), match.group("value")))
+    return tuples
+
 class JsonDictPromptTemplate(PromptTemplate):
     def format_example(self, example):
         return "```json" + json.dumps(example, ensure_ascii=False) + "```"
     
     def parse_output(self, response, original_address):
-        json_str = extract_json_block(response)
-        obj = json.loads(json_str)
+        try:
+            json_str = extract_json_block(response)
+            tuples = json.loads(json_str).items()
+        except:
+            tuples = extract_tuples(response, separator=":")
         result_builder = ParsedAddressResultBuilder(original_address)
-        for k, v in obj.items():
+        for k, v in tuples:
             result_builder.add_part(k, v)
         data = result_builder.build()
         return data
@@ -173,8 +197,11 @@ class JSONTuplesPromptTemplate(PromptTemplate):
             ignore_key = "Other"
             if isinstance(self.ignore_other, str):
                 ignore_key = self.ignore_other
-        json_str = extract_json_block(response)
-        tuples = json.loads(json_str)
+        try:
+            json_str = extract_json_block(response)
+            tuples = json.loads(json_str)
+        except:
+            tuples = extract_tuples(response, separator=",")
         result_builder = ParsedAddressResultBuilder(original_address)
         for part, ptype in tuples:
             if ptype != ignore_key:
