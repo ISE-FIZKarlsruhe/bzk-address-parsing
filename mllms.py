@@ -210,17 +210,22 @@ class JSONTuplesPromptTemplate(PromptTemplate):
         return data
 
 
-class LlamaAddressParsingModel:
+class LLMAddressParsingModel:
     def __init__(self, 
                  model_name, 
                  prompt : PromptTemplate, 
                  example_strategy : ExampleMatchingStrategy | dict, 
-                 batch_size=32, 
+                 *,
+                 batch_size=32,
                  device=None):
         tokenizer = transformers.AutoTokenizer.from_pretrained(
             model_name, padding_side='left', device=device)
-        self.pipe = transformers.pipeline("text-generation", model=model_name, 
-                                          batch_size=batch_size, tokenizer=tokenizer)
+        self.pipe = transformers.pipeline(
+            "text-generation", model=model_name, 
+            batch_size=batch_size, tokenizer=tokenizer, 
+            device=device)
+        self.generation_config = transformers.GenerationConfig()
+        self.generate_kwargs = dict(generation_config=self.generation_config)
         if getattr(self.pipe.tokenizer, "pad_token_id", None) is None:
             eos_token_id = self.pipe.model.config.eos_token_id
             if not isinstance(eos_token_id, int): eos_token_id = eos_token_id[0]
@@ -239,7 +244,7 @@ class LlamaAddressParsingModel:
         model_response = None
         output_dict = None
         try:
-            model_response = conversation[0]["generated_text"][1]["content"]
+            model_response = self._get_response(conversation)
             parsed = self.prompt.parse_output(model_response, original_address=original_address)
             parsed["fullConversation"] = json.dumps(conversation, ensure_ascii=False)
             output_dict = parsed
@@ -252,17 +257,76 @@ class LlamaAddressParsingModel:
             output_dict["___example_metadata"] = example_metadata
         return output_dict
 
-    def parse_addresses(self, addresses : list[str]) -> str:
-        bulk_examples = self.example_strategy.bulk_find_examples(addresses)
-        messages = [[
+    @classmethod
+    def _get_response(cls, conversation):
+        return conversation[0]["generated_text"][1]["content"]
+
+    def _make_conversation(self, address: str, examples : list[tuple[str, dict]]):
+        return [
             {
                 "role": "user", 
-                "content": self.prompt.make_prompt(address, address_examples)
+                "content": self.prompt.make_prompt(address, examples)
             }
-        ] for address, (address_examples, _) in zip(addresses, bulk_examples)]
+        ]
+    
+    def _invoke_model(self, conversations):
+        return self.pipe(conversations, **self.generate_kwargs)
+    
+    def parse_addresses(self, addresses : list[str]) -> str:
+        bulk_examples = self.example_strategy.bulk_find_examples(addresses)
+        messages = [
+            self._make_conversation(address, address_examples) 
+            for address, (address_examples, _) in zip(addresses, bulk_examples)
+        ]
         bulk_examples_metadata = [metadata for _, metadata in bulk_examples]
-        result = self.pipe(messages)
+        result = self._invoke_model(messages)
         responses = [
             self._parse_output(r, original_address=addr, example_metadata=example_metadata) 
             for r, addr, example_metadata in zip(result, addresses, bulk_examples_metadata)]
         return responses
+    
+class LlamaAddressParsingModel(LLMAddressParsingModel):
+    pass
+
+class QwenAddressParsingModel(LLMAddressParsingModel):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # According to https://huggingface.co/Qwen/Qwen3.5-9B#best-practices 
+        # non thinking mode for general tasks recommendations
+        self.generation_config.update(
+            max_new_tokens=32_768 // 4, # Too many tokens can cause large latency
+            temperature=0.7,
+            top_p=0.8,
+            top_k=20,
+            min_p=0.0,
+            presence_penalty=1.5,
+            repetition_penalty=1.0
+        )
+
+    @classmethod
+    def _get_response(cls, conversation):
+        response = conversation[0]["generated_text"].split("<|im_start|>assistant")[-1]
+        return response
+
+    def _invoke_model(self, conversations):
+        # Claude's suggestion to disable thinking mode
+        conversations = self.pipe.tokenizer.apply_chat_template(
+            conversations,
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=False
+        )
+        return super()._invoke_model(conversations)
+
+    def _make_conversation(self, address, examples):
+        return [
+            {
+                "role": "user", 
+                "content": [{
+                    "type": "text",
+                    "text": self.prompt.make_prompt(address, examples)
+                }]
+            }
+        ]
+    
+
