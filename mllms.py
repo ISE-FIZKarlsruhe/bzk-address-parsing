@@ -165,18 +165,9 @@ class SimilarExamples(ExampleMatchingStrategy):
 
 
 class PatternTokenSimilarExamples(ExampleMatchingStrategy):
-    """Few-shot selection combining structural pattern similarity and lexical
-    token similarity:
+    """Few-shot selection based solely on structural pattern similarity.
 
-        score = pattern_weight * pattern_sim + (1 - pattern_weight) * token_sim
-
-    *pattern_sim* – ``difflib.SequenceMatcher`` ratio between the abstract
-                    address patterns produced by ``address_to_pattern()``,
-                    e.g. "WORD-WORD-STREET NUM/NUM, WORD".
-    *token_sim*   – Jaccard similarity on the lowercased word-token sets of
-                    the raw address strings.
-
-    Both scores are computed against the full training set (no GPU needed).
+    Computed against the full training set.
     """
 
     def __init__(
@@ -185,7 +176,6 @@ class PatternTokenSimilarExamples(ExampleMatchingStrategy):
         example_labels: pd.DataFrame,
         num_examples: int,
         labels_to_include: list[str],
-        pattern_weight: float = 0.6,
         similarity_threshold: float = None,
         try_match_order: bool = True,
     ):
@@ -193,13 +183,11 @@ class PatternTokenSimilarExamples(ExampleMatchingStrategy):
         self.example_labels       = example_labels[labels_to_include].reset_index(drop=True)
         assert len(self.example_addresses) == len(self.example_labels)
         self.num_examples         = min(num_examples, len(self.example_labels))
-        self.pattern_weight       = pattern_weight
         self.similarity_threshold = similarity_threshold
         self.try_match_order      = try_match_order
 
-        # Precompute patterns and token sets for all training examples
-        self.example_patterns   = [address_to_pattern(a) for a in self.example_addresses]
-        self.example_token_sets = [_token_set(a)         for a in self.example_addresses]
+        # Precompute patterns for all training examples
+        self.example_patterns = [address_to_pattern(a) for a in self.example_addresses]
 
     def _get_example(self, index: int):
         address = self.example_addresses.iloc[index]
@@ -214,29 +202,212 @@ class PatternTokenSimilarExamples(ExampleMatchingStrategy):
     def bulk_find_examples(self, addresses: list[str]):
         results = []
         for addr in addresses:
-            query_pattern  = address_to_pattern(addr)
-            query_tokens   = _token_set(addr)
+            query_pattern = address_to_pattern(addr)
 
             scored = []
-            for idx, (ex_pattern, ex_tokens) in enumerate(
-                zip(self.example_patterns, self.example_token_sets)
-            ):
+            for idx, ex_pattern in enumerate(self.example_patterns):
                 pat_score = difflib.SequenceMatcher(None, query_pattern, ex_pattern).ratio()
-                tok_score = _jaccard(query_tokens, ex_tokens)
-                combined  = self.pattern_weight * pat_score + (1 - self.pattern_weight) * tok_score
-                scored.append((combined, tok_score, pat_score, idx))
+                scored.append((pat_score, idx))
 
             scored.sort(reverse=True)
 
             examples  = []
             metadatas = []
-            for combined, tok_score, pat_score, idx in scored[:self.num_examples]:
+            for pat_score, idx in scored[:self.num_examples]:
                 example  = self._get_example(idx)
-                included = self.similarity_threshold is None or combined >= self.similarity_threshold
+                included = self.similarity_threshold is None or pat_score >= self.similarity_threshold
                 metadatas.append({
                     "corpus_id":       idx,
-                    "score":           combined,
-                    "token_score":     tok_score,
+                    "score":           pat_score,
+                    "pattern_score":   pat_score,
+                    "address":         example[0],
+                    "example":         example[1],
+                    "included":        included,
+                    "query_pattern":   query_pattern,
+                    "example_pattern": self.example_patterns[idx],
+                })
+                if included:
+                    examples.append(example)
+
+            results.append((examples, metadatas))
+
+        return results
+
+    def find_examples(self, address: str):
+        return self.bulk_find_examples([address])[0]
+
+
+class HybridSimilarExamples(ExampleMatchingStrategy):
+    """Few-shot selection with embedding as the primary source and a conditional
+    pattern-based bonus shot
+    """
+
+    def __init__(
+        self,
+        embedding_strategy: "SimilarExamples",
+        pattern_strategy: "PatternTokenSimilarExamples",
+        n_embedding: int = 3,
+        n_pattern: int = 1,
+        bonus_pattern_threshold: float = 1.0,
+    ):
+        self.embedding_strategy      = embedding_strategy
+        self.pattern_strategy        = pattern_strategy
+        self.n_embedding             = n_embedding
+        self.n_pattern               = n_pattern
+        self.bonus_pattern_threshold = bonus_pattern_threshold
+
+    def bulk_find_examples(self, addresses: list[str]):
+        # Fetch enough pattern candidates to survive deduplication
+        oversample = self.n_embedding + self.n_pattern
+
+        orig_embedding_n = self.embedding_strategy.num_examples
+        orig_pattern_n   = self.pattern_strategy.num_examples
+        self.embedding_strategy.num_examples = oversample
+        self.pattern_strategy.num_examples   = oversample
+
+        embedding_bulk = self.embedding_strategy.bulk_find_examples(addresses)
+        pattern_bulk   = self.pattern_strategy.bulk_find_examples(addresses)
+
+        self.embedding_strategy.num_examples = orig_embedding_n
+        self.pattern_strategy.num_examples   = orig_pattern_n
+
+        results = []
+        for (em_examples, em_metas), (pt_examples, pt_metas) in zip(embedding_bulk, pattern_bulk):
+            # Primary embedding shots
+            primary_examples = em_examples[:self.n_embedding]
+            primary_metas    = em_metas[:self.n_embedding]
+            used_ids = {m["corpus_id"] for m in primary_metas}
+            for m in primary_metas:
+                m["source"] = "embedding"
+
+            # Bonus: pattern shot only when pattern_score meets threshold
+            bonus_examples = []
+            bonus_metas    = []
+            for ex, m in zip(pt_examples, pt_metas):
+                if len(bonus_examples) >= self.n_pattern:
+                    break
+                if m["pattern_score"] >= self.bonus_pattern_threshold and m["corpus_id"] not in used_ids:
+                    m["source"] = "pattern"
+                    bonus_examples.append(ex)
+                    bonus_metas.append(m)
+                    used_ids.add(m["corpus_id"])
+
+            # Fallback: fill remaining bonus slots with next-best embedding candidates
+            for ex, m in zip(em_examples[self.n_embedding:], em_metas[self.n_embedding:]):
+                if len(bonus_examples) >= self.n_pattern:
+                    break
+                if m["corpus_id"] not in used_ids:
+                    m["source"] = "embedding_fallback"
+                    bonus_examples.append(ex)
+                    bonus_metas.append(m)
+                    used_ids.add(m["corpus_id"])
+
+            results.append((primary_examples + bonus_examples, primary_metas + bonus_metas))
+
+        return results
+
+    def find_examples(self, address: str):
+        return self.bulk_find_examples([address])[0]
+
+
+# ---------------------------------------------------------------------------
+# spaCy-based pattern extraction
+# ---------------------------------------------------------------------------
+
+def _get_spacy_nlp():
+    """Lazily load the German spaCy model."""
+    if not hasattr(_get_spacy_nlp, "_nlp"):
+        import spacy
+        _get_spacy_nlp._nlp = spacy.load("de_core_news_sm")
+    return _get_spacy_nlp._nlp
+
+
+# spaCy POS tags that map to a generic WORD token in the pattern
+_SPACY_WORD_POS = {"PROPN", "NOUN", "ADJ", "ADV", "VERB", "X"}
+
+
+def spacy_address_to_pattern(address: str) -> str:
+    """Convert an address string to an abstract structural pattern using spaCy POS tags.
+
+    Mapping:
+      PROPN / NOUN / ADJ / ADV / X  →  WORD
+      NUM                            →  NUM
+      PUNCT / SYM                    →  verbatim character
+      everything else                →  WORD
+
+    Examples:
+        "Regensburg, Königstr. 2/I"             → "WORD, WORD. NUM/ WORD"
+        "München 15, Herzog Heinrichstr.30/III"  → "WORD NUM, WORD WORD/ NUM"
+    """
+    nlp = _get_spacy_nlp()
+    doc = nlp(address)
+    parts = []
+    for token in doc:
+        if token.is_space:
+            parts.append(" ")
+        elif token.pos_ == "NUM" or token.like_num:
+            parts.append("NUM")
+        elif token.pos_ in ("PUNCT", "SYM"):
+            parts.append(token.text)
+        else:
+            parts.append("WORD")
+        parts.append(token.whitespace_)
+    return re.sub(r" {2,}", " ", "".join(parts)).strip()
+
+
+class SpacyPatternTokenSimilarExamples(ExampleMatchingStrategy):
+    """Few-shot selection based solely on spaCy POS-based structural pattern similarity.
+    """
+
+    def __init__(
+        self,
+        example_addresses: pd.Series,
+        example_labels: pd.DataFrame,
+        num_examples: int,
+        labels_to_include: list[str],
+        similarity_threshold: float = None,
+        try_match_order: bool = True,
+    ):
+        self.example_addresses    = example_addresses.reset_index(drop=True)
+        self.example_labels       = example_labels[labels_to_include].reset_index(drop=True)
+        assert len(self.example_addresses) == len(self.example_labels)
+        self.num_examples         = min(num_examples, len(self.example_labels))
+        self.similarity_threshold = similarity_threshold
+        self.try_match_order      = try_match_order
+
+        print("Computing spaCy patterns for training examples...")
+        self.example_patterns = [spacy_address_to_pattern(a) for a in self.example_addresses]
+
+    def _get_example(self, index: int):
+        address = self.example_addresses.iloc[index]
+        labels = []
+        for label, part in self.example_labels.iloc[index].items():
+            if not pd.isna(part):
+                labels.append((address.find(part), label, part))
+        if self.try_match_order:
+            labels.sort()
+        return address, OrderedDict((x[1], x[2]) for x in labels)
+
+    def bulk_find_examples(self, addresses: list[str]):
+        results = []
+        for addr in addresses:
+            query_pattern = spacy_address_to_pattern(addr)
+
+            scored = []
+            for idx, ex_pattern in enumerate(self.example_patterns):
+                pat_score = difflib.SequenceMatcher(None, query_pattern, ex_pattern).ratio()
+                scored.append((pat_score, idx))
+
+            scored.sort(reverse=True)
+
+            examples  = []
+            metadatas = []
+            for pat_score, idx in scored[:self.num_examples]:
+                example  = self._get_example(idx)
+                included = self.similarity_threshold is None or pat_score >= self.similarity_threshold
+                metadatas.append({
+                    "corpus_id":       idx,
+                    "score":           pat_score,
                     "pattern_score":   pat_score,
                     "address":         example[0],
                     "example":         example[1],

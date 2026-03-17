@@ -1,0 +1,44 @@
+
+── Metrics — Llama-3-8B-prompt2-similar3shot ───────────────
+  accuracy                            0.9211
+  precision                           0.8514
+  recall                              0.8648
+  f1                                  0.8580
+  accuracy_with_tol_1                 0.9237
+  accuracy_with_tol_2                 0.9316
+  accuracy_with_tol_3                 0.9408
+  accuracy_with_tol_4                 0.9474
+  average_levenshtein                 0.5461
+  average_similarity                  0.9389
+  average_levenshtein_match           0.5693
+  average_similarity_match            0.9788
+  no_match_rate                       0.0408
+  deltatime                           158.2619
+  rate                                0.9604
+  estimatedTotalTime                  8558138.1245
+  error                               1
+  errorRate                           0.0066
+
+── Per-entity F1 ───────────────────────────────────────────
+  HouseNumber                         0.8430
+  StreetName                          0.8739
+  City                                0.8660
+  District                            0.2593
+  State                               0.6087
+  Country                             0.8966
+
+── Per-BZK-field F1 ────────────────────────────────────────
+  ApplicantCurrentAddress             0.8500
+  VictimBirthPlace                    0.8846
+  VictimCurrentAddress                0.8276
+  ApplicantBirthPlace                 0.8811
+  VictimDeathPlace                    1.0000
+
+── Summary ─────────────────────────────────────────────────
+  accuracy                            0.9211
+  precision                           0.8514
+  recall                              0.8648
+  f1                                  0.8580
+  average_similarity                  0.9389
+  errorRate                           0.0066
+  estimatedTotalTime                  3 months, 9 days, 1:15:38

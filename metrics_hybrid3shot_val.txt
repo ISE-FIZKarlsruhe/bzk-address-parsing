@@ -1,0 +1,43 @@
+
+── Metrics — Llama-3-8B-prompt2-hybrid3shot ────────────────
+  accuracy                            0.9066
+  precision                           0.8149
+  recall                              0.8585
+  f1                                  0.8361
+  accuracy_with_tol_1                 0.9092
+  accuracy_with_tol_2                 0.9211
+  accuracy_with_tol_3                 0.9316
+  accuracy_with_tol_4                 0.9382
+  average_levenshtein                 0.6474
+  average_similarity                  0.9265
+  average_levenshtein_match           0.6805
+  average_similarity_match            0.9739
+  no_match_rate                       0.0487
+  deltatime                           158.8905
+  rate                                0.9566
+  estimatedTotalTime                  13095101.1313
+  error                               1
+  errorRate                           0.0066
+
+── Per-entity F1 ───────────────────────────────────────────
+  HouseNumber                         0.8525
+  StreetName                          0.8689
+  City                                0.8356
+  State                               0.4000
+  Country                             0.9195
+
+── Per-BZK-field F1 ────────────────────────────────────────
+  ApplicantCurrentAddress             0.8411
+  VictimBirthPlace                    0.8889
+  VictimCurrentAddress                0.7797
+  ApplicantBirthPlace                 0.8400
+  VictimDeathPlace                    1.0000
+
+── Summary ─────────────────────────────────────────────────
+  accuracy                            0.9066
+  precision                           0.8149
+  recall                              0.8585
+  f1                                  0.8361
+  average_similarity                  0.9265
+  errorRate                           0.0066
+  estimatedTotalTime                  5 months, 1 day, 13:31:41

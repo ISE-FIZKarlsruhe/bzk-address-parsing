@@ -1,0 +1,24 @@
+Metadata-Version: 2.4
+Name: bzk-address-parsing
+Version: 0.1.0
+Requires-Python: >=3.10
+Requires-Dist: pandas>=2.3.3
+Requires-Dist: numpy>=2.2.6
+Requires-Dist: torch>=2.10.0
+Requires-Dist: transformers>=4.0.0
+Requires-Dist: accelerate>=0.20.0
+Requires-Dist: huggingface-hub>=0.20.0
+Requires-Dist: sentence-transformers>=2.0.0
+Requires-Dist: deepparse>=0.9.0
+Requires-Dist: rdflib>=7.0.0
+Requires-Dist: rapidfuzz>=3.0.0
+Requires-Dist: requests>=2.25.1
+Requires-Dist: tqdm>=4.0.0
+Requires-Dist: matplotlib>=3.0.0
+Requires-Dist: ipympl>=0.9.0
+Requires-Dist: spacy>=3.8.11
+Requires-Dist: de-core-news-sm
+Requires-Dist: datasets>=4.7.0
+Provides-Extra: dev
+Requires-Dist: jupyterlab>=4.0.0; extra == "dev"
+Requires-Dist: ipywidgets>=8.0.0; extra == "dev"
