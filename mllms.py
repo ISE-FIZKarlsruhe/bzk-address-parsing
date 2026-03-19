@@ -36,7 +36,7 @@ class SimilarExamples(ExampleMatchingStrategy):
                  example_labels: pd.DataFrame,
                  num_examples : int,
                  labels_to_include: list[str],
-                 embeeding_model="multi-qa-mpnet-base-dot-v1",
+                 embedding_model="multi-qa-mpnet-base-dot-v1",
                  similarity_threshold: float = None,
                  try_match_order : bool = True,
                  device=None):
@@ -51,7 +51,7 @@ class SimilarExamples(ExampleMatchingStrategy):
         else:
             self.num_examples = num_examples
         self.device = device
-        self.model = sentence_transformers.SentenceTransformer(embeeding_model, device=device)
+        self.model = sentence_transformers.SentenceTransformer(embedding_model, device=device)
         self.similarity_threshold = similarity_threshold
         self.try_match_order = try_match_order
         self.example_embeddings = self.model.encode(self.example_addresses, convert_to_tensor=True)
