@@ -226,7 +226,6 @@ def levenshtein(a: str, b: str, case_insensitive=True, max_distance=None) -> int
 def compare_preds(preds : pd.DataFrame, labels : pd.DataFrame, target_columns, ignore_trash_columns = True):
     # Drop meta columns that may be included in the preds dataframe
     assert len(preds) == len(labels), f"Length mismatch between preds and labels"
-    labels = labels.astype(str)
 
     tolerance_levels = 5
     correct_with_tol = [0,] * tolerance_levels
