@@ -3,6 +3,7 @@ General utility classes and functions for handling the parsing of addresses.
 """
 import pandas as pd
 from collections import OrderedDict
+import datetime
 
 SEPARATOR_CHARS = ",. -()/\\ \t"
 
@@ -318,3 +319,17 @@ def partial_levenshtein(key: str, query: str, case_insensitive=True) -> tuple[in
     distance, span = min(distance_spans, key=lambda x: (x[0], x[1][0] - x[1][1])) # prefer smaller distance, then larger span
     return distance, span
 
+def format_time(seconds, round_to_seconds=True):
+    seconds = round(seconds) if round_to_seconds else seconds
+    timedelta = datetime.timedelta(seconds=seconds)
+    days = timedelta.days
+    months, days = divmod(days, 30)
+    years, months = divmod(months, 12)
+    timedelta = timedelta - datetime.timedelta(days=timedelta.days) + datetime.timedelta(days=days)
+    sb = []
+    if years > 0:
+        sb.append(f"{years} year{'s' if years > 1 else ''}")
+    if months > 0:
+        sb.append(f"{months} month{'s' if months > 1 else ''}")
+    sb.append(f"{timedelta}")
+    return ", ".join(sb)

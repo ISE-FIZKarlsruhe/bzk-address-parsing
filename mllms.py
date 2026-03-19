@@ -10,6 +10,7 @@ import sentence_transformers
 import pandas as pd
 from collections import OrderedDict
 from typing import Any
+import re
 
 _STREET_SUFFIX_RE = re.compile(
     r'^(straße|strasse|gasse|weg|allee|platz|ring|damm|chaussee|steig|stieg|'
@@ -84,7 +85,7 @@ class SimilarExamples(ExampleMatchingStrategy):
                  example_labels: pd.DataFrame,
                  num_examples : int,
                  labels_to_include: list[str],
-                 embeeding_model="multi-qa-mpnet-base-dot-v1",
+                 embedding_model="multi-qa-mpnet-base-dot-v1",
                  similarity_threshold: float = None,
                  try_match_order : bool = True,
                  device=None):
@@ -99,10 +100,10 @@ class SimilarExamples(ExampleMatchingStrategy):
         else:
             self.num_examples = num_examples
         self.device = device
-        if isinstance(embeeding_model, str):
-            self.model = sentence_transformers.SentenceTransformer(embeeding_model, device=device)
+        if isinstance(embedding_model, str):
+            self.model = sentence_transformers.SentenceTransformer(embedding_model, device=device)
         else:
-            self.model = embeeding_model
+            self.model = embedding_model
         self.similarity_threshold = similarity_threshold
         self.try_match_order = try_match_order
         self.example_embeddings = self.model.encode(self.example_addresses, convert_to_tensor=True)
@@ -519,15 +520,38 @@ def extract_json_block(model_response : str):
         json_str = json_str[4:].strip()
     return json_str
 
+def _compile_tuple_regex(separator):
+    separator_escaped = re.escape(separator)
+    # \"(?P<key>.*)\"\s*,\s*\"(?P<value>.*)\"
+    return re.compile(
+        r"\"(?P<key>.*)\"\s*" + 
+        separator_escaped + 
+        r"\s*\"(?P<value>.*)\""
+    )
+
+PRE_COMPILED_REGEXES = {s : _compile_tuple_regex(s) for s in [":", ","]}
+
+def extract_tuples(model_response : str, separator=":"):
+    regex = PRE_COMPILED_REGEXES.get(separator)
+    if regex is None:
+        regex = _compile_tuple_regex(separator)
+    tuples = []
+    for match in regex.finditer(model_response):
+        tuples.append((match.group("key"), match.group("value")))
+    return tuples
+
 class JsonDictPromptTemplate(PromptTemplate):
     def format_example(self, example):
         return "```json" + json.dumps(example, ensure_ascii=False) + "```"
     
     def parse_output(self, response, original_address):
-        json_str = extract_json_block(response)
-        obj = json.loads(json_str)
+        try:
+            json_str = extract_json_block(response)
+            tuples = json.loads(json_str).items()
+        except:
+            tuples = extract_tuples(response, separator=":")
         result_builder = ParsedAddressResultBuilder(original_address)
-        for k, v in obj.items():
+        for k, v in tuples:
             result_builder.add_part(k, v)
         data = result_builder.build()
         return data
@@ -549,8 +573,11 @@ class JSONTuplesPromptTemplate(PromptTemplate):
             ignore_key = "Other"
             if isinstance(self.ignore_other, str):
                 ignore_key = self.ignore_other
-        json_str = extract_json_block(response)
-        tuples = json.loads(json_str)
+        try:
+            json_str = extract_json_block(response)
+            tuples = json.loads(json_str)
+        except:
+            tuples = extract_tuples(response, separator=",")
         result_builder = ParsedAddressResultBuilder(original_address)
         for part, ptype in tuples:
             if ptype != ignore_key:
@@ -559,18 +586,24 @@ class JSONTuplesPromptTemplate(PromptTemplate):
         return data
 
 
-class LlamaAddressParsingModel:
-    def __init__(self,
-                 model_name,
-                 prompt : PromptTemplate,
-                 example_strategy : ExampleMatchingStrategy | dict,
+
+class LLMAddressParsingModel:
+    def __init__(self, 
+                 model_name, 
+                 prompt : PromptTemplate, 
+                 example_strategy : ExampleMatchingStrategy | dict, 
+                 *,
                  batch_size=32,
                  device=None,
                  max_new_tokens=512):
         tokenizer = transformers.AutoTokenizer.from_pretrained(
             model_name, padding_side='left', device=device)
-        self.pipe = transformers.pipeline("text-generation", model=model_name, 
-                                          batch_size=batch_size, tokenizer=tokenizer)
+        self.pipe = transformers.pipeline(
+            "text-generation", model=model_name, 
+            batch_size=batch_size, tokenizer=tokenizer, 
+            device=device)
+        self.generation_config = transformers.GenerationConfig(max_new_tokens=max_new_tokens)
+        self.generate_kwargs = dict(generation_config=self.generation_config)
         if getattr(self.pipe.tokenizer, "pad_token_id", None) is None:
             eos_token_id = self.pipe.model.config.eos_token_id
             if not isinstance(eos_token_id, int): eos_token_id = eos_token_id[0]
@@ -596,7 +629,7 @@ class LlamaAddressParsingModel:
         model_response = None
         output_dict = None
         try:
-            model_response = conversation[0]["generated_text"][-1]["content"]
+            model_response = self._get_response(conversation)
             model_response = self._strip_thinking(model_response)
             parsed = self.prompt.parse_output(model_response, original_address=original_address)
             parsed["fullConversation"] = json.dumps(conversation, ensure_ascii=False)
@@ -610,17 +643,76 @@ class LlamaAddressParsingModel:
             output_dict["___example_metadata"] = example_metadata
         return output_dict
 
-    def parse_addresses(self, addresses : list[str]) -> str:
-        bulk_examples = self.example_strategy.bulk_find_examples(addresses)
-        messages = [[
+    @classmethod
+    def _get_response(cls, conversation):
+        return conversation[0]["generated_text"][1]["content"]
+
+    def _make_conversation(self, address: str, examples : list[tuple[str, dict]]):
+        return [
             {
                 "role": "user", 
-                "content": self.prompt.make_prompt(address, address_examples)
+                "content": self.prompt.make_prompt(address, examples)
             }
-        ] for address, (address_examples, _) in zip(addresses, bulk_examples)]
+        ]
+    
+    def _invoke_model(self, conversations):
+        return self.pipe(conversations, **self.generate_kwargs)
+    
+    def parse_addresses(self, addresses : list[str]) -> str:
+        bulk_examples = self.example_strategy.bulk_find_examples(addresses)
+        messages = [
+            self._make_conversation(address, address_examples) 
+            for address, (address_examples, _) in zip(addresses, bulk_examples)
+        ]
         bulk_examples_metadata = [metadata for _, metadata in bulk_examples]
-        result = self.pipe(messages, max_new_tokens=self.max_new_tokens)
+        result = self._invoke_model(messages)
         responses = [
             self._parse_output(r, original_address=addr, example_metadata=example_metadata)
             for r, addr, example_metadata in zip(result, addresses, bulk_examples_metadata)]
         return responses
+    
+class LlamaAddressParsingModel(LLMAddressParsingModel):
+    pass
+
+class QwenAddressParsingModel(LLMAddressParsingModel):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # According to https://huggingface.co/Qwen/Qwen3.5-9B#best-practices 
+        # non thinking mode for general tasks recommendations
+        self.generation_config.update(
+            max_new_tokens=32_768 // 4, # Too many tokens can cause large latency
+            temperature=0.7,
+            top_p=0.8,
+            top_k=20,
+            min_p=0.0,
+            presence_penalty=1.5,
+            repetition_penalty=1.0
+        )
+
+    @classmethod
+    def _get_response(cls, conversation):
+        response = conversation[0]["generated_text"].split("<|im_start|>assistant")[-1]
+        return response
+
+    def _invoke_model(self, conversations):
+        # Claude's suggestion to disable thinking mode
+        conversations = self.pipe.tokenizer.apply_chat_template(
+            conversations,
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=False
+        )
+        return super()._invoke_model(conversations)
+
+    def _make_conversation(self, address, examples):
+        return [
+            {
+                "role": "user", 
+                "content": [{
+                    "type": "text",
+                    "text": self.prompt.make_prompt(address, examples)
+                }]
+            }
+        ]
+    
+
