@@ -42,6 +42,9 @@ dependencies = [
     "spacy>=3.8.11",
     "de-core-news-sm",
     "datasets>=4.7.0",
+    "spacy-lookups-data>=1.0.5",
+    "outlines>=1.2.12",
+    "pydantic>=2.12.5",
 ]
 
 [project.optional-dependencies]
