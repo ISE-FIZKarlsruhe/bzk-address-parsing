@@ -311,7 +311,7 @@ def build_example_strategy(args, train_df, device):
             example_labels=train_df,
             num_examples=n,
             labels_to_include=ENTITIES_TO_PREDICT,
-            embeeding_model=sent_model,
+            embedding_model=sent_model,
             device=device,
         )
 
@@ -336,7 +336,7 @@ def build_example_strategy(args, train_df, device):
             example_labels=train_df,
             num_examples=n,
             labels_to_include=ENTITIES_TO_PREDICT,
-            embeeding_model=sent_model,
+            embedding_model=sent_model,
             device=device,
         )
         if not Path(args.ner_model_dir).exists():

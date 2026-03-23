@@ -69,11 +69,18 @@ class ExampleMatchingStrategy(ABC):
         raise Exception("Not implemented")
     
 class FixedExamples(ExampleMatchingStrategy):
-    def __init__(self, examples: list[tuple[str, dict]]):
+    def __init__(self, examples: list[tuple[str, dict]], labels_to_include: list[str] | None = None):
         self.examples = examples
+        self.labels_to_include = labels_to_include
 
     def find_examples(self, address: str) -> tuple[list[tuple[str, dict]], Any | None]:
-        return self.examples, None
+        examples = self.examples
+        if self.labels_to_include is not None:
+            examples = [
+                (addr, {k: v for k, v in example.items() if k in self.labels_to_include})
+                for addr, example in examples
+            ]
+        return examples, None
 
 class ZeroShot(ExampleMatchingStrategy):
     def find_examples(self, address: str) -> tuple[list[tuple[str, dict]], Any | None]:
@@ -672,6 +679,12 @@ class LLMAddressParsingModel:
         return responses
     
 class LlamaAddressParsingModel(LLMAddressParsingModel):
+    pass
+
+class MistralAddressParsingModel(LLMAddressParsingModel):
+    pass
+
+class DeepSeekAddressParsingModel(LLMAddressParsingModel):
     pass
 
 class QwenAddressParsingModel(LLMAddressParsingModel):
