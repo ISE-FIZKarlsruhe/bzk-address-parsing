@@ -1,3 +1,28 @@
+"""
+Script and utility functions to build a DuckDB database from Geonames dumps, extending it with GND dumps.
+
+Can be run as a standalone script or imported as module to be used in other scripts or notebooks.
+To import the database in another script or notebook, 
+simply import the open_or_init_duckdb function and call it to get a connection to the database, 
+which will be created if it does not already exist.
+
+Most of the tables are imported from the geonames dump files (https://download.geonames.org/export/dump/),
+but the script also imports geographic names from the GND (Gemeinsame Normdatei) authority files 
+(https://data.dnb.de/opendata/)
+
+To get more information about the geoname tables, consult https://download.geonames.org/export/dump/readme.txt 
+The only difference in the local database is that the admin5 code is included directly 
+in the main geonames table.
+
+The GND data is imported from the authorities-gnd-geografikum_lds.ttl file.
+Only entities of type gndo:TerritorialCorporateBodyOrAdministrativeUnit that link (using owl:sameAs) 
+to a geonames entity are imported to the table 'gnd'.
+For these entities, their preferred and variant names are imported to the gndNames table.
+Some of the entities in the authority file link to geoname ids that don't exist. Some of these, but not all,
+are resolved by making a request to the geonames server which triggers a redirect to the correct geoname id 
+(likely these are entities for which the id is outdated somehow).
+The rest of the entities with invalid geoname ids are ignored.
+"""
 import contextlib
 from pathlib import Path
 import io
@@ -8,9 +33,8 @@ import zipfile
 import gzip
 import shutil
 import duckdb
-from typing import IO
-from tqdm import tqdm
-from contextlib import contextmanager
+from typing import IO, Generator
+from tqdm.auto import tqdm
 import threading
 from urllib.parse import urlparse
 from datetime import timedelta
@@ -20,12 +44,18 @@ DUCK_DB_PATH = "geonames.duckdb"
 
 
 # =================================================================================
-# Functions and constants for downloading information from geonames and gnd
+# Generic utility functions
 # =================================================================================
 
 
-@contextmanager
+@contextlib.contextmanager
 def duckdbpbar(connection: duckdb.DuckDBPyConnection, **kwargs):
+    """Context manager to display a progress bar for long-running DuckDB queries using tqdm.
+    Usage:
+    with duckdbpbar(connection, desc="Running long query"):
+        connection.execute("SELECT ...")
+    """
+    # TODO the progress bar is not very accurate
     stop_signal = threading.Event()
 
     def progress_thread():
@@ -50,6 +80,12 @@ def duckdbpbar(connection: duckdb.DuckDBPyConnection, **kwargs):
 
 
 def extract(extension: str, data: IO[bytes], dest_path: Path):
+    """
+    Extracts a file from a compressed archive to a destination path.
+    Compression formats supported: zip, gzip, gz, or uncompressed files.
+    For zip files, the archive is expected to contain a file with the same name as
+    the dest_path file name.
+    """
     if extension == "zip":
         with zipfile.ZipFile(data) as zf:
             zf.extract(dest_path.name, dest_path.parent)
@@ -63,6 +99,14 @@ def extract(extension: str, data: IO[bytes], dest_path: Path):
 
 
 def download_file(url, dest_path, decompress=True):
+    """
+    Downloads a file from a url to a destination path, with an optional decompression step.
+    If decompress is True, the file will be decompressed based on its extension (zip, gzip, gz)
+    and the decompressed file will be saved to dest_path.
+    If decompress is False, the file will be downloaded as is to dest_path.
+    If the file already exists at dest_path, the function will skip downloading and
+    return immediately.
+    """
     if dest_path.exists():
         return
     print(f"Downloading file from {url}...")
@@ -75,7 +119,6 @@ def download_file(url, dest_path, decompress=True):
         for chunk in tqdm(
             response.iter_content(None),
             total=total_size,
-            desc=f"Downloading {url}",
             unit="B",
             unit_scale=True,
         ):
@@ -86,17 +129,23 @@ def download_file(url, dest_path, decompress=True):
             extract(extension, dest_stream, dest_path)
     print(f"Downloaded {url} to {dest_path}")
 
+# =================================================================================
+# Specific dump file handling and database initialization functions
+# =================================================================================
 
 def decompress_and_retrieve_relevant_geonames(zipfilepath, member):
+    """
+    Decompresses a geonames dump file and retrieves only the relevant entries based on feature class.
+
+    **Note**: currently all entries are considered relevant and this function simply extracts the 
+    specified member from the zip file, but it can be easily modified to filter entries 
+    based on feature class or other criteria if needed in the future.
+    """
     if not isinstance(zipfilepath, Path):
         zipfilepath = Path(zipfilepath)
     dest_path = zipfilepath.parent / member
     if dest_path.exists():
         return
-    relevant_feature_classes = [
-        "P",
-        "A",
-    ]  # P = populated place, A = administrative division
     dest_path.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(zipfilepath) as zf:
         print(f"Extracting and filtering {member}...")
@@ -119,34 +168,33 @@ def decompress_and_retrieve_relevant_geonames(zipfilepath, member):
 
             csv_reader = csv.reader(line_yielder(), delimiter="\t")
             csv_writer = csv.writer(dst, delimiter="\t")
-            for (
-                row
-            ) in (
-                csv_reader
-            ):  # row format: geonameid, name, asciiname, alternatenames, latitude, longitude, feature class, feature code, country code, cc2, admin1 code, admin2 code, admin3 code, admin4 code, population, elevation, dem, timezone, modification date
-                if (
-                    row[6] not in relevant_feature_classes
-                ):  # feature class is in the 7th column (index 6)
-                    pass  # continue
-                # row[-1] = row[-1].rstrip("\n\r") # remove newlines from the end of the last column to avoid issues with csv writing
+            # row format: geonameid, name, asciiname, alternatenames, latitude, longitude, feature class, feature code, country code, cc2, admin1 code, admin2 code, admin3 code, admin4 code, population, elevation, dem, timezone, modification date
+            for row in csv_reader:
                 csv_writer.writerow(row)
     print(f"Extracted {member} from {zipfilepath} to {dest_path}")
 
 
 def fix_csv(filename):
+    """Geonames country info dump is malformed as a csv and needs to be fixed before
+    importing to duckdb.
+    The file starts with a comment block explaining the table
+    however the comment character '#' is also used in postal code formats,
+    so we cannot simply use the csv comment parameter to skip comments.
+    """
     lines = []
     with open(filename, "r", encoding="utf-8") as f:
         lines = f.readlines()
     with open(filename, "w", encoding="utf-8") as f:
         for line in lines:
-            # Dump for country info table starts with a comment block explaining the table
-            # however the comment character '#' is also used in postal code formats,
-            # so we cannot simply use the csv comment parameter to skip comments.
             if not line.strip().startswith("#"):
                 f.write(line)
 
 
 def init_geonames_table(con: duckdb.DuckDBPyConnection):
+    """Imports the main table from the geonames dump into the DuckDB database.
+
+    This includes the admin5 code column which is only available in a separate dump file and 
+    needs to be imported separately to the main table."""
     print("Creating and populating main geonames table...")
     con.execute(
         """
@@ -196,7 +244,7 @@ def init_geonames_table(con: duckdb.DuckDBPyConnection):
         "https://download.geonames.org/export/dump/adminCode5.zip",
         Path("dumps/geonames/adminCode5.txt"),
     )
-    with duckdbpbar(con, desc="Importing adminCode5B"):
+    with duckdbpbar(con, desc="Importing adminCode5"):
         con.execute(
             """
         UPDATE geonames
@@ -211,6 +259,11 @@ def init_geonames_table(con: duckdb.DuckDBPyConnection):
 
 
 def init_geonames_alternate_names_table(con: duckdb.DuckDBPyConnection):
+    """
+    Imports the alternate names table from the geonames dump into the DuckDB database.
+
+    This table contains alternate names for geonames entities, which can be used for more flexible searching.
+    """
     print("Creating and populating geonames alternate names table...")
     con.execute(
         """
@@ -241,6 +294,17 @@ def init_geonames_alternate_names_table(con: duckdb.DuckDBPyConnection):
 
 
 def init_geonames_hierarchy_table(con):
+    """
+    Imports the hierarchy table from the geonames dump into the DuckDB database.
+    
+    This table contains parent-child relationships between geonames entities. 
+    This includes informal hierachy relationships such as neighborhoods of some cities. Examples:
+    - https://www.geonames.org/2873589/marienfelde.html as part of https://www.geonames.org/2950159/berlin.html
+    - https://www.geonames.org/5110302/brooklyn.html as part of https://www.geonames.org/5128581/new-york-city.html
+    
+    It also includes the official administrative hierarchy, 
+    but these relations can also be derived from the admin1-5 codes in the main table.
+    """
     print("Creating and populating geonames hierarchy table...")
     con.execute(
         """
@@ -267,6 +331,13 @@ def init_geonames_hierarchy_table(con):
 
 
 def init_country_info_table(con):
+    """
+    Imports the country info table from the geonames dump into the DuckDB database.
+
+    While the countries are contained in the main geonames table, 
+    this table contains additional information about countries such as 
+    postal code format, languages, neighbors, etc.
+    """
     print("Creating and populating geonames country info table...")
     con.execute(
         """
@@ -308,15 +379,14 @@ def init_country_info_table(con):
 
 
 @contextlib.contextmanager
-def _rdf_gnd_graph():
-    print("Loading GND RDF graph...")
-    filepath = Path("dumps/gnd/authorities-gnd-geografikum_lds.ttl")
-    size = filepath.stat().st_size
-    with tqdm.wrapattr(
-        open(filepath, "rb"), "read", total=size, desc="Loading GND turtle file"
-    ) as f:
-        gnd = rdflib.Graph()
-        gnd.parse(f, format=filepath.suffix[1:])
+def rdf_gnd_graph():
+    """
+    Context manager to parse gnd turtle authority file and return a rdflib Graph object.
+    Parsing the turtle file takes a long time.
+    """
+    print("Parsing GND RDF graph... This may take several minutes.")
+    gnd = rdflib.Graph()
+    gnd.parse("dumps/gnd/authorities-gnd-geografikum_lds.ttl")
     try:
         yield gnd
     finally:
@@ -328,6 +398,13 @@ def repair_gnd_geoname_ids(
     gnd_matches: list[tuple[str, int]],
     gnd_names: list[tuple[str, str, bool]],
 ):
+    """
+    Handle invalid geonameIds from GND by checking if they exist in the geonames table.
+    Then attempt to fix invalid geonameIds by making a request to the geonames server, 
+    which triggers a redirect to the correct geonameId for some of them.
+
+    geonameIds that cannot be fixed are removed from both gnd_matches and gnd_names.
+    """
     unavailable_geoname_ids = con.execute(
         """
         SELECT unnest(?) AS id
@@ -341,7 +418,7 @@ def repair_gnd_geoname_ids(
     if not unavailable_geoname_ids:
         return gnd_matches, gnd_names
     for k in unavailable_geoname_ids.keys():
-        print(
+        tqdm.write(
             f"Warning: geonameId {k} from GND does not exist in geonames table; attempting to fix using geonames server..."
         )
         # make a request to geonames to check if the geonameId is valid and to trigger a potential http redirect
@@ -350,20 +427,20 @@ def repair_gnd_geoname_ids(
         redirected_id = urlparse(response.url).path.split("/")[1]
         redirected_id = int(redirected_id) if redirected_id.isdigit() else redirected_id
         if response.status_code not in range(200, 300):
-            print(
-                f"Error: geonameId {k} from GND could not be resolved; received status code {response.status_code}"
+            tqdm.write(
+                f"ERROR: geonameId {k} from GND could not be resolved; received status code {response.status_code}"
             )
         elif isinstance(redirected_id, str):
-            print(
-                f"Error: geonameId {k} from GND could not be resolved; redirected to {response.url} (id = {redirected_id})"
+            tqdm.write(
+                f"ERROR: geonameId {k} from GND could not be resolved; redirected to {response.url} (id = {redirected_id})"
             )
         elif redirected_id == k:
-            print(
-                f"Warning: geonameId {k} from GND could not be resolved; geonames server returned the same id, is the database incomplete?"
+            tqdm.write(
+                f"ERROR: geonameId {k} from GND could not be resolved; geonames server returned the same id, is the database incomplete?"
             )
         else:
-            print(
-                f"geonameId {k} from GND redirected to {response.url} (id = {redirected_id}); updating match"
+            tqdm.write(
+                f"\tgeonameId {k} from GND redirected to {response.url} (id = {redirected_id}); updating match"
             )
             unavailable_geoname_ids[k] = redirected_id
     gnd_uris_to_ignore = set()
@@ -379,7 +456,10 @@ def repair_gnd_geoname_ids(
     return gnd_matches, gnd_names
 
 
-def fetch_names_from_gnd(gnd):
+def fetch_names_from_gnd(gnd) -> Generator[tuple[str, str, bool, int], None, None]:
+    """
+    Fetches geonameIds and names from GND RDF graph, yielding tuples of (gndUri, name, isPreferred, geonameId).
+    """
     qres = gnd.query(
         """
         SELECT ?gndUri ?nameType ?name ?geonameUri WHERE {
@@ -389,31 +469,37 @@ def fetch_names_from_gnd(gnd):
                 FILTER (?nameType IN (
                     gndo:preferredNameForThePlaceOrGeographicName, 
                     gndo:variantNameForThePlaceOrGeographicName)).
-    }
+        }
     """
     )
-    total_estimate = 150_000 # based on empirical experience with some margin for new entries
+    total_estimate = 150_000  # based on past runs with some margin for new entries
     for gndUri, name_type, name, geonameUri in tqdm(
-        qres, total=total_estimate, desc="Fetching GND query results"
+        qres, total=total_estimate, desc="Fetching GND entities"
     ):
         try:
             name = str(name)
             geonameId = urlparse(geonameUri).path.split("/")[1]
             geonameId = int(geonameId)
             preferred = (
-                str(name_type).split("#")[-1] == "preferredNameForThePlaceOrGeographicName"
+                str(name_type).split("#")[-1]
+                == "preferredNameForThePlaceOrGeographicName"
             )
             yield (str(gndUri), name, preferred, geonameId)
         except Exception as e:
             # Many urls are malformed and would cause the entire process to fail
-            print(f"Error processing GND query result ({(gndUri, name_type, name, geonameUri)})")
+            print(
+                f"Error processing GND query result ({(gndUri, name_type, name, geonameUri)})"
+            )
             exception_info = f"{type(e).__name__}: {e}"
             print(exception_info)
 
 
 def populate_gnd_tables(db_con: duckdb.DuckDBPyConnection):
+    """
+    Import relevant GND entities and their names into the gnd and gndNames tables in the DuckDB database.
+    """
     chunk_size = 10_000
-    with _rdf_gnd_graph() as gnd:
+    with rdf_gnd_graph() as gnd:
         gnd_matches = []
         gnd_names = []
 
@@ -422,19 +508,21 @@ def populate_gnd_tables(db_con: duckdb.DuckDBPyConnection):
             gnd_matches, gnd_names = repair_gnd_geoname_ids(
                 db_con, gnd_matches, gnd_names
             )
-            db_con.executemany(
-                "INSERT OR IGNORE INTO gnd (gndUri, geonameId) VALUES (?, ?)",
-                gnd_matches,
-            )
-            db_con.executemany(
-                """
-                INSERT INTO gndNames (gndUri, name, isPreferred) VALUES (?, ?, ?)
-                ON CONFLICT (gndUri, name) 
-                DO UPDATE SET isPreferred = EXCLUDED.isPreferred 
-                WHERE NOT isPreferred AND EXCLUDED.isPreferred; 
-                """,
-                gnd_names,
-            )
+            with duckdbpbar(db_con, desc="Inserting GND matches", leave=False):
+                db_con.executemany(
+                    "INSERT OR IGNORE INTO gnd (gndUri, geonameId) VALUES (?, ?)",
+                    gnd_matches,
+                )
+            with duckdbpbar(db_con, desc="Inserting GND names", leave=False):
+                db_con.executemany(
+                    """
+                    INSERT INTO gndNames (gndUri, name, isPreferred) VALUES (?, ?, ?)
+                    ON CONFLICT (gndUri, name) 
+                    DO UPDATE SET isPreferred = EXCLUDED.isPreferred 
+                    WHERE NOT isPreferred AND EXCLUDED.isPreferred; 
+                    """,
+                    gnd_names,
+                )
             gnd_matches.clear()
             gnd_names.clear()
 
@@ -448,9 +536,13 @@ def populate_gnd_tables(db_con: duckdb.DuckDBPyConnection):
 
 
 def init_gnd_tables(con):
+    """
+    Creates the gnd and gndNames tables in the DuckDB database and populates 
+    them with data from the GND RDF graph.
+    """
     print("Creating and populating GND tables...")
     con.execute(
-        f"""
+        """
         CREATE TABLE IF NOT EXISTS gnd (
             gndUri TEXT PRIMARY KEY,
             geonameId INTEGER,
@@ -476,8 +568,20 @@ def init_gnd_tables(con):
     populate_gnd_tables(con)
     return con
 
+def cleanup_dump_files():
+    """
+    Removes the downloaded dump files to free up disk space after the database has been built.
+    """
+    print("Cleaning up downloaded dump files...")
+    shutil.rmtree("dumps")
 
-def init_duckdb():
+def init_duckdb(cleanup=True):
+    """
+    Initializes the DuckDB database by creating the necessary tables and populating them with data 
+    from the geonames and GND dumps. Fails if the database already exists.
+
+    This function will take a long time to run (up to 30 minutes).
+    """
     start = time.monotonic()
     if Path(DUCK_DB_PATH).exists():
         raise FileExistsError(
@@ -491,25 +595,36 @@ def init_duckdb():
     init_geonames_hierarchy_table(con)
     init_country_info_table(con)
     init_gnd_tables(con)
+    if cleanup:
+        cleanup_dump_files()
     end = time.monotonic()
     elapsed = end - start
-    print(f"Complete! (Elapsed time: {timedelta(seconds=elapsed)})")
+    print(f"Database creation complete! (Elapsed time: {timedelta(seconds=elapsed)})")
     return con
 
 
 def open_or_init_duckdb():
+    """
+    Opens a connection to the DuckDB database if it exists, otherwise initializes a new database.
+    """
     if Path(DUCK_DB_PATH).exists():
         print(f"Opening existing DuckDB database at {DUCK_DB_PATH}...")
         return duckdb.connect(DUCK_DB_PATH)
     else:
+        print(f"DuckDB database not found at {DUCK_DB_PATH}. Initializing new database...")
         return init_duckdb()
 
 
 def rebuild_tables(table_names):
-    con = open_or_init_duckdb()
+    """
+    Rebuilds the specified tables in the DuckDB database.
+    Tables must be provided in order of dependency, meaning if table B can only be deleted after table A,
+    then A must be listed before B in the input list.
+    """
+    con = duckdb.connect(DUCK_DB_PATH)
     if ("gnd" in table_names) != ("gndNames" in table_names):
         print(
-            "Warning: Tables gnd and gndNames are interdependent; both table will be rebuilt"
+            "Warning: Tables gnd and gndNames are interdependent; both tables will be rebuilt"
         )
     else:
         # Delete gndNames to avoid repeated build
@@ -556,6 +671,9 @@ def rebuild_tables(table_names):
 
 
 def main(args=None):
+    """
+    Main function invoked when running as a standalone script.
+    """
     from argparse import ArgumentParser
 
     parser = ArgumentParser(
@@ -595,11 +713,10 @@ def main(args=None):
         print(
             f"Database already exists at {DUCK_DB_PATH}. Use --rebuild to delete and rebuild."
         )
+        if args.cleanup:
+            cleanup_dump_files()
     else:
-        init_duckdb()
-    if args.cleanup:
-        print("Cleaning up downloaded dump files...")
-        shutil.rmtree("dumps")
+        init_duckdb(cleanup=args.cleanup)
 
 
 if __name__ == "__main__":

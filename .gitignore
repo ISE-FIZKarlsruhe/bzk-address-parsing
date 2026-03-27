@@ -10,3 +10,4 @@ models/
 *.egg-info/
 .venv/
 geonames.duckdb
+geonames.duckdb.wal
