@@ -9,3 +9,4 @@ venv/
 models/
 *.egg-info/
 .venv/
+geonames.duckdb
