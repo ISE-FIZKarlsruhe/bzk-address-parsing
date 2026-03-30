@@ -534,6 +534,29 @@ def populate_gnd_tables(db_con: duckdb.DuckDBPyConnection):
         if gnd_matches:
             flush()
 
+def populate_wikidata_table(con):
+    """
+    Work in progress - There are 46k "Ortsteils" in wikidata
+    that do not link to a geonames of gnd entity.
+    This includes at least one place mentioned in BZK corpus 
+    (Sudberg, https://www.wikidata.org/wiki/Q2362997)
+    We should probaly include and link these entities as well.
+    """
+    #TODO
+    # Query is missing labels and geoname linking through closest ancestor.
+    # Closest ancestor is hard to express efficiently in SPARQL...
+    # Maybe subquery with a LIMIT 1 could work?
+    # 
+    # It is also exclusive to Ortsteils, there may be other relevant classes
+    wikidata_sparql_query = """
+    SELECT * WHERE {
+        ?id wdt:P31 wd:Q253019.
+        FILTER NOT EXISTS {
+            {?id wdt:P1566 ?geonameId} UNION {?id wdt:P227 ?gndId}
+        }
+    }
+    """
+    raise NotImplementedError("WIP - not implemented yet")
 
 def init_gnd_tables(con):
     """
@@ -568,6 +591,73 @@ def init_gnd_tables(con):
     populate_gnd_tables(con)
     return con
 
+def create_names_views(con):
+    """
+    Creates a view in the DuckDB database that combines the main geonames table with the alternate names and GND names, 
+    to facilitate searching for entities by any of their names.
+    """
+    print("Creating names view...")
+    con.execute(
+        """
+        CREATE OR REPLACE VIEW allNames AS
+        SELECT geonameId, alternateName, isolanguage, isPreferredName, isShortName, isColloquial, isHistoric FROM alternateNames
+        UNION ALL
+        SELECT geonameId, name as alternateName, isPreferred as isPreferredName, gndUri FROM gndNames
+            JOIN gnd USING (gndUri);
+    """
+    )
+
+def create_informal_parent_city_view(con):
+    """
+    Creates a view in the DuckDB database that identifies informal parent city 
+    relationships between geonames entities based on the hierarchy table and 
+    feature codes. Note: if a city has multiple parent cities 
+    it w
+
+    This view can be used to include informal parent cities 
+    (e.g. neighborhoods) in search results.
+    """
+    print("Creating informal parent city view...")
+    con.execute(
+        """
+        CREATE OR REPLACE VIEW informalParentCity AS
+        SELECT 
+            childId AS geonameId, 
+            ANY_VALUE(parentId) AS parentCityId
+        FROM hierarchy
+        JOIN geonames AS parent ON hierarchy.parentId = parent.geonameId
+        JOIN geonames AS child ON hierarchy.childId = child.geonameId
+        WHERE 
+            parent.feature_class = 'P' AND parent.feature_code != 'PPLX' AND
+            hierarchy.type != 'ADM'
+        GROUP BY childId
+        HAVING COUNT(*) = 1;
+    """
+    )
+
+def create_simplified_geonames_view(con):
+    """
+    Creates a view in the DuckDB database that simplifies the geonames table by including only the most relevant columns for searching and matching.
+    This can be used to speed up search queries by reducing the amount of data that needs to be scanned.
+    """
+    print("Creating simplified geonames view...")
+    con.execute(
+        """
+        CREATE OR REPLACE VIEW simplifiedGeonames AS
+        SELECT 
+            geonameId, name, asciiname, feature_class, feature_code, country_code, admin1_code, admin2_code, admin3_code, admin4_code, admin5_code, parentCityId
+        FROM geonames NATURAL JOIN informalParentCity;
+    """
+    )
+
+def create_views(con):
+    """
+    Creates all necessary views in the DuckDB database.
+    """
+    create_names_views(con)
+    create_informal_parent_city_view(con)
+    create_simplified_geonames_view(con)
+
 def cleanup_dump_files():
     """
     Removes the downloaded dump files to free up disk space after the database has been built.
@@ -600,20 +690,17 @@ def init_duckdb(cleanup=True):
     end = time.monotonic()
     elapsed = end - start
     print(f"Database creation complete! (Elapsed time: {timedelta(seconds=elapsed)})")
-    return con
+    con.close()
 
 
 def open_or_init_duckdb():
     """
     Opens a connection to the DuckDB database if it exists, otherwise initializes a new database.
     """
-    if Path(DUCK_DB_PATH).exists():
-        print(f"Opening existing DuckDB database at {DUCK_DB_PATH}...")
-        return duckdb.connect(DUCK_DB_PATH)
-    else:
+    if not Path(DUCK_DB_PATH).exists():
         print(f"DuckDB database not found at {DUCK_DB_PATH}. Initializing new database...")
-        return init_duckdb()
-
+        init_duckdb()
+    return duckdb.connect(DUCK_DB_PATH, read_only=True)
 
 def rebuild_tables(table_names):
     """
