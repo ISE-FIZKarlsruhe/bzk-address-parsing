@@ -600,8 +600,10 @@ def create_names_views(con):
     con.execute(
         """
         CREATE OR REPLACE VIEW allNames AS
-        SELECT geonameId, alternateName, isolanguage, isPreferredName, isShortName, isColloquial, isHistoric FROM alternateNames
-        UNION ALL
+        SELECT * EXCLUDE (alternateNameId) FROM alternateNames
+        UNION BY NAME
+        SELECT geonameId, name AS alternateName, true AS isPreferredName FROM geonames
+        UNION BY NAME
         SELECT geonameId, name as alternateName, isPreferred as isPreferredName, gndUri FROM gndNames
             JOIN gnd USING (gndUri);
     """
@@ -611,8 +613,7 @@ def create_informal_parent_city_view(con):
     """
     Creates a view in the DuckDB database that identifies informal parent city 
     relationships between geonames entities based on the hierarchy table and 
-    feature codes. Note: if a city has multiple parent cities 
-    it w
+    feature codes.
 
     This view can be used to include informal parent cities 
     (e.g. neighborhoods) in search results.
@@ -622,18 +623,57 @@ def create_informal_parent_city_view(con):
         """
         CREATE OR REPLACE VIEW informalParentCity AS
         SELECT 
-            childId AS geonameId, 
-            ANY_VALUE(parentId) AS parentCityId
+            childId AS childId, 
+            parentId AS parentId
         FROM hierarchy
         JOIN geonames AS parent ON hierarchy.parentId = parent.geonameId
         JOIN geonames AS child ON hierarchy.childId = child.geonameId
         WHERE 
             parent.feature_class = 'P' AND parent.feature_code != 'PPLX' AND
-            hierarchy.type != 'ADM'
-        GROUP BY childId
-        HAVING COUNT(*) = 1;
+            hierarchy.type IS DISTINCT FROM 'ADM';
     """
     )
+
+def create_full_hierarchy_view(con):
+    """
+    Creates a view in the DuckDB database that associates all the ancestor geoname ids 
+    in the administrative hierarchy to each geoname entity.
+    
+    Additionally includes informal parent city relationships as well, 
+    but only if the city has a single parent city to avoid ambiguity.
+    """
+    print("Creating full hierarchy view...")
+    query = [
+        """
+        CREATE OR REPLACE VIEW fullHierarchy AS
+        SELECT child.geonameId AS childId, parent.geonameid AS parentId, 'Country' AS level
+            FROM geonames AS child JOIN countryInfo AS parent ON child.country_code = parent.ISO
+            WHERE child.geonameId != parent.geonameid
+    """]
+    N_LEVELS = 5
+    # Append each admin level
+    for i in range(1, N_LEVELS + 1):
+        join_codes = ", ".join(f"admin{j}_code" for j in range(1, i + 1))
+        next_level_guard = f"parent.admin{i+1}_code IS NULL AND" if i < N_LEVELS else ""
+        query.append(
+            f"""
+            UNION
+            SELECT child.geonameId AS childId, parent.geonameId AS parentId, 'ADM{i}' AS level
+                FROM geonames AS child JOIN geonames AS parent USING (country_code, {join_codes})
+                WHERE 
+                    parent.feature_class = 'A' AND 
+                    starts_with(parent.feature_code, 'ADM{i}') AND 
+                    parent.admin{i}_code IS NOT NULL AND
+                    {next_level_guard}
+                    child.geonameId != parent.geonameId
+        """)
+    # Append informal parent cities
+    query.append(
+        """
+        UNION
+        SELECT childId, parentId, 'City' AS level FROM informalParentCity
+    """)
+    con.execute("\n".join(query))
 
 def create_simplified_geonames_view(con):
     """
@@ -645,8 +685,8 @@ def create_simplified_geonames_view(con):
         """
         CREATE OR REPLACE VIEW simplifiedGeonames AS
         SELECT 
-            geonameId, name, asciiname, feature_class, feature_code, country_code, admin1_code, admin2_code, admin3_code, admin4_code, admin5_code, parentCityId
-        FROM geonames NATURAL JOIN informalParentCity;
+            geonameId, name, asciiname, feature_class, feature_code, country_code, admin1_code, admin2_code, admin3_code, admin4_code, admin5_code, parentId as parentCityId
+        FROM geonames LEFT JOIN informalParentCity ON geonames.geonameId = informalParentCity.childId;
     """
     )
 
@@ -656,6 +696,7 @@ def create_views(con):
     """
     create_names_views(con)
     create_informal_parent_city_view(con)
+    create_full_hierarchy_view(con)
     create_simplified_geonames_view(con)
 
 def cleanup_dump_files():
@@ -693,13 +734,17 @@ def init_duckdb(cleanup=True):
     con.close()
 
 
-def open_or_init_duckdb():
+def open_or_init_duckdb(rebuild_views=False):
     """
     Opens a connection to the DuckDB database if it exists, otherwise initializes a new database.
     """
     if not Path(DUCK_DB_PATH).exists():
         print(f"DuckDB database not found at {DUCK_DB_PATH}. Initializing new database...")
         init_duckdb()
+    elif rebuild_views:
+        conn = duckdb.connect(DUCK_DB_PATH) # with write permission
+        create_views(conn)
+        conn.close()
     return duckdb.connect(DUCK_DB_PATH, read_only=True)
 
 def rebuild_tables(table_names):

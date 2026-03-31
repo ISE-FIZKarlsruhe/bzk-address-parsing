@@ -13,6 +13,7 @@ import contextlib
 import enum
 import dataclasses
 import textwrap
+import warnings
 
 @dataclasses.dataclass
 class TextMatchingAlgorithmProperties:
@@ -31,12 +32,14 @@ class TextMatchingAlgorithm(TextMatchingAlgorithmProperties, enum.Enum):
 
 
 @dataclasses.dataclass
-class SearchQueryParameters:
+class NameSearchQuery:
+    table : str
+    filter_feature_codes : bool
     topk : int = 5
     threshold : int | float = 3
     text_matching_algorithm : TextMatchingAlgorithm = TextMatchingAlgorithm.LEVENSHTEIN
 
-    def build_query(self, filter_feature_codes : bool) -> str:
+    def build_query(self) -> str:
         # avoid SQL injection by validating type of the parameters before using them to construct the query
         assert isinstance(self.text_matching_algorithm, TextMatchingAlgorithm)
         assert isinstance(self.topk, int) and self.topk > 0
@@ -54,7 +57,7 @@ class SearchQueryParameters:
             threshold_comparison_operator = ">="
             order_direction = "DESC"
         
-        if filter_feature_codes:
+        if self.filter_feature_codes:
             feature_code_filter = "AND\n    featureCode IN (?)"
         else:
             feature_code_filter = ""
@@ -67,7 +70,45 @@ class SearchQueryParameters:
             ORDER BY score {order_direction}
             LIMIT {self.topk}
         """).strip()
-        
+    
+    def __str__(self):
+        return self.build_query(filter_feature_codes=False)
+
+ENTITY_TYPE_SQL_FILTERS = {
+    "Country": "featureCode IN ('TERR', 'PCLI', 'PCL', 'PCLF', 'LTER', 'ZN', 'PCLD', 'PCLH', 'PCLS', 'PRSH', 'PCLIX')",
+    "State": "featureCode IN ('ADM1', 'ADM1H', 'ADMDH', 'ADMD')",
+    "Region": "featureCode IN ('RGN', 'RGNH', 'ADM1', 'ADM1H', 'ADMDH', 'ADMD', 'ADM2', 'ADM2H', 'ADM3H', 'ADM3', 'ADM4', 'ADM4H', 'ADM5')",
+    "District": "featureCode IN ('ADM1', 'ADM1H', 'ADMDH', 'ADMD', 'ADM2', 'ADM2H', 'ADM3H', 'ADM3')",
+    "City" : "featureClass == 'P'"
+}
+
+def search_closest_matches_query(
+        entity_type : Optional[str] = None,
+        topk : int = 5,
+        threshold : int | float = 3,                       
+    ):
+
+    if entity_type is not None:
+        entity_type_filter = ENTITY_TYPE_SQL_FILTERS.get(entity_type)
+        if entity_type_filter is None:
+            warnings.warn(f"Unknown entity type: {entity_type}. No filter will be applied.")
+    else:
+        entity_type_filter = None
+    if entity_type_filter is not None:
+        entity_type_filter = " AND \n" + entity_type_filter
+    
+    query = f"""
+        SELECT *, 
+            levenshtein(
+                nfc_normalize(lower(name)), 
+                nfc_normalize(lower(?))
+            ) AS distance
+        FROM allNames
+        WHERE distance <= {threshold} {entity_type_filter}
+        ORDER BY distance ASC
+        LIMIT {topk}
+    """
+    
 
 class GeonamesSearch(contextlib.AbstractContextManager):
     def __init__(
@@ -102,27 +143,6 @@ class GeonamesSearch(contextlib.AbstractContextManager):
     
     def __del__(self):
         self.close()
-    
-
-
-FEATURE_CODE_HIERARCHY = [
-    # countries, equivalent or above levels
-    {'A.TERR', 'A.PCLI', 'A.PCL', 'A.PCLF', 'A.LTER', 'A.ZN', 'A.PCLD', 'A.PCLH', 'A.PCLS', 'A.PRSH', 'A.PCLIX'}, 
-    # first-level administrative divisions (e.g. states in the US, Bundesländer in Germany) and informal divisions
-    {'A.ADM1', 'A.ADM1H', 'A.ADMDH', 'A.ADMD'}, 
-    # second-level administrative divisions
-    {'A.ADM2', 'A.ADM2H'}, 
-    # third-level administrative divisions
-    {'A.ADM3H', 'A.ADM3'}, 
-    # fourth-level administrative divisions
-    {'A.ADM4', 'A.ADM4H'}, 
-    # fifth-level administrative divisions
-    {'A.ADM5'}, 
-    # populated places (cities, towns, villages, etc.).
-    {'P.PPLA2', 'P.PPLA3', 'P.PPLA', 'P.PPLR', 'P.PPL', 'P.PPLA5', 'P.STLMT', 'P.PPLQ', 'P.PPLS', 'P.PPLG', 'P.PPLW', 'P.PPLC', 'P.PPLH', 'P.PPLL', 'P.PPLCH', 'P.PPLF', 'P.PPLA4'}, 
-    # section of populated place (neighborhoods, quarters, etc.)
-    {'P.PPLX'}
-]
 
 def _to_feature_codes(key : str) -> set[str]:
         if key == "Country":
