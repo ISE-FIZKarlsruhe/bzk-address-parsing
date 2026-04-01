@@ -40,7 +40,56 @@ class EntityType(EntityTypeProperties, enum.Enum):
         if not isinstance(other, EntityType):
             return NotImplemented
         return self.hierarchy_level < other.hierarchy_level
-    
+
+# Used to materialize in memory a distilled version of the names table
+# TODO filter neighborhoods?
+CANDIDATE_NAMES_INIT_QUERY = """
+CREATE TEMP TABLE candidate_names AS
+SELECT 
+    nfc_normalize(alternateName) AS nfc_alt_name,
+    regexp_replace(lower(strip_accents(nfc_alt_name)), '[^\\w\\s]', '', 'g') AS clean_alt_name,
+    allNames.*, 
+    simplifiedGeonames.*, 
+    countryInfo.Country,
+    { 
+        'Country' : (
+            feature_class = 'A' AND 
+            feature_code IN ('TERR', 'PCLI', 'PCL', 'PCLF', 'LTER', 'ZN', 'PCLD', 'PCLH', 'PCLS', 'PRSH', 'PCLIX')
+        ),
+        'State' : (
+            feature_class = 'A' AND 
+            feature_code IN ('ADM1', 'ADM1H', 'ADMDH', 'ADMD')
+        ),
+        'Region' : (
+            (
+                feature_class = 'A' AND 
+                feature_code IN ('RGN', 'RGNH', 'ADM1', 'ADM1H', 'ADMDH', 'ADMD', 'ADM2', 'ADM2H', 'ADM3H', 'ADM3', 'ADM4', 'ADM4H', 'ADM5')
+            ) OR (
+                feature_class = 'L' AND
+                feature_code IN ('RGN', 'RGNH')
+            )
+        ),
+        'District' : (
+            feature_class = 'A' AND
+            feature_code IN ('ADM1', 'ADM1H', 'ADMDH', 'ADMD', 'ADM2', 'ADM2H', 'ADM3H', 'ADM3')
+        ),
+        'City' : (
+            feature_class = 'P' AND feature_code != 'PPLX'
+        ),
+        'Neighborhood' : (
+            feature_class = 'P'
+        )
+    } AS entity_type_map
+FROM allNames NATURAL LEFT JOIN simplifiedGeonames LEFT JOIN countryInfo ON (country_code = ISO)
+WHERE
+    allNames.isolanguage IS NULL OR 
+    allNames.isolanguage IN countryInfo.Languages OR 
+    split(allNames.isolanguage, '-')[1] IN ('en', 'de');
+
+CREATE TEMP MACRO candidate_names_filtered(entity_type) AS TABLE 
+    SELECT * FROM candidate_names WHERE entity_type_map[entity_type];
+"""
+
 class GeographicNameProvider(enum.Enum):
     GEONAMES = "geonames"
     GND = "gnd"
@@ -98,9 +147,9 @@ def build_closest_matches_query(
     else:
         entity_type_filter = None
     if entity_type_filter is not None:
-        entity_type_filter = entity_type_filter + " AND "
+        entity_type_filter = f"candidate_names_filtered('{entity_type.entity_type}')"
     else:
-        entity_type_filter = "-- No entity type filter"
+        entity_type_filter = "candidate_names"
     
     ranking_order = """
 ORDER BY 
@@ -116,35 +165,37 @@ ORDER BY
 ASC
 """
 
+    # TODO materializing some sub queries and views might speed up the query significantly
     query = f"""
-WITH 
+WITH
+query_prep AS (
+    SELECT 
+        $1 AS query,
+        nfc_normalize(query) AS nfc_query,
+        regexp_replace(lower(strip_accents(nfc_query)), '[^\\w\\s]', '', 'g') AS clean_query,
+        '.' IN query AS check_for_abbreviation,
+        replace(lower(strip_accents(query)), '.', '\\w+\\s*') AS abbreviation_pattern
+),
 ranked_matches AS(
     SELECT 
-        nfc_normalize(alternateName) AS match_name,
-        nfc_normalize(?) AS query_name,
-        regexp_replace(lower(strip_accents(match_name)), '[^\\w\\s]', '', 'g') AS clean_match_name,
-        regexp_replace(lower(strip_accents(query_name)), '[^\\w\\s]', '', 'g') AS clean_query_name,
-        levenshtein(match_name, query_name) AS raw_distance,
-        levenshtein(clean_match_name, clean_query_name) AS cleaned_distance,
+        query_prep.*,
+        levenshtein(nfc_alt_name, nfc_query) AS raw_distance,
+        levenshtein(clean_alt_name, clean_query) AS cleaned_distance,
         CASE 
-            WHEN '.' IN query_name 
-            THEN clean_match_name SIMILAR TO replace(lower(strip_accents(query_name)), '.', '\\w+\\s*')
-            ELSE FALSE 
+            WHEN query_prep.check_for_abbreviation THEN 
+                clean_alt_name SIMILAR TO query_prep.abbreviation_pattern
+            ELSE FALSE
         END AS may_be_abbreviation,
         ROW_NUMBER() OVER (
             PARTITION BY geonameId 
 {textwrap.indent(ranking_order, ' ' * 4 * 3)}
             ) AS match_rank,
-        allNames.*, simplifiedGeonames.*, countryInfo.Country
-    FROM allNames NATURAL LEFT JOIN simplifiedGeonames LEFT JOIN countryInfo ON (country_code = ISO)
+        *
+    FROM {entity_type_filter}, query_prep
     WHERE 
-        (least(raw_distance, cleaned_distance) <= {threshold} OR may_be_abbreviation) AND 
-        {entity_type_filter}
-        (
-            isolanguage IS NULL OR 
-            isolanguage IN countryInfo.Languages OR 
-            split(isolanguage, '-')[1] IN ('en', 'de')
-        )
+        least(raw_distance, cleaned_distance) <= {threshold} 
+        OR 
+        may_be_abbreviation
 ),
 ranked_entities AS (
     SELECT *,
@@ -161,7 +212,7 @@ ORDER BY entity_rank
 """
     return query.strip()
 
-    
+
 
 class GeonamesSearch(contextlib.AbstractContextManager):
     def __init__(
@@ -171,6 +222,7 @@ class GeonamesSearch(contextlib.AbstractContextManager):
             threshold : int | float = 3
         ):
         self.connection = conn or build_geonames_db.open_or_init_duckdb()
+        self.connection.execute(CANDIDATE_NAMES_INIT_QUERY)
         self.topk = topk
         self.threshold = threshold
     
@@ -178,18 +230,12 @@ class GeonamesSearch(contextlib.AbstractContextManager):
             self,
         parts : list[str],
         entity_type : Optional[EntityType] = None,
-        
     ):
         query = build_closest_matches_query(entity_type, self.topk, self.threshold)
-        #self.connection.execute("PREPARE closest_matches_query AS\n" + query)
         results = []
         for part in parts:
             matches = self.connection.execute(query, [part]).fetchdf()
-            # query_name will be nfc normalized and may no longer match the original part
-            # hence we add the original part as a separate column
-            matches.insert(0, "query_part", part) 
             results.append(matches)
-        #self.connection.execute("DEALLOCATE my_stmt")
         return pd.concat(results, ignore_index=True)
 
     def close(self):
