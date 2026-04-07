@@ -40,6 +40,7 @@ from urllib.parse import urlparse
 from datetime import timedelta
 import time
 
+
 DUCK_DB_PATH = "geonames.duckdb"
 
 
@@ -609,7 +610,7 @@ def create_names_views(con):
     """
     )
 
-def create_informal_parent_city_view(con):
+def create_informal_hierarchy_view(con):
     """
     Creates a view in the DuckDB database that identifies informal parent city 
     relationships between geonames entities based on the hierarchy table and 
@@ -621,16 +622,21 @@ def create_informal_parent_city_view(con):
     print("Creating informal parent city view...")
     con.execute(
         """
-        CREATE OR REPLACE VIEW informalParentCity AS
+        CREATE OR REPLACE VIEW informalHierarchy AS
         SELECT 
             childId AS childId, 
-            parentId AS parentId
+            list(parentId) AS parentId
         FROM hierarchy
         JOIN geonames AS parent ON hierarchy.parentId = parent.geonameId
         JOIN geonames AS child ON hierarchy.childId = child.geonameId
-        WHERE 
-            parent.feature_class = 'P' AND parent.feature_code != 'PPLX' AND
-            hierarchy.type IS DISTINCT FROM 'ADM';
+        WHERE
+            (
+                (parent.feature_class = 'P' AND parent.feature_code != 'PPLX')
+                OR
+                (parent.feature_class = 'L' AND starts_with(parent.feature_code, 'RGN'))
+            ) AND
+            hierarchy.type IS DISTINCT FROM 'ADM'
+        GROUP BY childId;
     """
     )
 
@@ -684,9 +690,39 @@ def create_simplified_geonames_view(con):
     con.execute(
         """
         CREATE OR REPLACE VIEW simplifiedGeonames AS
+        WITH
+        informalParentCity AS (
+            SELECT 
+                childId AS geonameId, 
+                list(parentId) AS parentCityIds
+            FROM hierarchy
+            JOIN geonames AS parent ON hierarchy.parentId = parent.geonameId
+            JOIN geonames AS child ON hierarchy.childId = child.geonameId
+            WHERE
+                parent.feature_class = 'P' AND parent.feature_code != 'PPLX' AND
+                hierarchy.type IS DISTINCT FROM 'ADM'
+            GROUP BY childId
+        ),
+        informalParentRegion AS (
+            SELECT 
+                childId AS geonameId, 
+                list(parentId) AS parentRegionIds
+            FROM hierarchy
+            JOIN geonames AS parent ON hierarchy.parentId = parent.geonameId
+            JOIN geonames AS child ON hierarchy.childId = child.geonameId
+            WHERE
+                (parent.feature_class = 'L' AND parent.feature_code LIKE 'RGN%')
+                OR
+                (parent.feature_class = 'A' AND parent.feature_code LIKE 'ADM%')
+            GROUP BY childId
+        )
         SELECT 
-            geonameId, name, asciiname, feature_class, feature_code, country_code, admin1_code, admin2_code, admin3_code, admin4_code, admin5_code, parentId as parentCityId
-        FROM geonames LEFT JOIN informalParentCity ON geonames.geonameId = informalParentCity.childId;
+            geonameId, name, asciiname, feature_class, feature_code, country_code, 
+            admin1_code, admin2_code, admin3_code, admin4_code, admin5_code, 
+            parentCityIds, parentRegionIds
+        FROM geonames 
+            LEFT JOIN informalParentCity USING (geonameId)
+            LEFT JOIN informalParentRegion USING (geonameId);
     """
     )
 
@@ -695,8 +731,8 @@ def create_views(con):
     Creates all necessary views in the DuckDB database.
     """
     create_names_views(con)
-    create_informal_parent_city_view(con)
-    create_full_hierarchy_view(con)
+    #create_informal_hierarchy_view(con)
+    #create_full_hierarchy_view(con)
     create_simplified_geonames_view(con)
 
 def cleanup_dump_files():
@@ -812,6 +848,11 @@ def main(args=None):
         description="Build DuckDB database from Geonames and GND dumps"
     )
     parser.add_argument(
+        "--rebuild-views",
+        action="store_true",
+        help="Rebuild database views without rebuilding the entire database",
+    )
+    parser.add_argument(
         "--rebuild",
         action="store_true",
         help="Delete existing database and rebuild from scratch",
@@ -831,17 +872,27 @@ def main(args=None):
         parser.error("Cannot use --rebuild and --rebuild-table together")
 
     duckdb_path = Path(DUCK_DB_PATH)
+    delete_old_db = False
 
     if args.rebuild and duckdb_path.exists():
-        print(f"Removing existing database at {DUCK_DB_PATH}...")
-        duckdb_path.unlink()
+        print(f"Moving existing database at {DUCK_DB_PATH}...")
+        shutil.move(DUCK_DB_PATH, f"{DUCK_DB_PATH}.old")
+        delete_old_db = True
     if args.rebuild_table:
         if not duckdb_path.exists():
             parser.error(
                 f"Database does not exist at {DUCK_DB_PATH}. Cannot rebuild tables."
             )
         rebuild_tables(args.rebuild_table)
-    if duckdb_path.exists():
+    elif args.rebuild_views:
+        if not duckdb_path.exists():
+            parser.error(
+                f"Database does not exist at {DUCK_DB_PATH}. Cannot rebuild tables."
+            )
+        conn = duckdb.connect(DUCK_DB_PATH)
+        create_views(conn)
+        conn.close()
+    elif duckdb_path.exists():
         print(
             f"Database already exists at {DUCK_DB_PATH}. Use --rebuild to delete and rebuild."
         )
@@ -849,7 +900,9 @@ def main(args=None):
             cleanup_dump_files()
     else:
         init_duckdb(cleanup=args.cleanup)
-
+    if delete_old_db:
+        print(f"Deleting old database backup at {DUCK_DB_PATH}.old...")
+        Path(f"{DUCK_DB_PATH}.old").unlink()
 
 if __name__ == "__main__":
     main()
