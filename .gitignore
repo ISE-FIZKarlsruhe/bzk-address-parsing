@@ -9,3 +9,7 @@ venv/
 models/
 *.egg-info/
 .venv/
+cluster_analysis/
+.env
+metadata/
+exp_results/
