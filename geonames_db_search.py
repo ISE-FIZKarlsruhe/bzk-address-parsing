@@ -148,12 +148,14 @@ def abbreviation_pattern_to_regex(part : str) -> str:
         else:
             initials = None
             break
-    word_bound_regex = r"\w*\b\s*"
+    if not initials and '.' in part:
+        initials = part.split(".")
+        if len(initials[-1]) == 0:
+            initials = initials[:-1]
     if initials:
-        return "".join(c + word_bound_regex for c in initials)
-    elif "." in part:
-        return part.lower().replace(".", word_bound_regex)
-    else: 
+        initials = [x.lower() for x in initials]
+        return "% ".join(initials) + "%"
+    else:
         return None
 
 def build_closest_matches_query(
@@ -214,7 +216,7 @@ ranked_matches AS(
         levenshtein(clean_alt_name, clean_query) AS cleaned_distance,
         CASE 
             WHEN query_prep.abbreviation_pattern IS NOT NULL THEN 
-                clean_alt_name SIMILAR TO query_prep.abbreviation_pattern
+                clean_alt_name LIKE query_prep.abbreviation_pattern
             ELSE FALSE
         END AS may_be_abbreviation,
         ROW_NUMBER() OVER (
@@ -224,7 +226,7 @@ ranked_matches AS(
         candidates.* EXCLUDE (nfc_alt_name, clean_alt_name)
     FROM candidates, query_prep
     WHERE 
-        least(raw_distance, cleaned_distance) <= {threshold} 
+        cleaned_distance <= {threshold} 
         OR 
         may_be_abbreviation
 ),
