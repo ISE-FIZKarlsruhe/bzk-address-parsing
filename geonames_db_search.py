@@ -17,6 +17,7 @@ import warnings
 import textwrap
 import itertools
 import time
+from collections import defaultdict
 
 @dataclasses.dataclass
 class EntityTypeProperties:
@@ -76,7 +77,7 @@ SELECT
         ),
         'District' : (
             feature_class = 'A' AND
-            feature_code IN ('ADM1', 'ADM1H', 'ADMDH', 'ADMD', 'ADM2', 'ADM2H', 'ADM3H', 'ADM3')
+            feature_code IN ('ADM1', 'ADM1H', 'ADMDH', 'ADMD', 'ADM2', 'ADM2H', 'ADM3H', 'ADM3', 'ADM4', 'ADM4H', 'ADM5')
         ),
         'City' : (
             feature_class = 'P' AND feature_code != 'PPLX'
@@ -89,47 +90,27 @@ FROM allNames
     NATURAL JOIN simplifiedGeonames 
     JOIN countryInfo ON (country_code = ISO)
 WHERE
-    allNames.isolanguage IS NULL OR 
-    split(allNames.isolanguage, '-')[1] IN ('en', 'de', 'abbr') OR
-    allNames.isolanguage IN countryInfo.Languages;
+    (
+        allNames.isolanguage IS NULL OR 
+        split(allNames.isolanguage, '-')[1] IN ('en', 'de', 'abbr') OR
+        allNames.isolanguage IN countryInfo.Languages
+    )
+    AND
+    alternateName IS NOT NULL AND 
+    alternateName != '' AND
+    clean_alt_name != '';
 
 CREATE TEMP TABLE reduced_candidate_names AS
 SELECT candidate_names.*
 FROM candidate_names JOIN countryInfo ON (country_code = ISO)
 WHERE 
-    Continent = 'EU' OR country_code IN ('US', 'IL');
+    country_code IN ('US', 'IL', 'DE') OR 'DE' IN neighbours;
 
 CREATE TEMP MACRO filter_entity_type(tbl, entity_type) AS TABLE 
     SELECT * FROM query_table(tbl) WHERE entity_type_map[entity_type];
 """
 
-class GeographicNameProvider(enum.Enum):
-    GEONAMES = "geonames"
-    GND = "gnd"
-    WIKIDATA = "wikidata" # Not used currently
 
-@dataclasses.dataclass
-class LinkedAddressPart:
-    part : str
-    matched_name : str
-    entity_type : EntityType
-    feature_class : str
-    feature_code : str
-    geonames_id : int
-    distance : int
-    match_method : Literal["levenshtein", "abbreviation_expansion"]
-    name_provenance : GeographicNameProvider
-    is_preferred : bool
-
-
-@dataclasses.dataclass
-class LinkedAddress:
-    address : str
-    parts : list[LinkedAddressPart]
-    levenshtein_distance : int
-    # neighbor distance between the country that matched the address and the country that contains the corresponding place.
-    # Usually 0, however some addresses might contain cities that changed countries.
-    country_distance : int = 0
 
 def abbreviation_pattern_to_regex(part : str) -> str:
     """
@@ -162,7 +143,7 @@ def build_closest_matches_query(
         entity_type : Optional[EntityType] = None,
         topk : int = 5,
         threshold : int | float = 3,
-        table : Literal["candidate_names", "reduced_candidate_names"] = "candidate_names"                  
+        table : Literal["candidate_names", "reduced_candidate_names"] = "candidate_names"  
     ):
     if isinstance(entity_type, str):
         entity_type = EntityType[entity_type]
@@ -173,6 +154,11 @@ def build_closest_matches_query(
     else:
         entity_type_filter = table
     
+    if threshold > 0:
+        match_filter = f"cleaned_distance <= {threshold} OR may_be_abbreviation"
+    else:
+        match_filter = "clean_alt_name = clean_query"
+
     ranking_order = """
 ORDER BY 
     CASE 
@@ -225,10 +211,7 @@ ranked_matches AS(
             ) AS match_rank,
         candidates.* EXCLUDE (nfc_alt_name, clean_alt_name)
     FROM candidates, query_prep
-    WHERE 
-        cleaned_distance <= {threshold} 
-        OR 
-        may_be_abbreviation
+    WHERE {match_filter}
 ),
 ranked_entities AS (
     SELECT *,
@@ -246,6 +229,19 @@ ORDER BY entity_rank
     return query.strip()
 
 
+def falling_query_list(
+        connection : duckdb.DuckDBPyConnection, 
+        queries : list[tuple[bool, str, list]]
+    ) -> tuple[pd.DataFrame, int]:
+    matches = None
+    query_idx = -1
+    for i, (use, query, params) in enumerate(queries):
+        if not use:
+            continue
+        matches = connection.execute(query, params).fetch_df()
+        query_idx = i
+        if len(matches) > 0: break
+    return matches, query_idx
 
 class GeonamesSearch(contextlib.AbstractContextManager):
     def __init__(
@@ -277,29 +273,28 @@ class GeonamesSearch(contextlib.AbstractContextManager):
         ).fetchone()[0]
         query = build_closest_matches_query(entity_type, self.topk, self.threshold)
         reduced_query = build_closest_matches_query(entity_type, self.topk, self.threshold, table="reduced_candidate_names")
+        exact_query = build_closest_matches_query(entity_type, self.topk, 0, table="candidate_names")
+        exact_reduced_query = build_closest_matches_query(entity_type, self.topk, 0, table="reduced_candidate_names")
         results = []
-        query_hits = {"1st":0, "2nd":0, "3rd":0}
+        query_hits = defaultdict(int)
         for part, cleaned, country_hint in zip(parts, cleaned_strings, country_hints):
             abbreviation_regex = abbreviation_pattern_to_regex(cleaned)
             matches = []
             start = time.monotonic()
-            if entity_type is None or entity_type == EntityType.Country:
-                query_hits["3rd"] += 1
-                matches = self.connection.execute(query, [part, None, abbreviation_regex]).fetchdf()
-            else:
-                # Cascade through different subsets of all names to speed up the search.
-                matches = []
-                if country_hint is not None:
-                    matches = self.connection.execute(query, [part, country_hint, abbreviation_regex]).fetchdf()
-                    if len(matches) > 0: query_hits["1st"] += 1
-                if len(matches) == 0:
-                    matches = self.connection.execute(reduced_query, [part, None, abbreviation_regex]).fetchdf()
-                    if len(matches) > 0: query_hits["2nd"] += 1
-                if len(matches) == 0:
-                    matches = self.connection.execute(query, [part, None, abbreviation_regex]).fetchdf()
-                    if len(matches) > 0: query_hits["3rd"] += 1
-                assert isinstance(matches, pd.DataFrame)
+            matches, hit_query_idx = falling_query_list(
+                self.connection,
+                [
+                    (country_hint is not None, exact_query, [part, country_hint, abbreviation_regex]),
+                    (entity_type != EntityType.Country, exact_reduced_query, [part, None, abbreviation_regex]),
+                    (True, exact_query, [part, None, abbreviation_regex]),
+                    (country_hint is not None, query, [part, country_hint, abbreviation_regex]),
+                    (entity_type != EntityType.Country, reduced_query, [part, None, abbreviation_regex]),
+                    (True, query, [part, None, abbreviation_regex]),
+                ]
+            )
             end = time.monotonic()
+            assert isinstance(matches, pd.DataFrame)
+            query_hits[hit_query_idx] += 1
             matches["search_time"] = end - start
             results.append(matches)
         print(f"Query hits: {query_hits}")
