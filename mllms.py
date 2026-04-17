@@ -476,8 +476,8 @@ class NERPatternSimilarExamples(ExampleMatchingStrategy):
 
 
 class PromptTemplate(ABC):
-    def __init__(self, template: str, 
-                 examples_prefix = "Consider the following examples:\n", 
+    def __init__(self, template: str,
+                 examples_prefix = "Consider the following examples:\n",
                  example_template = "Address: %(address)s\n%(example)s\n"):
         self.template = template
         self.examples_prefix = examples_prefix
@@ -485,7 +485,7 @@ class PromptTemplate(ABC):
 
     def make_prompt(self, address: str, examples : list[tuple[str, dict]]) -> dict:
         formatted_examples = [
-            self.example_template % {"address": addr, "example": self.format_example(example)} 
+            self.example_template % {"address": addr, "example": self.format_example(example)}
             for addr, example in examples
         ]
         if len(formatted_examples) > 0:
@@ -495,13 +495,7 @@ class PromptTemplate(ABC):
         template_parameters = {"address": address, "examples": examples}
         return self.template % template_parameters
 
-    @abstractmethod
-    def format_example(self, example) -> str:
-        raise Exception("Not implemented")
 
-    @abstractmethod
-    def parse_output(self, response: str, original_address: str) -> dict:
-        raise Exception("Not implemented")
 
 def extract_json_block(model_response : str):
     limit_chars = [('{', '}'), ('[', ']'), ('"', '"')]
@@ -543,7 +537,7 @@ def extract_tuples(model_response : str, separator=":"):
 class JsonDictPromptTemplate(PromptTemplate):
     def format_example(self, example):
         return "```json" + json.dumps(example, ensure_ascii=False) + "```"
-    
+
     def parse_output(self, response, original_address):
         try:
             json_str = extract_json_block(response)
@@ -555,7 +549,47 @@ class JsonDictPromptTemplate(PromptTemplate):
             result_builder.add_part(k, v)
         data = result_builder.build()
         return data
-    
+
+
+class InducedRulesJsonDictPromptTemplate(JsonDictPromptTemplate):
+    """JsonDictPromptTemplate that injects cluster-specific induced rules per address.
+
+    The template string must contain a ``%(rules)s`` placeholder in addition to
+    the standard ``%(address)s`` and ``%(examples)s``.  At inference time
+    ``rule_deductor.get_rules(address)`` is called; the result (or empty string)
+    replaces ``%(rules)s`` before the prompt is sent to the LLM.
+    """
+
+    def __init__(
+        self,
+        template: str,
+        rule_deductor,
+        rules_header: str = "Additional cluster-specific rules:\n",
+        **kwargs,
+    ):
+        super().__init__(template, **kwargs)
+        self.rule_deductor = rule_deductor
+        self.rules_header = rules_header
+
+    def make_prompt(self, address: str, examples: list[tuple[str, dict]]) -> str:
+        rules_text = self.rule_deductor.get_rules(address)
+        rules_block = (self.rules_header + rules_text + "\n") if rules_text else ""
+
+        formatted_examples = [
+            self.example_template % {"address": addr, "example": self.format_example(ex)}
+            for addr, ex in examples
+        ]
+        examples_str = (
+            self.examples_prefix + "".join(formatted_examples)
+            if formatted_examples else ""
+        )
+        return self.template % {
+            "address": address,
+            "examples": examples_str,
+            "rules": rules_block,
+        }
+
+
 class JSONTuplesPromptTemplate(PromptTemplate):
     def __init__(self, template: str, 
                  examples_prefix = "Consider the following examples:\n", 
@@ -674,6 +708,7 @@ class LLMAddressParsingModel:
 class LlamaAddressParsingModel(LLMAddressParsingModel):
     pass
 
+
 class QwenAddressParsingModel(LLMAddressParsingModel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -714,5 +749,62 @@ class QwenAddressParsingModel(LLMAddressParsingModel):
                 }]
             }
         ]
-    
 
+
+# ---------------------------------------------------------------------------
+# Logprob confidence mixin
+# ---------------------------------------------------------------------------
+
+class WithLogprobsMixin:
+    """Adds per-field confidence scores via teacher-forcing logprobs.
+
+    Subclasses must implement _get_prompt_string(conversation) -> str
+    returning the exact string passed to the tokenizer (after chat-template
+    application).  parse_addresses() attaches a '___confidence' key to every
+    output dict.
+    """
+
+    def _get_prompt_string(self, conversation) -> str:
+        raise NotImplementedError
+
+    def parse_addresses(self, addresses: list[str]) -> list[dict]:
+        from logprob_confidence import attach_confidence
+
+        bulk_examples = self.example_strategy.bulk_find_examples(addresses)
+        conversations = [
+            self._make_conversation(addr, examples)
+            for addr, (examples, _) in zip(addresses, bulk_examples)
+        ]
+        bulk_examples_metadata = [meta for _, meta in bulk_examples]
+        result = self._invoke_model(conversations)
+
+        responses = []
+        for conv_out, addr, meta, conv_in in zip(
+            result, addresses, bulk_examples_metadata, conversations
+        ):
+            parsed = self._parse_output(
+                conv_out, original_address=addr, example_metadata=meta
+            )
+            prompt_str = self._get_prompt_string(conv_in)
+            generated_text = self._get_response(conv_out)
+            attach_confidence(self, prompt_str, generated_text, parsed)
+            responses.append(parsed)
+
+        return responses
+
+
+class LlamaWithLogprobs(WithLogprobsMixin, LlamaAddressParsingModel):
+    def _get_prompt_string(self, conversation) -> str:
+        return self.pipe.tokenizer.apply_chat_template(
+            conversation, tokenize=False, add_generation_prompt=True
+        )
+
+
+class QwenWithLogprobs(WithLogprobsMixin, QwenAddressParsingModel):
+    def _get_prompt_string(self, conversation) -> str:
+        return self.pipe.tokenizer.apply_chat_template(
+            conversation,
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=False,
+        )

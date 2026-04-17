@@ -1,29 +1,22 @@
 """
 Unified BZK address-parsing inference runner.
 
-────────────────────────────────────────────────────────────────────────────────
-QUICK EXAMPLES
-────────────────────────────────────────────────────────────────────────────────
-
-Reproduce Llama embedding-only baseline:
+Llama embedding-only baseline:
   uv run python run.py --strategy embedding
 
 Hybrid (NER pattern + XLM-RoBERTa embedding) with extraction rules, Llama:
-  uv run python run.py --strategy hybrid --pattern-type ner \\
-      --embedding-model hm-haitham/xlm-roberta-large-address-parser \\
+  uv run python run.py --strategy hybrid \
+      --embedding-model hm-haitham/xlm-roberta-large-address-parser \
       --prompt-variant rules --fallback-threshold 0.92
 
 Run on test split:
   uv run python run.py --strategy hybrid --pattern-type ner --split test
 
-Force rerun even if cached predictions exist:
-  uv run python run.py --strategy hybrid --force-rerun
 """
 
 import argparse
 import datetime
 import json
-import re
 import time
 from pathlib import Path
 
@@ -31,9 +24,21 @@ import pandas as pd
 import torch
 from tqdm import tqdm
 
+from sentence_transformers import SentenceTransformer
+from sentence_transformers import models as st_models
+from mllms import (
+    SimilarExamples, NERPatternSimilarExamples,
+    HybridSimilarExamples, FallbackExamplesStrategy,
+    LlamaAddressParsingModel, JsonDictPromptTemplate, 
+    InducedRulesJsonDictPromptTemplate
+)
+
+from rule_induction import RuleInducer, RuleDeductor
+
+
 from utils import compare_preds
 
-# ── Parameter registry ────────────────────────────────────────────────────────
+# Parameter registry 
 
 TOTAL_BZK_CARDS     = 2_000_000
 ENTITIES_TO_PREDICT = ["HouseNumber", "StreetName", "City", "District", "State", "Country"]
@@ -49,7 +54,7 @@ _EMBED_ALIASES = {
     "hm-haitham/xlm-roberta-large-address-parser": "xlmroberta",
 }
 
-# ── Prompt templates ──────────────────────────────────────────────────────────
+# Prompt templates
 
 _PROMPT_BASE = (
     "You are a german archivist handling the digitalization of german documents from the "
@@ -82,7 +87,7 @@ _PROMPT_RULES_SUFFIX = (
     "'gefallen'), return all fields empty.\n"
 )
 
-# ── CLI ───────────────────────────────────────────────────────────────────────
+# CLI 
 
 def parse_args():
     p = argparse.ArgumentParser(
@@ -91,7 +96,7 @@ def parse_args():
         epilog=__doc__,
     )
 
-    # ── Inference model ────────────────────────────────────────────────────
+    # Inference model 
     p.add_argument(
         "--inference-model", default="meta-llama/Meta-Llama-3-8B-Instruct",
         metavar="HF_MODEL_ID",
@@ -118,7 +123,7 @@ def parse_args():
         ),
     )
 
-    # ── Few-shot example strategy ──────────────────────────────────────────
+    # Few-shot example strategy 
     p.add_argument(
         "--strategy", default="hybrid",
         choices=["embedding", "pattern", "hybrid"],
@@ -142,7 +147,7 @@ def parse_args():
         ),
     )
 
-    # ── Embedding model ────────────────────────────────────────────────────
+    # Embedding model 
     p.add_argument(
         "--embedding-model", default="multi-qa-mpnet-base-dot-v1",
         metavar="HF_MODEL_ID",
@@ -154,7 +159,7 @@ def parse_args():
         ),
     )
 
-    # ── Pattern strategy ───────────────────────────────────────────────────
+    # Pattern strategy 
     p.add_argument(
         "--ner-model-dir", default="models/ner_bzk",
         metavar="DIR",
@@ -164,16 +169,37 @@ def parse_args():
         ),
     )
 
-    # ── Prompt variant ─────────────────────────────────────────────────────
+    # Prompt variant 
     p.add_argument(
         "--prompt-variant", default="rules",
-        choices=["base", "rules"],
+        choices=["base", "rules", "induced"],
         help=(
-            "Prompt template variant."
+            "Prompt template variant.\n"
+            "  base    — system prompt only, no extraction rules\n"
+            "  rules   — system prompt + static extraction rules (default)\n"
+            "  induced — static rules + cluster-specific induced rules injected\n"
+            "            per address (requires --induced-rules)"
+        ),
+    )
+    p.add_argument(
+        "--induced-rules", default=None,
+        metavar="JSON_FILE",
+        help=(
+            "Path to induced_rules.json produced by induce_rules.py.  "
+            "Required when --prompt-variant induced is used."
+        ),
+    )
+    p.add_argument(
+        "--induced-rules-min-sim", type=float, default=0.0,
+        metavar="FLOAT",
+        help=(
+            "Minimum hybrid similarity to the cluster representative required "
+            "before injecting its rules into the prompt.  0.0 = always inject "
+            "(default)."
         ),
     )
 
-    # ── Fallback strategy ──────────────────────────────────────────────────
+    # Fallback strategy 
     p.add_argument(
         "--fallback-threshold", type=float, default=0.92,
         metavar="FLOAT",
@@ -184,7 +210,7 @@ def parse_args():
         ),
     )
 
-    # ── Data / output ──────────────────────────────────────────────────────
+    # Data / output
     p.add_argument(
         "--split", default="val",
         choices=["val", "test"],
@@ -203,7 +229,7 @@ def parse_args():
     return p.parse_args()
 
 
-# ── Config name & output paths ────────────────────────────────────────────────
+# Config name & output paths
 
 def build_config_name(args) -> str:
     model_alias  = _MODEL_ALIASES.get(args.inference_model, args.inference_model.split("/")[-1])
@@ -223,12 +249,14 @@ def build_config_name(args) -> str:
 
     if args.prompt_variant == "rules":
         parts.append("rules")
+    elif args.prompt_variant == "induced":
+        parts.append("induced")
     if args.fallback_threshold > 0:
         parts.append(f"fb{args.fallback_threshold:.2f}".replace(".", ""))
     return "_".join(parts)
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# Helpers 
 
 def format_time(seconds):
     seconds = round(seconds)
@@ -275,19 +303,16 @@ def per_field_metrics(preds_df, labels_df, cols, metric="f1"):
     }
 
 
-# ── Strategy builders ─────────────────────────────────────────────────────────
+# Strategy builders 
 
 def build_embedding_model(args, device):
     """Return a SentenceTransformer for the chosen embedding model."""
-    from sentence_transformers import SentenceTransformer
-
     if args.embedding_model == "multi-qa-mpnet-base-dot-v1":
         print(f"Building embedding model: {args.embedding_model}")
         return SentenceTransformer(args.embedding_model, device=str(device))
 
     # Token-classifier models 
     print(f"Building sentence encoder from {args.embedding_model} (mean pooling)...")
-    from sentence_transformers import models as st_models
     word_model   = st_models.Transformer(args.embedding_model)
     pooling      = st_models.Pooling(
         word_model.get_word_embedding_dimension(), pooling_mode_mean_tokens=True
@@ -297,10 +322,6 @@ def build_embedding_model(args, device):
 
 def build_example_strategy(args, train_df, device):
     """Instantiate the example-selection strategy from parsed args."""
-    from mllms import (
-        SimilarExamples, NERPatternSimilarExamples,
-        HybridSimilarExamples, FallbackExamplesStrategy,
-    )
 
     n = args.num_examples
 
@@ -311,7 +332,7 @@ def build_example_strategy(args, train_df, device):
             example_labels=train_df,
             num_examples=n,
             labels_to_include=ENTITIES_TO_PREDICT,
-            embeeding_model=sent_model,
+            embedding_model=sent_model,
             device=device,
         )
 
@@ -336,7 +357,7 @@ def build_example_strategy(args, train_df, device):
             example_labels=train_df,
             num_examples=n,
             labels_to_include=ENTITIES_TO_PREDICT,
-            embeeding_model=sent_model,
+            embedding_model=sent_model,
             device=device,
         )
         if not Path(args.ner_model_dir).exists():
@@ -369,24 +390,56 @@ def build_example_strategy(args, train_df, device):
     return strategy
 
 
-def build_prompt(args):
+def build_prompt(args, train_df=None):
     """Return the prompt template for the chosen variant."""
-    from mllms import JsonDictPromptTemplate
 
     entities_str = ", ".join(ENTITIES_TO_PREDICT + ["Other"])
+    base = _PROMPT_BASE.format(entities=entities_str)
+
     if args.prompt_variant == "base":
-        text = _PROMPT_BASE.format(entities=entities_str)
-    else:
-        # Insert rules block before the format instruction
-        base = _PROMPT_BASE.format(entities=entities_str)
-        text = base.replace(
-            "Format the output as a JSON object",
-            _PROMPT_RULES_SUFFIX + "Format the output as a JSON object",
-        )
-    return JsonDictPromptTemplate(text)
+        return JsonDictPromptTemplate(base)
+
+    # start from the static-rules template
+    static_rules_text = base.replace(
+        "Format the output as a JSON object",
+        _PROMPT_RULES_SUFFIX + "Format the output as a JSON object",
+    )
+
+    if args.prompt_variant == "rules":
+        return JsonDictPromptTemplate(static_rules_text)
+
+    # "induced": add %(rules)s slot between the static rules and the examples
+    if args.induced_rules is None:
+        raise ValueError("--induced-rules <json_file> is required for --prompt-variant induced")
+    if train_df is None:
+        raise ValueError("train_df must be provided to build_prompt for induced variant")
+
+    induced_rules = json.loads(Path(args.induced_rules).read_text(encoding="utf-8"))
+
+    # Build the inducer 
+    inducer = RuleInducer(
+        addresses=train_df["FullAddress"].fillna("").astype(str),
+        labels_df=train_df[ENTITIES_TO_PREDICT].fillna(""),
+        labels_to_include=ENTITIES_TO_PREDICT,
+        ner_model_dir=args.ner_model_dir,
+        embedding_model=args.embedding_model,
+        distance_threshold=getattr(args, "induction_distance_threshold", 0.3),
+    )
+    deductor = RuleDeductor(
+        inducer=inducer,
+        induced_rules=induced_rules,
+        min_similarity=args.induced_rules_min_sim,
+    )
+
+    # Insert the %(rules)s slot just before %(examples)s
+    induced_template = static_rules_text.replace(
+        "%(examples)s",
+        "%(rules)s%(examples)s",
+    )
+    return InducedRulesJsonDictPromptTemplate(induced_template, rule_deductor=deductor)
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# Main
 
 def main():
     args = parse_args()
@@ -400,7 +453,7 @@ def main():
     print(f"Split:   {args.split}")
     print(f"Outputs: {preds_path} / {metrics_path}")
 
-    # ── Load data ──────────────────────────────────────────────────────────
+    # Load data 
     csv_args = dict(keep_default_na=False, dtype=str, na_values=[""])
     train_df = pd.read_csv("open_data/bzkopen_addresses_train.csv", **csv_args)
     val_df   = pd.read_csv("open_data/bzkopen_addresses_val.csv",   **csv_args)
@@ -412,7 +465,7 @@ def main():
     addr_per_card = sum(n_addrs[s] / n_cards[s] for s in n_cards)
     estimated_total = TOTAL_BZK_CARDS * addr_per_card
 
-    # ── Load or run predictions ────────────────────────────────────────────
+    # Load or run predictions 
     if preds_path.exists() and not args.force_rerun:
         print(f"Loading cached predictions from {preds_path}...")
         with open(preds_path) as f:
@@ -423,12 +476,12 @@ def main():
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"Device: {device}")
 
-        prompt   = build_prompt(args)
+        prompt   = build_prompt(args, train_df=train_df)
         strategy = build_example_strategy(args, train_df, device)
 
         addresses = eval_df["FullAddress"].tolist()
 
-        from mllms import LlamaAddressParsingModel
+        
         model = LlamaAddressParsingModel(
             model_name=args.inference_model,
             prompt=prompt,
@@ -452,7 +505,7 @@ def main():
                       f, ensure_ascii=False)
         print(f"Saved predictions → {preds_path}")
 
-    # ── Evaluate ───────────────────────────────────────────────────────────
+    # Evaluate 
     preds_df     = pd.DataFrame(preds)
     output_lines = []
 
