@@ -173,8 +173,6 @@ ORDER BY
 ASC
 """
 
-    # TODO materializing some sub queries and views might speed up the query significantly
-    # TODO query size limit is arbitrary
     query = f"""
 WITH
 query_prep AS (
@@ -259,7 +257,8 @@ class GeonamesSearch(contextlib.AbstractContextManager):
             self,
         parts : list[str],
         entity_type : Optional[EntityType] = None,
-        country_hints : Optional[list[list[str]]] = None
+        country_hints : Optional[list[list[str]]] = None,
+        fall_to_all_entities : bool = False,
     ) -> list[pd.DataFrame]:
         # convert in case it's a series
         if not isinstance(parts, list):
@@ -269,15 +268,19 @@ class GeonamesSearch(contextlib.AbstractContextManager):
         # No strip_accents in python. Additionally, using the exact same normalization function might avoid problems
         cleaned_strings = self.connection.execute(
             "SELECT [strip_accents(nfc_normalize(x)) FOR x IN $1] AS cleaned_parts",
-            [parts]
+            [[p or "" for p in parts]]
         ).fetchone()[0]
         query = build_closest_matches_query(entity_type, self.topk, self.threshold)
         reduced_query = build_closest_matches_query(entity_type, self.topk, self.threshold, table="reduced_candidate_names")
         exact_query = build_closest_matches_query(entity_type, self.topk, 0, table="candidate_names")
         exact_reduced_query = build_closest_matches_query(entity_type, self.topk, 0, table="reduced_candidate_names")
+        all_types_query = build_closest_matches_query(None, self.topk, self.threshold)
         results = []
         query_hits = defaultdict(int)
         for part, cleaned, country_hint in zip(parts, cleaned_strings, country_hints):
+            if pd.isna(part) or part.strip() == "":
+                results.append(pd.DataFrame())
+                continue
             abbreviation_regex = abbreviation_pattern_to_regex(cleaned)
             matches = []
             start = time.monotonic()
@@ -285,19 +288,19 @@ class GeonamesSearch(contextlib.AbstractContextManager):
                 self.connection,
                 [
                     (country_hint is not None, exact_query, [part, country_hint, abbreviation_regex]),
-                    (entity_type != EntityType.Country, exact_reduced_query, [part, None, abbreviation_regex]),
                     (True, exact_query, [part, None, abbreviation_regex]),
+                    (entity_type != EntityType.Country, exact_reduced_query, [part, None, abbreviation_regex]),
                     (country_hint is not None, query, [part, country_hint, abbreviation_regex]),
                     (entity_type != EntityType.Country, reduced_query, [part, None, abbreviation_regex]),
                     (True, query, [part, None, abbreviation_regex]),
+                    (fall_to_all_entities, all_types_query, [part, None, abbreviation_regex])
                 ]
             )
             end = time.monotonic()
             assert isinstance(matches, pd.DataFrame)
             query_hits[hit_query_idx] += 1
-            matches["search_time"] = end - start
+            matches.insert(len(matches.columns), "search_time", end - start)
             results.append(matches)
-        print(f"Query hits: {query_hits}")
         return results
 
     def link_parsed_addresses(self, addresses : pd.DataFrame | list[dict]) -> pd.DataFrame:
@@ -338,8 +341,91 @@ class GeonamesSearch(contextlib.AbstractContextManager):
                             hints = country_hints.setdefault(country, [])
                             hints.append(match["country_code"])
                     print(f"Country hints set for {len(country_hints)} countries")
-        return pd.concat(matches).sort_index()
+        result = pd.concat(matches).sort_index()
+        return result
 
+    def find_parents(self, addr_matches : pd.DataFrame, match : pd.Series) -> list[pd.DataFrame]:
+        """
+        Finds parent matches according to geographical hierarchy for the given match.
+        """
+        # TODO continue later
+        raise NotImplementedError()
+        parents = []
+        addr_matches = addr_matches[addr_matches["entity_type"] != match["entity_type"]]
+        admin_cols = ["country_code"] + [f"admin{n}_code" for n in range(1, 6)]
+        #possible_admin_matches = addr_matches[admin ]
+        # Admin hierarchy
+        admin_cols = ["country_code"] + [f"admin{n}_code" for n in range(1, 6)]
+        admin_masks = [addr_matches["entity_type"] == "Country"] + [
+            (addr_matches["feature_code"].str.startswith(f"ADM{n}") & (addr_matches["entity_type"] != "Country")) for n in range(1, 6)
+        ]
+        for i, level_i_mask in enumerate(admin_masks):
+            code_cols = admin_cols[:i+1]
+            match_mask = (addr_matches["feature_class"] == "A") & level_i_mask & (addr_matches[code_cols] == match[code_cols]).all(axis=1)
+            parents.append(addr_matches[match_mask])
+        
+        parent_city_ids = match["parentCityIds"]
+        if pd.isna(parent_city_ids) is not True: # isna will output a bool array when given an array
+            parents.append(addr_matches[addr_matches["geonameId"].astype(str).isin(parent_city_ids)])
+        parent_region_ids = match["parentRegionIds"]
+        if pd.isna(parent_region_ids) is not True:
+            parents.append(addr_matches[addr_matches["geonameId"].astype(str).isin(parent_region_ids)])
+        return parents        
+
+    def group_hierarchical_matches(self, matches : pd.DataFrame) -> pd.DataFrame:
+        return matches.groupby("input_row").apply(self.group_address_hierarchical_matches).reset_index(level=2, drop=True)
+
+    def group_address_hierarchical_matches(self, addr_matches : pd.DataFrame) -> pd.DataFrame:
+        """
+        Groups different matches of the same address for different entity types that are hierarchically dependent.
+        """
+        orig_index_levels = addr_matches.index.names
+        addr_matches = addr_matches.reset_index()
+        ungrouped_entities = set(addr_matches["geonameId"])
+        matched_entity_types = [EntityType[entity_type] for entity_type in addr_matches["entity_type"].unique()]
+        matched_entity_types.sort(reverse=True)
+        grouped_matches : list[tuple[tuple[int, float], pd.DataFrame]] = []
+        for entity_type in matched_entity_types:
+            for _, match in addr_matches[addr_matches["entity_type"] == entity_type.entity_type].iterrows():
+                if match["geonameId"] not in ungrouped_entities:
+                    continue
+                ungrouped_entities.remove(match["geonameId"])
+                parents = self.find_parents(addr_matches, match)
+                for parent in parents:
+                    ungrouped_entities.difference_update(parent["geonameId"])
+                hierarchy_group = pd.concat([match.to_frame().T, *parents])
+                mean_rank = hierarchy_group["entity_rank"].mean()
+                grouped_matches.append(((-len(hierarchy_group), mean_rank), hierarchy_group))
+            if not ungrouped_entities:
+                break
+        grouped_matches.sort(key=lambda x: x[0])
+        groups = []
+        group_rank = 0
+        last_sort_key = None
+        for i, (sort_key, group) in enumerate(grouped_matches):
+            group.insert(0, "group_id", i)
+            if sort_key != last_sort_key:
+                group_rank = i + 1
+                last_sort_key = sort_key
+            group.insert(1, "group_rank", group_rank)
+            groups.append(group)
+        result = pd.concat(groups)
+        result.set_index(["group_id"] + orig_index_levels, inplace=True)
+        return result
+
+    def disambiguate(self, matches : pd.DataFrame, difference_threshold : float = 0) -> pd.DataFrame:
+        """
+        Returns the best match for each input row unless there are ties.
+        """
+        # TODO continue later
+        raise NotImplementedError()
+        if "group_id" in matches.index.names:
+            matches_per_input = matches.groupby("input_row")
+            best_per_input = matches_per_input.first()
+            unambiguous = matches_per_input.transform(
+                lambda group: group[(group["group_rank"] == 1) & ((group["cleaned_distance"].mean()))]
+            )
+            
 
     def close(self):
         self.connection.close()

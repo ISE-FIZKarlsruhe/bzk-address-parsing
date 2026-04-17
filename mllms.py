@@ -665,7 +665,7 @@ class LLMAddressParsingModel:
     def _invoke_model(self, conversations):
         return self.pipe(conversations, **self.generate_kwargs)
     
-    def parse_addresses(self, addresses : list[str]) -> str:
+    def parse_addresses(self, addresses : list[str]) -> list[dict[str, str]]:
         bulk_examples = self.example_strategy.bulk_find_examples(addresses)
         messages = [
             self._make_conversation(address, address_examples) 
