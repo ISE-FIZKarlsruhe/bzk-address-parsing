@@ -3,12 +3,12 @@ import mllms
 import argparse
 import re
 import pandas as pd
-from typing import Iterable
+from typing import Iterable, Literal
 from pathlib import Path
 from tqdm.contrib.logging import tqdm_logging_redirect as tqdm
 import traceback
-import dataclasses
 import logging
+import json
 
 PROMPT="""
 # Role
@@ -53,11 +53,51 @@ PLACE_COLS = ['ApplicantBirthPlace', 'ApplicantCurrentAddress', 'VictimBirthPlac
 N_SHOTS = 15
 REGEX = re.compile(r"^(?P<City>\w+)(\s*/\s*(?P<Country>\w+))?$")
 
-@dataclasses.dataclass
 class Stats:
-    addresses : int = 0
-    parsed : int = 0
-    corrected : int = 0
+    def __init__(self):
+        index = pd.MultiIndex.from_product([PLACE_COLS, ["", "City", "Country"]], names=["field", "subfield"])
+        self.df = pd.DataFrame(
+            0, index=index, columns=["addresses", "parsed", "corrected"], dtype=int
+        )
+        self.n_cards = 0
+    
+    def load(self, path):
+        if Path(path).exists():
+            with open(path) as f:
+                obj = json.load(f)
+            self.n_cards = obj.pop("n_cards", 0)
+            self.df = pd.DataFrame.from_dict(obj, orient="tight", dtype=int)
+
+    def save(self, path):
+        obj = self.df.to_dict(orient="tight")
+        obj["n_cards"] = self.n_cards
+        with open(path, "w") as f:
+            json.dump(obj, f)
+
+    def update(self, status : pd.DataFrame, n_cards : int):
+        self.n_cards += n_cards
+        status = status.groupby(level=1)
+        for field, group in status:
+            assert set(group.columns) == {"City", "Country"}, f"Unexpected columns in status: {group.columns}"
+            for subfield in ["City", "Country"]:
+                self.df.at[(field, subfield), "addresses"] += len(group)
+                self.df.at[(field, subfield), "parsed"] += (group[subfield].isin(["matched", "corrected"])).sum()
+                self.df.at[(field, subfield), "corrected"] += (group[subfield] == "corrected").sum()
+            self.df.at[(field, ""), "parsed"] += (group.isin(["matched", "corrected"])).any(axis=1).sum()
+            self.df.at[(field, ""), "corrected"] += (group == "corrected").any(axis=1).sum()
+            self.df.at[(field, ""), "addresses"] += len(group)
+
+    def display_stats(self) -> pd.DataFrame:
+        df = self.df.copy()
+        for subfield in ["", "City", "Country"]:
+            df.loc[("Total", subfield), :] = df.xs(subfield, level="subfield").sum(min_count=1)
+        df["parsed_ratio"] = (df["parsed"] / df["addresses"]).map(lambda x: f"{x:.0%}" if pd.notna(x) else "0%")
+        df["corrected_ratio"] = (df["corrected"] / df["parsed"]).map(lambda x: f"{x:.0%}" if pd.notna(x) else "0%")
+        df["address_ratio"] = (df["addresses"] / self.n_cards).map(lambda x: f"{x:.0%}" if pd.notna(x) else "0%")
+        df.loc[pd.IndexSlice[:, "City"], "addresses"] = pd.NA
+        df.loc[pd.IndexSlice[:, "Country"], "addresses"] = pd.NA
+        df[["addresses", "parsed", "corrected"]] = df[["addresses", "parsed", "corrected"]].map(lambda x: f"{x:_.0f}" if pd.notna(x) else "")
+        return df
 
 class BasicRegexAddressParser:
     def __init__(self, fallback_parser = None):
@@ -129,41 +169,45 @@ def parse_and_correct(
         search_db : geonames_db_search.GeonamesSearch, 
         stats : Stats
     ):
-    addresses = df[PLACE_COLS].stack().fillna("")
-    stats.addresses += len(addresses)
+    addresses = df[PLACE_COLS].stack().dropna()
     parsed_addresses = pd.DataFrame(
         address_parser.parse_addresses(addresses), 
         index=addresses.index, dtype=str
     )[["City", "Country"]]
-    db_matches = search_db.link_entities(parsed_addresses["Country"])
+    db_matches = search_db.link_entities(parsed_addresses["Country"], name_only=True, entity_type=geonames_db_search.EntityType.Country)
     country_hints = [None] * len(parsed_addresses)
+    status = pd.DataFrame("unmatched", index=parsed_addresses.index, columns=["City", "Country"])
     for i, idx, row_matches in zip(range(len(parsed_addresses)), parsed_addresses.index, db_matches):
         if len(row_matches) == 1:
-            if parsed_addresses.at[idx, "Country"] != row_matches.at[0, "alternateName"]:
-                parsed_addresses.at[idx, "Country"] = row_matches.at[0, "alternateName"]
-                stats.corrected += 1
+            parsed_addresses.at[idx, "Country"] = row_matches.at[0, "nfc_alt_name"]
+            if row_matches.at[0, "nfc_query"] != row_matches.at[0, "nfc_alt_name"]:
+                status.at[idx, "Country"] = "corrected"
+            else:
+                status.at[idx, "Country"] = "matched"
             country_hints[i] = row_matches.at[0, "country_code"]
         else:
             parsed_addresses.at[idx, "Country"] = None
-    db_matches = search_db.link_entities(parsed_addresses["City"], country_hints=country_hints)
+    db_matches = search_db.link_entities(parsed_addresses["City"], country_hints=country_hints, name_only=True, entity_type=geonames_db_search.EntityType.City)
     for idx, row_matches in zip(parsed_addresses.index, db_matches):
         if len(row_matches) == 1:
-            if parsed_addresses.at[idx, "City"] != row_matches.at[0, "alternateName"]:
-                parsed_addresses.at[idx, "City"] = row_matches.at[0, "alternateName"]
-                stats.corrected += 1
+            parsed_addresses.at[idx, "City"] = row_matches.at[0, "nfc_alt_name"]
+            if row_matches.at[0, "nfc_query"] != row_matches.at[0, "nfc_alt_name"]:
+                status.at[idx, "City"] = "corrected"
+            else:
+                status.at[idx, "City"] = "matched"
         else:
             parsed_addresses.at[idx, "City"] = None
-    stats.parsed += parsed_addresses.notna().any(axis=1).sum()
-    parsed_addresses = parsed_addresses.unstack().swaplevel(axis=1)
+    stats.update(status, len(df))
+    parsed_addresses = parsed_addresses.unstack(sort=False).swaplevel(axis=1).sort_index(axis=1)
     parsed_addresses.columns = ["_".join(a) for a in parsed_addresses.columns.to_flat_index()]
-    return df.merge(
+    return df[["filename"]].merge(
         parsed_addresses, 
         left_index=True, right_index=True)
+
 
 def main(argv=None):
     arg_parser = argparse.ArgumentParser()
     arg_parser.add_argument("input_file_directory", type=str)
-    arg_parser.add_argument("-k", "--topk", type=int, default=1)
     arg_parser.add_argument("-t", "--threshold", type=int, default=2)
     arg_parser.add_argument("-P", "--file-pattern", type=str, default="1*.jsonl")
     arg_parser.add_argument("--input-chunk-size", type=int, default=100)
@@ -175,7 +219,7 @@ def main(argv=None):
     args = arg_parser.parse_args(argv)
     
     address_parser = load_model(args)
-    search_db = geonames_db_search.GeonamesSearch()
+    search_db = geonames_db_search.GeonamesSearch(threshold=args.threshold, topk=1)
 
     input_dir = Path(args.input_file_directory)
     assert input_dir.is_dir(), f"{args.input_file_directory} is not a valid directory"
@@ -189,7 +233,9 @@ def main(argv=None):
     files.sort()
     row_counts = [len(f.read_text().splitlines()) for f in files]
     total_rows = sum(row_counts)
+    stats_file = output_dir / "stats.json"
     stats = Stats()
+    stats.load(stats_file)
 
     logging.basicConfig(
         level=logging.INFO, 
@@ -211,7 +257,8 @@ def main(argv=None):
                     to_write = parse_and_correct(df, address_parser, search_db, stats)
                     pbar.update(len(df))
                     to_write.to_json(out_file, orient="records", lines=True, mode="a")
-                logging.info(f"Finished processing {file}. Stats so far: {stats}")
+                logging.info(f"Finished processing {file}. Stats so far:\n{stats.display_stats()}")
+                stats.save(stats_file)
             except Exception as e:
                 if str(e) == "Query interrupted": raise
                 logging.exception(f"Error processing {file}: {e}")

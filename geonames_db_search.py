@@ -85,7 +85,8 @@ SELECT
         'Neighborhood' : (
             feature_class = 'P'
         )
-    } AS entity_type_map
+    } AS entity_type_map,
+    geonameId AS partition_key
 FROM allNames 
     NATURAL JOIN simplifiedGeonames 
     JOIN countryInfo ON (country_code = ISO)
@@ -100,11 +101,19 @@ WHERE
     alternateName != '' AND
     clean_alt_name != '';
 
+
+
 CREATE TEMP TABLE reduced_candidate_names AS
 SELECT candidate_names.*
 FROM candidate_names JOIN countryInfo ON (country_code = ISO)
 WHERE 
     country_code IN ('US', 'IL', 'DE') OR 'DE' IN neighbours;
+
+CREATE TEMP TABLE names_only AS
+SELECT DISTINCT nfc_alt_name, clean_alt_name, isPreferredName, feature_class, feature_code, country_code, entity_type_map, nfc_alt_name AS partition_key FROM candidate_names;
+
+CREATE TEMP TABLE reduced_names_only AS
+SELECT DISTINCT nfc_alt_name, clean_alt_name, isPreferredName, feature_class, feature_code, country_code, entity_type_map, nfc_alt_name AS partition_key FROM reduced_candidate_names;
 
 CREATE TEMP MACRO filter_entity_type(tbl, entity_type) AS TABLE 
     SELECT * FROM query_table(tbl) WHERE entity_type_map[entity_type];
@@ -143,7 +152,7 @@ def build_closest_matches_query(
         entity_type : Optional[EntityType] = None,
         topk : int = 5,
         threshold : int | float = 3,
-        table : Literal["candidate_names", "reduced_candidate_names"] = "candidate_names"  
+        table : Literal["candidate_names", "reduced_candidate_names", "names_only", "reduced_names_only"] = "candidate_names"
     ):
     if isinstance(entity_type, str):
         entity_type = EntityType[entity_type]
@@ -204,7 +213,7 @@ ranked_matches AS(
             ELSE FALSE
         END AS may_be_abbreviation,
         ROW_NUMBER() OVER (
-            PARTITION BY geonameId 
+            PARTITION BY partition_key
 {textwrap.indent(ranking_order, ' ' * 4 * 3)}
             ) AS match_rank,
         candidates.* EXCLUDE (nfc_alt_name, clean_alt_name)
@@ -259,7 +268,15 @@ class GeonamesSearch(contextlib.AbstractContextManager):
         entity_type : Optional[EntityType] = None,
         country_hints : Optional[list[list[str]]] = None,
         fall_to_all_entities : bool = False,
+        name_only : bool = False
     ) -> list[pd.DataFrame]:
+        """
+        Links the given parts to entities in the database of the given type, 
+            optionally using country hints and falling back to searching with all entity types if no matches are found.
+        Returns a list of dataframes containing the matches for each part.
+
+        
+        """
         # convert in case it's a series
         if not isinstance(parts, list):
             parts = list(parts)
@@ -270,11 +287,15 @@ class GeonamesSearch(contextlib.AbstractContextManager):
             "SELECT [strip_accents(nfc_normalize(x)) FOR x IN $1] AS cleaned_parts",
             [[p or "" for p in parts]]
         ).fetchone()[0]
-        query = build_closest_matches_query(entity_type, self.topk, self.threshold)
-        reduced_query = build_closest_matches_query(entity_type, self.topk, self.threshold, table="reduced_candidate_names")
-        exact_query = build_closest_matches_query(entity_type, self.topk, 0, table="candidate_names")
-        exact_reduced_query = build_closest_matches_query(entity_type, self.topk, 0, table="reduced_candidate_names")
-        all_types_query = build_closest_matches_query(None, self.topk, self.threshold)
+        if name_only:
+            table, reduced_table = "names_only", "reduced_names_only"
+        else:
+            table, reduced_table = "candidate_names", "reduced_candidate_names"
+        query = build_closest_matches_query(entity_type, self.topk, self.threshold, table=table)
+        reduced_query = build_closest_matches_query(entity_type, self.topk, self.threshold, table=reduced_table)
+        exact_query = build_closest_matches_query(entity_type, self.topk, 0, table=table)
+        exact_reduced_query = build_closest_matches_query(entity_type, self.topk, 0, table=reduced_table)
+        all_types_query = build_closest_matches_query(None, self.topk, self.threshold, table=table)
         results = []
         query_hits = defaultdict(int)
         for part, cleaned, country_hint in zip(parts, cleaned_strings, country_hints):
