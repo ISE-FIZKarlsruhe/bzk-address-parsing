@@ -6,3 +6,8 @@ data/
 dumps/
 place_lookup_tables/
 venv/
+models/
+*.egg-info/
+.venv/
+geonames.duckdb
+geonames.duckdb.wal

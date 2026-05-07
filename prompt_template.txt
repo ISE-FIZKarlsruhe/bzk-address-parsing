@@ -1,4 +1,3 @@
-"""
 ## Task
 You are an expert in address parsing and historical geography.
 Your task is to annotate historical addresses by identifying and extracting their components.
@@ -34,7 +33,7 @@ Each extracted component must be classified into one of the following types:
 
 ### State 
 Do not classify the following as a state:
-- components preceded by district indicators (e.g., Krs. for Kreis)
+- components preceded by district indicators (Krs. for Kreis)
 - historical regions (e.g., Böhmen)
 - postal districts (e.g., London N.W.)
 - geographical regions (e.g., L.I.)
@@ -73,4 +72,3 @@ Annotate the components of the following address according to the rules above.
 
 Address:
 {address}
-"""
