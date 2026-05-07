@@ -31,7 +31,7 @@ import pandas as pd
 import torch
 from tqdm import tqdm
 
-from utils import compare_preds
+from modules.utils import compare_preds
 
 # ── Parameter registry ────────────────────────────────────────────────────────
 
@@ -297,7 +297,7 @@ def build_embedding_model(args, device):
 
 def build_example_strategy(args, train_df, device):
     """Instantiate the example-selection strategy from parsed args."""
-    from mllms import (
+    from modules.llms import (
         SimilarExamples, NERPatternSimilarExamples,
         HybridSimilarExamples, FallbackExamplesStrategy,
     )
@@ -371,7 +371,7 @@ def build_example_strategy(args, train_df, device):
 
 def build_prompt(args):
     """Return the prompt template for the chosen variant."""
-    from mllms import JsonDictPromptTemplate
+    from modules.llms import JsonDictPromptTemplate
 
     entities_str = ", ".join(ENTITIES_TO_PREDICT + ["Other"])
     if args.prompt_variant == "base":
@@ -428,7 +428,7 @@ def main():
 
         addresses = eval_df["FullAddress"].tolist()
 
-        from mllms import LlamaAddressParsingModel
+        from modules.llms import LlamaAddressParsingModel
         model = LlamaAddressParsingModel(
             model_name=args.inference_model,
             prompt=prompt,

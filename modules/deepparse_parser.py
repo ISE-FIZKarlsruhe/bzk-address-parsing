@@ -1,5 +1,5 @@
 import deepparse.parser
-from utils import ParsedAddressResultBuilder
+from modules.utils import ParsedAddressResultBuilder
 
 
 DEEPPARSE_LABEL_MAPPING = {

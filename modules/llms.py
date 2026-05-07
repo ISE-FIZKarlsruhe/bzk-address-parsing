@@ -4,7 +4,7 @@ Utility classes and functions for use with MLLMs for parsing addresses.
 import json
 import re
 from abc import ABC, abstractmethod
-from utils import ParsedAddressResultBuilder
+from modules.utils import ParsedAddressResultBuilder
 import transformers
 import sentence_transformers
 import pandas as pd

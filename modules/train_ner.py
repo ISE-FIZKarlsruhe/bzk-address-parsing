@@ -273,7 +273,7 @@ if __name__ == "__main__":
     else:
         augmented_df = None
         if args.augment:
-            from augmentation import GeoNamesLookup, augment_dataset
+            from modules.augmentation import GeoNamesLookup, augment_dataset
             print(f"Running data augmentation (n_augments={args.n_augments}, user={args.geonames_user})...")
             bzkopen_train = pd.read_csv(TRAIN_CSV, **CSV_READ_ARGS)
             geo = GeoNamesLookup(username=args.geonames_user)

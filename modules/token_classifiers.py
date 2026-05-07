@@ -1,5 +1,5 @@
 import json
-from utils import StrictMergeParsedResultBuilder, SEPARATOR_CHARS
+from modules.utils import StrictMergeParsedResultBuilder, SEPARATOR_CHARS
 import transformers
 from transformers.pipelines.token_classification import AggregationStrategy, TokenClassificationPipeline
 import numpy as np

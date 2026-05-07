@@ -1,4 +1,4 @@
-from utils import partial_levenshtein, levenshtein
+from modules.utils import partial_levenshtein, levenshtein
 
 
 def test_levenshtein():

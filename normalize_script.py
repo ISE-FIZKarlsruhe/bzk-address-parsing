@@ -1,5 +1,5 @@
-import geonames_db_search
-import mllms
+import modules.geonames_db_search as geonames_db_search
+import modules.llms as llms
 import argparse
 import re
 import pandas as pd
@@ -86,8 +86,8 @@ def load_model(args):
     llm_model = None
     if args.llm is not None:
         examples = pd.read_csv(args.example_pool, keep_default_na=False, dtype=str, na_values=[""])
-        example_strategy = mllms.HybridSimilarExamples(
-            embedding_strategy=mllms.SimilarExamples(
+        example_strategy = llms.HybridSimilarExamples(
+            embedding_strategy=llms.SimilarExamples(
                 num_examples=N_SHOTS,
                 similarity_threshold=0.35,
                 embedding_model="all-MiniLM-L6-v2",
@@ -95,7 +95,7 @@ def load_model(args):
                 example_labels=examples,
                 labels_to_include=["HouseNumber", "StreetName", "Neighborhood", "City", "Country"]
             ),
-            pattern_strategy=mllms.NERPatternSimilarExamples(
+            pattern_strategy=llms.NERPatternSimilarExamples(
                 example_addresses=examples["FullAddress"],
                 example_labels=examples,
                 num_examples=N_SHOTS,
@@ -105,13 +105,13 @@ def load_model(args):
             pool_size=N_SHOTS
         )
         if "Llamma" in args.llm:
-            llm_class = mllms.LLMAddressParsingModel
+            llm_class = llms.LLMAddressParsingModel
         elif "Qwen" in args.llm:
-            llm_class = mllms.QwenAddressParsingModel
+            llm_class = llms.QwenAddressParsingModel
         elif "Mistral" in args.llm:
-            llm_class = mllms.MistralAddressParsingModel
+            llm_class = llms.MistralAddressParsingModel
         elif "DeepSeek" in args.llm:
-            llm_class = mllms.DeepSeekAddressParsingModel
+            llm_class = llms.DeepSeekAddressParsingModel
         else: raise ValueError(f"Unknown model {args.llm}")
         llm_model = llm_class(
             model=args.llm,

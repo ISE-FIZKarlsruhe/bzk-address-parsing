@@ -5,9 +5,9 @@ Classes related to matching extracted place names to place names on the database
 # TODO rewrite everything
 from pathlib import Path
 import pandas as pd
-import utils
+import modules.utils as utils
 import duckdb
-import build_geonames_db
+import modules.build_geonames_db as build_geonames_db
 from typing import Optional, Literal, LiteralString
 import contextlib
 import enum
