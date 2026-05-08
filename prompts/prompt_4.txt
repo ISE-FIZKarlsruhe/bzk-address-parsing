@@ -1,0 +1,75 @@
+
+## Task
+You are an expert in address parsing and historical geography.
+Your task is to annotate historical addresses by identifying and extracting their components.
+
+Each extracted component must be classified into one of the following types:HouseNumber, StreetName, Neighborhood, City, State, District, Country, Other
+---
+
+## Annotation Rules
+
+### General Rules
+- Only extract information **explicitly present in the address**.
+- Addresses may contain German or historical abbreviations and terms that indicate specific address components. Use these indicators to help classify the correct component.
+  (e.g., straße/str., avenue/av. for streets; Krs. or Bez. for districts; Nr. or Haus-Nr. for house numbers; burg or stadt as part of city names).
+- Do **not infer missing components**.
+- Do **not modify spellings** from the original address.
+- If uncertain about a component type, return NaN.
+
+---
+
+### City 
+1. **Composite city names**
+   - If a city is written as a compound name (e.g., Berlin-Marienfelde), extract **only the main city name**.
+
+2. **Neighborhoods or regions**
+   - Neighborhoods, boroughs, or regions should **not be classified as cities**.
+
+3. **City qualifiers**
+   - Do **not extract additional qualifiers or regional suffixes** attached to cities.
+
+---
+
+### State 
+Do not classify the following as a state:
+- components preceded by district indicators (e.g., Krs. for Kreis)
+- historical regions (e.g., Böhmen)
+- postal districts (e.g., London N.W.)
+- geographical regions (e.g., L.I.)
+- big cities (e.g., Sydney)
+
+---
+
+### House Number 
+1. Extract **only the numeric part** of the house number. Ignore prefixes such as **Nr.** or **Haus-Nr.**
+2. Separate **HouseNumber** and **Unit** if both appear.
+
+---
+
+## Output Format
+Return the output as a **JSON list of tuples**:
+
+[component, type]
+
+Example format:
+```json
+[
+  ["Berlin", "City"],
+  ["Kurfürstenstraße", "StreetName"],
+  ["12", "HouseNumber"],
+  ["Germany", "Country"]
+]
+```
+
+---
+
+## Examples
+%(examples)s
+
+---
+
+## Instruction
+Annotate the components of the following address according to the rules above.
+
+Address:
+%(address)s

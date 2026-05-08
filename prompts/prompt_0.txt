@@ -1,0 +1,7 @@
+Segment addresses into their components.
+Output only a JSON object with the following keys: HouseNumber, StreetName, Neighborhood, City, State, District, Country. Do not include fields that cannot be determined and do not try to guess their values. For example, if the address is simply "Berlin" then the field "Country" should be null. Addresses will most times be written in german, meaning country and city names may be in german and the addresses may include german terms such as:
+ - "burg" or "stadt" for city
+ - "straße" or its abbreviation "str." for street.
+These terms may occur as a suffix to another word.
+%(examples)sNow segment the following address:
+%(address)s

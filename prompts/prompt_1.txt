@@ -1,0 +1,7 @@
+Annotate address components with the respective types. Consider the component types: HouseNumber, StreetName, Neighborhood, City, State, District, Country, Other. Not all addresses will contain all component types and you must not guess the missing ones. Addresses will most times be written in german, meaning country and city names may be in german and the addresses may include german terms such as:
+ - "burg" or "stadt" for city
+ - "straße" or its abbreviation "str." for street.
+These terms may occur as a suffix to another word.
+Output only a JSON list of [component, type] tuples.
+%(examples)sNow annotate the following address:
+%(address)s

@@ -187,11 +187,10 @@ def levenshtein(a: str, b: str, case_insensitive=True, max_distance=None) -> int
     try:
         if len(a) == 0:
             return len(b)
+        if len(b) == 0:
+            return len(a)
     except TypeError:
-        print(f"TypeError: a is not a string: {a}")
-        raise
-    if len(b) == 0:
-        return len(a)
+        raise TypeError(f"Something is not a string: a={repr(a)}, b={repr(b)}")
     
     if case_insensitive:
         a = a.lower()
@@ -225,8 +224,9 @@ def levenshtein(a: str, b: str, case_insensitive=True, max_distance=None) -> int
     return distance
 
 def compare_preds(preds : pd.DataFrame, labels : pd.DataFrame, target_columns, ignore_trash_columns = True):
-    # Drop meta columns that may be included in the preds dataframe
     assert len(preds) == len(labels), f"Length mismatch between preds and labels"
+    labels = labels.reset_index(drop=True)
+    preds = preds.reset_index(drop=True)
 
     tolerance_levels = 5
     correct_with_tol = [0,] * tolerance_levels

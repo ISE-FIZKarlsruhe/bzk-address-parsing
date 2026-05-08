@@ -22,6 +22,7 @@ import spacy
 from spacy.training import Example
 from spacy.util import minibatch, compounding
 from tqdm.auto import tqdm
+import re
 
 # ── Config ───────────────────────────────────────────────────────────────────
 
@@ -74,6 +75,10 @@ def find_spans(address: str, row: pd.Series) -> list[tuple[int, int, str]]:
     return spans
 
 
+def spacify_words(text: str) -> str:
+    """Add spaces around non-alphanumeric characters to improve tokenization."""
+    return "".join(f" {c} " if not c.isalnum() else c for c in text)
+
 def df_to_ner_data(df: pd.DataFrame, label: str = "") -> list[tuple[str, dict]]:
     """Convert a DataFrame to a list of (address, {entities: [...]}) tuples."""
     raw: list[tuple[str, dict]] = []
@@ -110,6 +115,16 @@ def load_ner_data(csv_path: Path) -> list[tuple[str, dict]]:
     df = pd.read_csv(csv_path, **CSV_READ_ARGS)
     return df_to_ner_data(df, label=csv_path.name)
 
+
+def retokenize(doc):
+    with doc.retokenize() as retokenizer:
+        for token in doc:
+            if not token.text:
+                continue
+            subtokens = re.split(r"(\W)", token.text)
+            subtokens = [s for s in subtokens if s != ""]
+            if len(subtokens) > 1:
+                retokenizer.split(token, subtokens, heads=[token] * len(subtokens))
 
 # ── Training ──────────────────────────────────────────────────────────────────
 
@@ -161,6 +176,7 @@ def train(
         examples = []
         for text, annots in raw:
             doc = nlp.make_doc(text)
+            retokenize(doc)
             try:
                 ex = Example.from_dict(doc, annots)
                 examples.append(ex)
@@ -189,6 +205,7 @@ def train(
                 examples = []
                 for text, annots in batch:
                     doc = nlp.make_doc(text)
+                    retokenize(doc)
                     try:
                         examples.append(Example.from_dict(doc, annots))
                     except Exception:
