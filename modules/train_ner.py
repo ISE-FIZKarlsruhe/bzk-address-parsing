@@ -21,6 +21,7 @@ import pandas as pd
 import spacy
 from spacy.training import Example
 from spacy.util import minibatch, compounding
+from tqdm.auto import tqdm
 
 # ── Config ───────────────────────────────────────────────────────────────────
 
@@ -113,11 +114,13 @@ def load_ner_data(csv_path: Path) -> list[tuple[str, dict]]:
 # ── Training ──────────────────────────────────────────────────────────────────
 
 def train(
-    n_iter: int = 20,
+    n_iter: int = 30,
     output_dir: Path = Path("models/ner_bzk"),
     dropout: float = 0.3,
     seed: int = 42,
+    train_df : pd.DataFrame | None = None,
     augmented_train_df: pd.DataFrame | None = None,
+    val_df : pd.DataFrame | None = None
 ):
     random.seed(seed)
 
@@ -135,14 +138,23 @@ def train(
 
     print("Loading training data...")
     if augmented_train_df is not None:
+        if train_df is not None:
+            warnings.warn("Both train_df and augmented_train_df provided; using augmented_train_df")
         orig_count = (augmented_train_df["is_augmented"] == False).sum()
         aug_count  = (augmented_train_df["is_augmented"] == True).sum()
         print(f"  Using augmented dataset: {orig_count} original + {aug_count} synthetic rows")
         train_raw = df_to_ner_data(augmented_train_df, label="augmented train")
+    elif train_df is not None:
+        print(f"  Using provided training DataFrame with {len(train_df)} rows")
+        train_raw = df_to_ner_data(train_df, label="provided train")
     else:
         train_raw = load_ner_data(TRAIN_CSV)
     print("Loading validation data...")
-    val_raw   = load_ner_data(VAL_CSV)
+    if val_df is not None:
+        print(f"  Using provided validation DataFrame with {len(val_df)} rows")
+        val_raw = df_to_ner_data(val_df, label="provided val")
+    else:
+        val_raw = load_ner_data(VAL_CSV)
 
     # Convert raw tuples to spaCy Example objects
     def to_examples(raw, nlp):
@@ -169,7 +181,7 @@ def train(
 
     with nlp.select_pipes(enable=["ner"]):
         sizes = compounding(4.0, 32.0, 1.001)
-        for i in range(n_iter):
+        for i in tqdm(range(n_iter)):
             random.shuffle(train_raw)
             losses = {}
             batches = minibatch(train_raw, size=sizes)
@@ -194,7 +206,7 @@ def train(
                             "p": ents_p, "r": ents_r, "f1": ents_f})
 
             marker = " *" if ents_f > best_f1 else ""
-            print(f"  iter {i+1:3d}  loss={losses.get('ner', 0):8.2f}  "
+            tqdm.write(f"  iter {i+1:3d}  loss={losses.get('ner', 0):8.2f}  "
                   f"P={ents_p:.4f}  R={ents_r:.4f}  F1={ents_f:.4f}{marker}")
 
             if ents_f > best_f1:

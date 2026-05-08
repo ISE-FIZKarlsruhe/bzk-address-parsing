@@ -4,6 +4,7 @@ General utility classes and functions for handling the parsing of addresses.
 import pandas as pd
 from collections import OrderedDict
 import datetime
+import re
 
 SEPARATOR_CHARS = ",. -()/\\ \t"
 
@@ -333,3 +334,11 @@ def format_time(seconds, round_to_seconds=True):
         sb.append(f"{months} month{'s' if months > 1 else ''}")
     sb.append(f"{timedelta}")
     return ", ".join(sb)
+
+def natural_casing(qualified_name: str, casing="UpperCamelCase") -> str:
+    """Converts a qualified name (eg. in UpperCammelCase) to a standard natural casing format"""
+    match casing:
+        case "UpperCamelCase":
+            return " ".join(map(lambda m: m.group(), re.finditer(r"[A-Z\d]*[a-z\d]*", qualified_name)))
+        case _:
+            raise ValueError(f"Unsupported casing: {casing}")
