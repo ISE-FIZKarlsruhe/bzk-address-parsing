@@ -1,0 +1,428 @@
+[
+    {
+        "house": "aschendorf/ems altenkamp"
+    },
+    {
+        "City": "lemberg"
+    },
+    {
+        "StreetName": "memmingen/bay. moltkestr.",
+        "HouseNumber": "8"
+    },
+    {
+        "StreetName": "z\u00fcrich stockerstr.",
+        "HouseNumber": "8",
+        "Country": "schweiz"
+    },
+    {
+        "house": "saimiste/jugl."
+    },
+    {
+        "house": "aachen",
+        "StreetName": "arndtstr.",
+        "HouseNumber": "23",
+        "suburb": "reg.bez.",
+        "City": "aachen"
+    },
+    {
+        "house": "szeplak/rum\u00e4nien"
+    },
+    {
+        "City": "auschwitz"
+    },
+    {
+        "HouseNumber": "2434",
+        "StreetName": "e ave.",
+        "City": "cedar rapids",
+        "State": "iowa/",
+        "Country": "usa"
+    },
+    {
+        "City": "auschwitz"
+    },
+    {
+        "HouseNumber": "1544",
+        "StreetName": "union st.",
+        "City": "brooklyn 13",
+        "State": "n.y."
+    },
+    {
+        "City": "breslau"
+    },
+    {
+        "City": "bat yam",
+        "Country": "israel"
+    },
+    {
+        "house": "schikun nowe-nejman doar ramat aim",
+        "HouseNumber": "54",
+        "StreetName": "israel"
+    },
+    {
+        "StreetName": "solingen-wald st\u00fcbbenerstr.",
+        "HouseNumber": "4"
+    },
+    {
+        "City": "pabianice",
+        "Country": "polen"
+    },
+    {
+        "house": "berlin-tempelhof friedrich",
+        "StreetName": "karlstr.___bei trabbert.",
+        "HouseNumber": "49"
+    },
+    {
+        "City": "goslar.",
+        "PostalCode": "jakobistr.36"
+    },
+    {
+        "City": "nowy sacz",
+        "Country": "polen"
+    },
+    {
+        "house": "remscheid-lennep",
+        "StreetName": "ringstr.",
+        "HouseNumber": "123 / kreis",
+        "City": "remscheid"
+    },
+    {
+        "StreetName": "beer jakow. beth olim a",
+        "HouseNumber": "14"
+    },
+    {
+        "house": "sao paulo/brasilien",
+        "StreetName": "rua santa efigenia",
+        "HouseNumber": "31"
+    },
+    {
+        "City": "kiustendil"
+    },
+    {
+        "house": "regensburg",
+        "StreetName": "k\u00f6nigstr.",
+        "HouseNumber": "2/i"
+    },
+    {
+        "City": "herne"
+    },
+    {
+        "house": "ingolstadt/ <unk>",
+        "StreetName": "kupferstr.",
+        "HouseNumber": "15/ii"
+    },
+    {
+        "City": "oberdorf"
+    },
+    {
+        "City": "wittenberge"
+    },
+    {
+        "house": "n\u00fcrnberg vestnertorgraben 13/kreis mittelfranken"
+    },
+    {
+        "house": "remscheid-lennep",
+        "StreetName": "ringstr.",
+        "HouseNumber": "123 / kreis",
+        "City": "remscheid"
+    },
+    {
+        "house": "munkacs"
+    },
+    {
+        "City": "brody"
+    },
+    {
+        "City": "andernach",
+        "StreetName": "josef neuss str.",
+        "HouseNumber": "26"
+    },
+    {
+        "house": "bremerhaven-m.",
+        "StreetName": "langemarckstr.",
+        "HouseNumber": "28"
+    },
+    {
+        "house": "tel-aviv",
+        "StreetName": "auerbach str.___israel",
+        "HouseNumber": "9"
+    },
+    {
+        "house": "lemgo/lippe"
+    },
+    {
+        "StreetName": "fretter",
+        "HouseNumber": "nr. 70",
+        "suburb": "reg.bez.",
+        "City": "arnsberg"
+    },
+    {
+        "Country": "kz"
+    },
+    {
+        "house": "denver colo usa",
+        "HouseNumber": "1338",
+        "StreetName": "bannock"
+    },
+    {
+        "house": "berg.-gladbach",
+        "StreetName": "jakobstr.",
+        "HouseNumber": "117",
+        "City": "reg.bez.k\u00f6ln"
+    },
+    {
+        "house": "london n.w.3/england",
+        "HouseNumber": "109",
+        "StreetName": "green hill"
+    },
+    {
+        "house": "preuss.eylau/ ostpr."
+    },
+    {
+        "house": "muniz provinz buenos aires",
+        "StreetName": "calle munoz",
+        "PostalCode": "1084",
+        "Country": "argentinien"
+    },
+    {
+        "City": "warschau",
+        "Country": "polen"
+    },
+    {
+        "house": "lodz/po."
+    },
+    {
+        "house": "birkenau/hessen"
+    },
+    {
+        "City": "krakow/polen"
+    },
+    {
+        "City": "dortmund"
+    },
+    {
+        "StreetName": "cholon/isr. blokonim",
+        "HouseNumber": "181"
+    },
+    {
+        "house": "tysmienica po."
+    },
+    {
+        "house": "usa",
+        "HouseNumber": "92-05",
+        "StreetName": "224 street",
+        "suburb": "queens village",
+        "PostalCode": "11428",
+        "State": "n.y."
+    },
+    {
+        "house": "szillau csomio ungarn"
+    },
+    {
+        "house": "gr\u00e4felfing b.m\u00fcnchen hartnagelstr.1/i"
+    },
+    {
+        "City": "dieblich___koblenz",
+        "Country": "kr."
+    },
+    {
+        "City": "hannover"
+    },
+    {
+        "house": "trier",
+        "StreetName": "im froschepfuhl",
+        "HouseNumber": "129"
+    },
+    {
+        "City": "hannover"
+    },
+    {
+        "StreetName": "fall river/mass___walnut street",
+        "HouseNumber": "995",
+        "Country": "u.s.a."
+    },
+    {
+        "StreetName": "hannover kochstr.",
+        "HouseNumber": "17"
+    },
+    {
+        "house": "thorn/westpr"
+    },
+    {
+        "City": "kacza"
+    },
+    {
+        "house": "dammheim",
+        "StreetName": "hauptstr.",
+        "HouseNumber": "59"
+    },
+    {
+        "house": "migdal haemeck",
+        "HouseNumber": "block 587/12"
+    },
+    {
+        "StreetName": "verst."
+    },
+    {
+        "house": "giwattaim sohun. rosenstein nr.32"
+    },
+    {
+        "City": "frankfurt/main."
+    },
+    {
+        "city_district": "gross-karben"
+    },
+    {
+        "house": "neuwied/rh.",
+        "StreetName": "werftstr.",
+        "HouseNumber": "8"
+    },
+    {
+        "house": "forrest a.c.t. australien",
+        "StreetName": "arthur circle",
+        "HouseNumber": "22"
+    },
+    {
+        "City": "hannover"
+    },
+    {
+        "StreetName": "thessaloniki/griechenland tsiroyani-str.",
+        "HouseNumber": "3"
+    },
+    {
+        "house": "jerusalem israel beit vegan"
+    },
+    {
+        "house": "kz des ostens"
+    },
+    {
+        "StreetName": "hamburg___thielbek",
+        "HouseNumber": "36___2 iii"
+    },
+    {
+        "StreetName": "sprendlingen wingertstr.",
+        "HouseNumber": "22 hinterhaus"
+    },
+    {
+        "City": "schleiz"
+    },
+    {
+        "house": "obertiefenbach kr. oberlahn"
+    },
+    {
+        "house": "sao paulo/bras.",
+        "StreetName": "rua rosa e silva",
+        "HouseNumber": "156"
+    },
+    {
+        "StreetName": "antwerpen___jan van ryswyklaan",
+        "HouseNumber": "141"
+    },
+    {
+        "City": "elberfeld"
+    },
+    {
+        "house": "giwataim"
+    },
+    {
+        "City": "kaiserslautern",
+        "PostalCode": "klosterstr.18"
+    },
+    {
+        "house": "hannover richard-wagner-str.22"
+    },
+    {
+        "City": "stol/polen"
+    },
+    {
+        "City": "budapest",
+        "Country": "/ungarn"
+    },
+    {
+        "house": "eddersheim/m. main-taunus"
+    },
+    {
+        "HouseNumber": "8___20/england.",
+        "StreetName": "burlington road manchester"
+    },
+    {
+        "house": "sao paulo/brasilien",
+        "StreetName": "rua conego eugenio leite",
+        "HouseNumber": "318",
+        "unit": "apt. 34"
+    },
+    {
+        "house": "ingelheim/krs. bingen",
+        "StreetName": "ob. b\u00f6hlstr.",
+        "HouseNumber": "4"
+    },
+    {
+        "house": "berlin-neuk\u00f6lln",
+        "StreetName": "sonnenallee",
+        "HouseNumber": "18 b./wegner"
+    },
+    {
+        "house": "aschbach/pfalz"
+    },
+    {
+        "City": "mindelheim___krs.",
+        "PostalCode": "bahnhofstr.14",
+        "state_district": "schwaben."
+    },
+    {
+        "StreetName": "migdal-haemek/israel",
+        "HouseNumber": "no. 678/29"
+    },
+    {
+        "City": "berlin"
+    },
+    {
+        "HouseNumber": "241___25",
+        "StreetName": "west 108th street new york"
+    },
+    {
+        "house": "berlin-lichterfelde-ost berlinerstr.48a altersheim"
+    },
+    {
+        "house": "berkovitza bulg."
+    },
+    {
+        "City": "giessen"
+    },
+    {
+        "house": "ffm."
+    },
+    {
+        "house": "ffm"
+    },
+    {
+        "StreetName": "pardes chana"
+    },
+    {
+        "StreetName": "chascomus",
+        "City": "f.c.s.",
+        "Country": "argentinien"
+    },
+    {
+        "City": "minsk"
+    },
+    {
+        "house": "kaiserslautern",
+        "StreetName": "ebertstr.",
+        "HouseNumber": "83 a"
+    },
+    {
+        "house": "wiesbaden",
+        "StreetName": "goethestr.",
+        "HouseNumber": "15",
+        "City": "hths."
+    },
+    {
+        "HouseNumber": "10",
+        "StreetName": "fulton st. east-st. kilda melbourne vict.",
+        "Country": "australia"
+    },
+    {
+        "StreetName": "trier hospitalfeld",
+        "HouseNumber": "8"
+    }
+]

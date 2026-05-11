@@ -1,0 +1,447 @@
+[
+    {
+        "City": "Stolberg",
+        "Neighborhood": "Eichsfeldstr.98",
+        "Country": "Aachen-Land"
+    },
+    {
+        "City": "Hamburg",
+        "StreetName": "Thielbek",
+        "HouseNumber": "2"
+    },
+    {
+        "City": "Kolmar"
+    },
+    {
+        "City": "Aachen",
+        "StreetName": "Dammstr.",
+        "HouseNumber": "5"
+    },
+    {
+        "City": "DP-Lager___Wasservurg/Inn",
+        "Neighborhood": "Gabersee"
+    },
+    {
+        "City": "M\u00fcnchen-Gladbach",
+        "District": "D\u00fcsseldorf"
+    },
+    {
+        "City": "Kiriat Chaim",
+        "District": "Halzot"
+    },
+    {
+        "City": "Marstetten-Aitrach",
+        "District": "Wangen"
+    },
+    {
+        "Neighborhood": "Kfar Saba",
+        "StreetName": "Machano Ognen",
+        "Country": "Israel"
+    },
+    {
+        "City": "Wandsbek"
+    },
+    {
+        "City": "Radziwilow"
+    },
+    {
+        "HouseNumber": "62-98",
+        "StreetName": "Saunders Street, Rego Park L.I.,New York",
+        "Country": "USA"
+    },
+    {
+        "City": "Tel-Aviv",
+        "StreetName": "Schderoth Nordau",
+        "HouseNumber": "22",
+        "Country": "Israel"
+    },
+    {
+        "City": "Jaroslaw",
+        "Country": "Polen"
+    },
+    {
+        "City": "Bad Kreuznach"
+    },
+    {
+        "City": "Elberfeld"
+    },
+    {
+        "City": "N\u00fcrnberg",
+        "StreetName": "Mommsenstrasse",
+        "HouseNumber": "41"
+    },
+    {
+        "HouseNumber": "544___32",
+        "StreetName": "West 157 Street, New-York",
+        "Country": "U.S.A."
+    },
+    {
+        "City": "Krakau"
+    },
+    {
+        "StreetName": "Viktoriastr.",
+        "HouseNumber": "33",
+        "District": "Neu\u00df"
+    },
+    {
+        "City": "Polish DP-Camp, B\u00f6blingen"
+    },
+    {
+        "City": "Ramat Gan",
+        "HouseNumber": "15",
+        "District": "Bajith",
+        "StreetName": "c/o Weiss"
+    },
+    {
+        "City": "Jaffo",
+        "Country": "Israel",
+        "StreetName": "87 Str. Nr.",
+        "HouseNumber": "28"
+    },
+    {
+        "City": "Lodz"
+    },
+    {
+        "City": "Leer"
+    },
+    {
+        "City": "Nordheim",
+        "District": "Heilbronn"
+    },
+    {
+        "City": "Hartuf",
+        "Country": "Israel",
+        "StreetName": "Maabara Beit Schemesch",
+        "HouseNumber": "69"
+    },
+    {
+        "City": "Auschwitz"
+    },
+    {
+        "City": "Bremen-St. Magnus, Zum Fichtenhof"
+    },
+    {
+        "City": "Hildesheim",
+        "StreetName": "Ladem\u00fchle"
+    },
+    {
+        "City": "J\u00f6hlingen",
+        "District": "Durlach"
+    },
+    {
+        "City": "Frankfurt/Main"
+    },
+    {
+        "City": "M\u00fclheim"
+    },
+    {
+        "City": "Altenau"
+    },
+    {
+        "City": "Sdeh Warburg",
+        "StreetName": "Erif",
+        "HouseNumber": "5",
+        "Neighborhood": "Kfar Saba"
+    },
+    {
+        "City": "Wei\u00dfenburg",
+        "State": "Bayern",
+        "StreetName": "S\u00fcdring",
+        "HouseNumber": "10"
+    },
+    {
+        "City": "Cluj",
+        "Country": "Rum."
+    },
+    {
+        "City": "Wuppertal-E.",
+        "StreetName": "Schleswigerstr.",
+        "HouseNumber": "62"
+    },
+    {
+        "City": "Regensuburg",
+        "StreetName": "Tannstr.",
+        "HouseNumber": "14"
+    },
+    {
+        "StreetName": "Belgrad"
+    },
+    {
+        "City": "Aachen"
+    },
+    {
+        "City": "Mannheim"
+    },
+    {
+        "City": "Wehlau"
+    },
+    {
+        "City": "Schd. Nordau___TEL AVIV",
+        "HouseNumber": "22",
+        "Country": "Israel"
+    },
+    {
+        "City": "KZ Auschwitz"
+    },
+    {
+        "City": "Lichtenfels"
+    },
+    {
+        "City": "Miami",
+        "State": "Florida",
+        "HouseNumber": "231",
+        "StreetName": "N.W. 3rd. Str."
+    },
+    {
+        "City": "Richen",
+        "District": "Sinsheim"
+    },
+    {
+        "City": "Loiching___Dingolfing"
+    },
+    {
+        "City": "Bremen"
+    },
+    {
+        "City": "Berlin"
+    },
+    {
+        "City": "Mindelheim",
+        "Neighborhood": "Bahnhofstr.14",
+        "District": "Schwaben"
+    },
+    {
+        "City": "Niederklein"
+    },
+    {
+        "City": "New York",
+        "HouseNumber": "481",
+        "StreetName": "Fort Washington Ave."
+    },
+    {
+        "City": "Aachen"
+    },
+    {
+        "HouseNumber": "62-98",
+        "StreetName": "Saunders Street, Rego Park L.I.,New York",
+        "Country": "USA"
+    },
+    {
+        "HouseNumber": "7"
+    },
+    {
+        "City": "Rostoki"
+    },
+    {
+        "City": "Beuthen"
+    },
+    {
+        "HouseNumber": "2114",
+        "StreetName": "79 St.",
+        "Neighborhood": "Jackson Heights",
+        "Country": "USA"
+    },
+    {
+        "City": "Leonberg",
+        "District": "Stuttgart"
+    },
+    {
+        "City": "Rt.l",
+        "HouseNumber": "318",
+        "District": "Cotati",
+        "State": "California",
+        "Country": "USA"
+    },
+    {
+        "City": "S\u00fclzbach"
+    },
+    {
+        "City": "Giessen"
+    },
+    {
+        "HouseNumber": "220",
+        "City": "East___Brooklyn"
+    },
+    {
+        "City": "Gymeskoezeplok",
+        "Country": "Ungarn"
+    },
+    {
+        "HouseNumber": "22",
+        "City": "Drive, Wilmington, Delaware",
+        "Country": "USA."
+    },
+    {
+        "City": "Berlin-Hermsdorf",
+        "StreetName": "Junostr.",
+        "HouseNumber": "7"
+    },
+    {
+        "City": "New York",
+        "Country": "USA",
+        "HouseNumber": "220",
+        "StreetName": "West 98th Str."
+    },
+    {
+        "City": "Schwelm",
+        "StreetName": "Weilent\u00e4uschenstr.",
+        "HouseNumber": "3",
+        "District": "Arnsberg"
+    },
+    {
+        "City": "Hamburg"
+    },
+    {
+        "City": "Berlin"
+    },
+    {
+        "City": "Jungingen",
+        "District": "Hechingen"
+    },
+    {
+        "HouseNumber": "808",
+        "StreetName": "Westend Avenue",
+        "City": "New York"
+    },
+    {
+        "City": "der Deportation"
+    },
+    {
+        "City": "London",
+        "HouseNumber": "72",
+        "StreetName": "Canfield Gardena"
+    },
+    {
+        "StreetName": "Orchideenstieg",
+        "HouseNumber": "9."
+    },
+    {
+        "City": "Hamburg"
+    },
+    {
+        "City": "Cholon",
+        "Country": "Israel",
+        "StreetName": "Sprintzakstr.",
+        "HouseNumber": "13"
+    },
+    {
+        "City": "Neu Isenburg"
+    },
+    {
+        "City": "G\u00f6ttingen",
+        "StreetName": "Land Hannover"
+    },
+    {
+        "City": "Mainz-Weisenau"
+    },
+    {
+        "City": "Parie",
+        "District": "Frankr.)",
+        "StreetName": "rue de Moscau"
+    },
+    {
+        "City": "Schwarau"
+    },
+    {
+        "City": "Braunschweig",
+        "StreetName": "Uferstr.",
+        "HouseNumber": "25"
+    },
+    {
+        "City": "Antwerpen",
+        "HouseNumber": "141",
+        "StreetName": "Jan van Ryswyklaan"
+    },
+    {
+        "City": "M\u00fclheim",
+        "StreetName": "Dehne",
+        "HouseNumber": "75"
+    },
+    {
+        "City": "Deu-Somes",
+        "Country": "Ungarn."
+    },
+    {
+        "Neighborhood": "Kfar Harah",
+        "StreetName": "Ischivat Bnei Avodah"
+    },
+    {
+        "City": "Hertza",
+        "Country": "Rum. jetzt SSRU"
+    },
+    {
+        "City": "Boryslaw",
+        "Country": "Polen"
+    },
+    {
+        "City": "Jaffo___Schtei Achajot",
+        "HouseNumber": "21"
+    },
+    {
+        "City": "Bad Kreuznach",
+        "StreetName": "Sch\u00f6ne Aussicht",
+        "HouseNumber": "12"
+    },
+    {
+        "City": "Madiorban-Hedersch",
+        "Country": "Ung."
+    },
+    {
+        "HouseNumber": "Jerusalem-Rehavia",
+        "Country": "Israel"
+    },
+    {
+        "City": "Trondheim",
+        "Country": "Norwegen"
+    },
+    {
+        "City": "Uffenheim"
+    },
+    {
+        "City": "Mering"
+    },
+    {
+        "City": "Berlin"
+    },
+    {
+        "City": "Bilgoraj",
+        "Country": "Polen"
+    },
+    {
+        "City": "Atlanta___N.E.",
+        "Country": "USA",
+        "HouseNumber": "155",
+        "StreetName": "3rd Street"
+    },
+    {
+        "City": "Jerusalem Baka"
+    },
+    {
+        "City": "Siedlice",
+        "Country": "Polen"
+    },
+    {
+        "City": "Weiden",
+        "Country": "Steubenstr.11"
+    },
+    {
+        "HouseNumber": "8",
+        "StreetName": "Burlington Road",
+        "City": "Manchester",
+        "Country": "England"
+    },
+    {
+        "HouseNumber": "848___46",
+        "City": "Kilkea, Los Angeles"
+    },
+    {
+        "City": "Lodz",
+        "Country": "Polen"
+    },
+    {
+        "City": "Giwataim",
+        "StreetName": "Schenkinstr.",
+        "HouseNumber": "79",
+        "Country": "Israel"
+    }
+]

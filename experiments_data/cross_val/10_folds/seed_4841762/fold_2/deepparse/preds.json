@@ -1,0 +1,407 @@
+[
+    {
+        "HouseNumber": "35",
+        "StreetName": "im moore"
+    },
+    {
+        "City": "altona"
+    },
+    {
+        "StreetName": "tirschenreuth maximiliansplatz",
+        "City": "1/kreis",
+        "Country": "oberpfalz"
+    },
+    {
+        "City": "hamburg"
+    },
+    {
+        "HouseNumber": "1a",
+        "StreetName": "bielsko ul.3-go maja",
+        "City": "durch die poln.mil.mission berlin"
+    },
+    {
+        "HouseNumber": "5",
+        "StreetName": "dudweiler im allement"
+    },
+    {
+        "City": "gorna"
+    },
+    {
+        "City": "worms"
+    },
+    {
+        "StreetName": "weiler krs. schw.",
+        "City": "gm\u00fcnd"
+    },
+    {
+        "HouseNumber": "14",
+        "StreetName": "schweinfurt/m. klingenh\u00f6he"
+    },
+    {
+        "HouseNumber": "211",
+        "StreetName": "bochum hattingerstr."
+    },
+    {
+        "StreetName": "kassel kreis kassel",
+        "City": "(hessen)"
+    },
+    {
+        "StreetName": "klingenberg/m.",
+        "City": "; michelstadt"
+    },
+    {
+        "HouseNumber": "113",
+        "StreetName": "tarrassa (barcelona) lauria",
+        "City": "bajos"
+    },
+    {
+        "HouseNumber": "17",
+        "StreetName": "hannover kochstr."
+    },
+    {
+        "StreetName": "richen krs. sinsheim"
+    },
+    {
+        "City": "deportation."
+    },
+    {
+        "HouseNumber": "3103",
+        "StreetName": "milanstr. new",
+        "City": "orleans la u.s.a."
+    },
+    {
+        "HouseNumber": "16",
+        "StreetName": "bnei brack isr. raw oto st."
+    },
+    {
+        "City": "bamberg"
+    },
+    {
+        "HouseNumber": "184 nr.",
+        "StreetName": "giwat alija str. nr.",
+        "City": "israel",
+        "PostalCode": "11"
+    },
+    {
+        "StreetName": "weinheim/bergstr.",
+        "City": "hauptstr. 78/kreis weinheim"
+    },
+    {
+        "City": "biedenkopf"
+    },
+    {
+        "HouseNumber": "25",
+        "StreetName": "montbeliard doubs france",
+        "City": "j. rue du mont bart",
+        "PostalCode": "46"
+    },
+    {
+        "City": "haspe-hagen"
+    },
+    {
+        "City": "th\u00fcngen"
+    },
+    {
+        "HouseNumber": "3",
+        "StreetName": "hettenleidelheim peter schwalbstr."
+    },
+    {
+        "City": "n\u00fcrnberg"
+    },
+    {
+        "HouseNumber": "n.y.",
+        "StreetName": "new 33",
+        "Unit": "york usa 282",
+        "City": "cabrini blvd."
+    },
+    {
+        "StreetName": "bremen"
+    },
+    {
+        "StreetName": "kfar saba",
+        "City": "machano ognen israel"
+    },
+    {
+        "StreetName": "schikun hastadruthi",
+        "City": "14/3 bei givath rambam israel"
+    },
+    {
+        "City": "ghetto rokitno"
+    },
+    {
+        "City": "riga/lettland"
+    },
+    {
+        "HouseNumber": "23",
+        "StreetName": "ingelheim-mitte zuckerberg"
+    },
+    {
+        "HouseNumber": "46",
+        "StreetName": "highstoen mansions camden",
+        "City": "town london",
+        "Country": "n.w",
+        "PostalCode": "1"
+    },
+    {
+        "StreetName": "maria nostra-ungarn"
+    },
+    {
+        "HouseNumber": "14",
+        "StreetName": "tel aviv. hasan bek"
+    },
+    {
+        "StreetName": "naharia",
+        "City": "israel",
+        "Country": "trumeldorf",
+        "PostalCode": "246/7"
+    },
+    {
+        "City": "kattowitz/o.s."
+    },
+    {
+        "StreetName": "wahrscheinlich",
+        "City": "auschwitz"
+    },
+    {
+        "City": "czenstochau/polen"
+    },
+    {
+        "StreetName": "acco tzafon - israel -",
+        "City": "str. herzl",
+        "Country": "block",
+        "PostalCode": "1/4"
+    },
+    {
+        "HouseNumber": "112",
+        "StreetName": "petach tikwa maabara zrif"
+    },
+    {
+        "HouseNumber": "10",
+        "StreetName": "haifa leah str. nr.",
+        "City": "israel"
+    },
+    {
+        "HouseNumber": "1037",
+        "StreetName": "bergen str.",
+        "City": "brooklyn",
+        "Country": "new york"
+    },
+    {
+        "City": "remscheid"
+    },
+    {
+        "City": "berlin"
+    },
+    {
+        "HouseNumber": "2114-79",
+        "StreetName": "st. jackson heights.",
+        "City": "n.y.",
+        "Country": "usa"
+    },
+    {
+        "City": "bingerbr\u00fcck"
+    },
+    {
+        "City": "theresienstadt"
+    },
+    {
+        "City": "im ghetto rokitno"
+    },
+    {
+        "City": "der deportation"
+    },
+    {
+        "StreetName": "usa 220",
+        "Unit": "new york",
+        "City": "west 98th",
+        "Country": "str."
+    },
+    {
+        "StreetName": "heiligenhaus leubeck",
+        "City": "8/mettmann"
+    },
+    {
+        "City": "k\u00f6ln-d\u00fcnnwald"
+    },
+    {
+        "City": "leer/ostfriesland"
+    },
+    {
+        "StreetName": "pardess chana malben"
+    },
+    {
+        "City": "lorup"
+    },
+    {
+        "City": "usa"
+    },
+    {
+        "HouseNumber": "1",
+        "StreetName": "saarbr\u00fccken paul-marien-str."
+    },
+    {
+        "City": "schnaittenbach"
+    },
+    {
+        "HouseNumber": "146",
+        "StreetName": "palestina chadar josef"
+    },
+    {
+        "HouseNumber": "anzengruberstra\u00dfe. 21",
+        "StreetName": "hamburg"
+    },
+    {
+        "City": "rogasen"
+    },
+    {
+        "StreetName": "lodz polen"
+    },
+    {
+        "City": "monaco/mo."
+    },
+    {
+        "StreetName": "steinbach am glan"
+    },
+    {
+        "HouseNumber": "3",
+        "StreetName": "saarbr\u00fccken",
+        "Unit": "graf-johann-str. 28"
+    },
+    {
+        "City": "heilshorn"
+    },
+    {
+        "StreetName": "bous (saar)"
+    },
+    {
+        "City": "berlin"
+    },
+    {
+        "City": "bochum"
+    },
+    {
+        "HouseNumber": "83",
+        "StreetName": "karlsruhe/baden karlstr."
+    },
+    {
+        "City": "hohenrode"
+    },
+    {
+        "City": "neuwied"
+    },
+    {
+        "HouseNumber": "3252",
+        "StreetName": "33rd st astoria",
+        "City": "new-york",
+        "Country": "usa"
+    },
+    {
+        "StreetName": "seubersdorf",
+        "City": "bundesstr. 77/kreis parsberg-opf."
+    },
+    {
+        "City": "velbert"
+    },
+    {
+        "City": "hamburg"
+    },
+    {
+        "StreetName": "hoffenheim kr.",
+        "City": "sinsheim"
+    },
+    {
+        "StreetName": "a/m.",
+        "City": "frankfurt"
+    },
+    {
+        "StreetName": "sarajevo",
+        "City": "ademowica"
+    },
+    {
+        "HouseNumber": "42",
+        "StreetName": "tel-aviv kir. schalom"
+    },
+    {
+        "City": "boryslaw/polen"
+    },
+    {
+        "City": "friedrichsrode"
+    },
+    {
+        "HouseNumber": "75",
+        "StreetName": "bad t\u00f6lz marktstr."
+    },
+    {
+        "HouseNumber": "284",
+        "StreetName": "e 2nd.str. new york",
+        "City": "city n.y.",
+        "Country": "usa"
+    },
+    {
+        "StreetName": "bremen"
+    },
+    {
+        "City": "hofkirchen b/vilshofen"
+    },
+    {
+        "City": "heidenheim"
+    },
+    {
+        "StreetName": "posen/",
+        "City": "polen"
+    },
+    {
+        "StreetName": "jaffo rh. 35/2"
+    },
+    {
+        "City": "hohenrode"
+    },
+    {
+        "StreetName": "bystra",
+        "City": "polen"
+    },
+    {
+        "City": "k\u00f6ln-d\u00fcnnwald"
+    },
+    {
+        "City": "lippstadt",
+        "Country": "i.w."
+    },
+    {
+        "City": "ramat",
+        "Country": "gan"
+    },
+    {
+        "City": "warschau"
+    },
+    {
+        "City": "dinkelsb\u00fchl/mfr."
+    },
+    {
+        "StreetName": "chrubieszow",
+        "City": "polen"
+    },
+    {
+        "StreetName": "prayjstajn",
+        "City": "cestochau"
+    },
+    {
+        "City": "bischofsburg/ostpr."
+    },
+    {
+        "City": "kassel"
+    },
+    {
+        "City": "breslau"
+    },
+    {
+        "HouseNumber": "58",
+        "StreetName": "vohwinkel/wupptl. letto-vorbeckstr."
+    },
+    {
+        "City": "wiesbaden"
+    },
+    {
+        "StreetName": "offenbach/mainbieber seligenst\u00e4dterstr.18 1/10"
+    }
+]

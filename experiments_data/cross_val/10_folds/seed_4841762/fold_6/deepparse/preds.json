@@ -1,0 +1,401 @@
+[
+    {
+        "HouseNumber": "1",
+        "StreetName": "kempten/allg\u00e4u freudenberg"
+    },
+    {
+        "City": "m\u00fclheim/ruhr"
+    },
+    {
+        "City": "petnerhas/ungarn"
+    },
+    {
+        "City": "frankfurt.",
+        "Country": "a.m."
+    },
+    {
+        "HouseNumber": "614",
+        "StreetName": "west 136th",
+        "City": "street",
+        "Country": "new york"
+    },
+    {
+        "City": "wongrowitz"
+    },
+    {
+        "City": "lodz"
+    },
+    {
+        "StreetName": "roedingen bez.",
+        "City": "aachen"
+    },
+    {
+        "HouseNumber": "78",
+        "StreetName": "raanana k.k.l.",
+        "City": "isr."
+    },
+    {
+        "StreetName": "weilbach",
+        "City": "i. taunus"
+    },
+    {
+        "City": "n\u00fcrnberg"
+    },
+    {
+        "StreetName": "motzen/krs.",
+        "City": "teltow"
+    },
+    {
+        "HouseNumber": "10",
+        "StreetName": "homberg krs. moers kapellstr.",
+        "City": "reg. bez.",
+        "Country": "d\u00fcsseldorf"
+    },
+    {
+        "City": "trier"
+    },
+    {
+        "City": "homberg"
+    },
+    {
+        "City": "ittlingen"
+    },
+    {
+        "StreetName": "kz jasenovac"
+    },
+    {
+        "StreetName": "t\u00fcrkheim krs. mindelheim"
+    },
+    {
+        "City": "wiedelah"
+    },
+    {
+        "City": "n\u00fcrnberg"
+    },
+    {
+        "City": "s\u00fclzbach/opf."
+    },
+    {
+        "StreetName": "eichstetten kr.",
+        "City": "emmendingen"
+    },
+    {
+        "City": "ittlingen"
+    },
+    {
+        "City": "emerting"
+    },
+    {
+        "City": "peterkowka"
+    },
+    {
+        "City": "remscheid"
+    },
+    {
+        "HouseNumber": "15",
+        "StreetName": "amberg grabenstr.",
+        "City": "opf."
+    },
+    {
+        "HouseNumber": "56",
+        "StreetName": "coesfeld bahnhofstr."
+    },
+    {
+        "HouseNumber": "34",
+        "StreetName": "guldbrandsg.",
+        "City": "boras schweden"
+    },
+    {
+        "HouseNumber": "52",
+        "StreetName": "wuppertal osterberg",
+        "City": "wuppertal"
+    },
+    {
+        "StreetName": "frankfurt a/main"
+    },
+    {
+        "StreetName": "scheumargorosch/rum."
+    },
+    {
+        "HouseNumber": "36",
+        "StreetName": "neuer wall 10"
+    },
+    {
+        "StreetName": "izbica-kujawska/krs.",
+        "City": "kolo/posen"
+    },
+    {
+        "HouseNumber": "300",
+        "StreetName": "rochester n.y./usa.",
+        "City": "joseph ave."
+    },
+    {
+        "City": "ghetto rokitno"
+    },
+    {
+        "HouseNumber": "19",
+        "StreetName": "tel-aviv/israel bartinorastr."
+    },
+    {
+        "StreetName": "dacha wojczynska",
+        "City": "west ukraine"
+    },
+    {
+        "HouseNumber": "1441",
+        "StreetName": "monroe avenue",
+        "Unit": "rochest n.y./usa."
+    },
+    {
+        "HouseNumber": "9",
+        "StreetName": "bingerbr\u00fcck strombergstr."
+    },
+    {
+        "City": "elberfeld"
+    },
+    {
+        "StreetName": "neudek/krs.",
+        "City": "neutitschein (csr.)"
+    },
+    {
+        "City": "magdeburg"
+    },
+    {
+        "City": "coesfeld"
+    },
+    {
+        "StreetName": "weiler krs. schw.",
+        "City": "gm\u00fcnd"
+    },
+    {
+        "City": "prleworsk/polen"
+    },
+    {
+        "City": "szczekociny"
+    },
+    {
+        "HouseNumber": "54",
+        "StreetName": "wuppertal hochstr.",
+        "City": "reg. bez.:",
+        "Country": "d\u00fcsseldorf"
+    },
+    {
+        "City": "wiesbaden"
+    },
+    {
+        "City": "schlat"
+    },
+    {
+        "HouseNumber": "9",
+        "StreetName": "tel-baruch rh. s. mesan nr."
+    },
+    {
+        "StreetName": "a/m.",
+        "City": "frankfurt"
+    },
+    {
+        "City": "radewell halle"
+    },
+    {
+        "City": "mannheim"
+    },
+    {
+        "City": "kiustendil"
+    },
+    {
+        "City": "sao",
+        "Country": "paulo"
+    },
+    {
+        "StreetName": "jaffo rh. 35/2"
+    },
+    {
+        "City": "rowne/polen"
+    },
+    {
+        "HouseNumber": "31-77",
+        "StreetName": "32nd street long",
+        "Unit": "island city 6",
+        "City": "n.y.",
+        "Country": "usa"
+    },
+    {
+        "StreetName": "peitschendorf",
+        "City": "reg.bez. m\u00fcnster"
+    },
+    {
+        "StreetName": "essen hans-lutherstr.3"
+    },
+    {
+        "City": "hbg-bergedorf"
+    },
+    {
+        "StreetName": "obernau",
+        "City": "krs. t\u00fcbingen"
+    },
+    {
+        "City": "erskurt/damals",
+        "Country": "rumaenien"
+    },
+    {
+        "City": "stuttgart-bad cannstatt"
+    },
+    {
+        "City": "weener/ostfr."
+    },
+    {
+        "HouseNumber": "29",
+        "StreetName": "hohenrode haus-nr."
+    },
+    {
+        "City": "t\u00fcschendorf"
+    },
+    {
+        "HouseNumber": "50",
+        "StreetName": "hamburg sasel saselbekweg"
+    },
+    {
+        "StreetName": "kiel"
+    },
+    {
+        "City": "f\u00fcrstenfeldbruck"
+    },
+    {
+        "City": "f\u00fcrstenfeldbruck"
+    },
+    {
+        "City": "stefanesti/rum\u00e4nien"
+    },
+    {
+        "City": "rum."
+    },
+    {
+        "City": "wetzlar"
+    },
+    {
+        "City": "frankfurt",
+        "Country": "a.m."
+    },
+    {
+        "HouseNumber": "10",
+        "StreetName": "osborne terrace newark",
+        "City": "n.j.",
+        "Country": "usa"
+    },
+    {
+        "HouseNumber": "23",
+        "StreetName": "ingelheim zuckerberg"
+    },
+    {
+        "City": "dinkelsb\u00fchl mfr."
+    },
+    {
+        "StreetName": "neustadt",
+        "City": "o/s."
+    },
+    {
+        "StreetName": "kirjat",
+        "City": "motzkin/israel"
+    },
+    {
+        "HouseNumber": "17 no. 7",
+        "StreetName": "tel aviv sch. makabi chadacha str."
+    },
+    {
+        "HouseNumber": "20",
+        "StreetName": "essen sundernholz"
+    },
+    {
+        "HouseNumber": "8",
+        "StreetName": "neuwied/rh. werftstr."
+    },
+    {
+        "City": "debreczin/ungarn"
+    },
+    {
+        "StreetName": "hannover"
+    },
+    {
+        "City": "m\u00fchlheim"
+    },
+    {
+        "City": "n\u00fcrschan bez.mies/b\u00f6hmen"
+    },
+    {
+        "HouseNumber": "15",
+        "StreetName": "amberg grabenstr.",
+        "City": "opf."
+    },
+    {
+        "HouseNumber": "45",
+        "StreetName": "g\u00f6ttingen j\u00fcdenstr."
+    },
+    {
+        "HouseNumber": "43",
+        "StreetName": "sosnowiec/polen ul. curie-sklodowska 14 str."
+    },
+    {
+        "HouseNumber": "2937",
+        "StreetName": "west 25th str.",
+        "City": "brooklyn",
+        "Country": "n.y."
+    },
+    {
+        "StreetName": "caica postal",
+        "City": "sao",
+        "Country": "paulo/brasilien",
+        "PostalCode": "3579"
+    },
+    {
+        "HouseNumber": "16",
+        "StreetName": "holzkirchen baumgartenstr."
+    },
+    {
+        "City": "gelsenkirchen"
+    },
+    {
+        "City": "kaiserslautern"
+    },
+    {
+        "HouseNumber": "45",
+        "StreetName": "hannover wittekamp nr."
+    },
+    {
+        "HouseNumber": "169",
+        "StreetName": "worpswede",
+        "City": "krs. osterholz"
+    },
+    {
+        "StreetName": "leopoldshall /",
+        "City": "anhalt"
+    },
+    {
+        "StreetName": "binningen",
+        "City": "(krs. cochem)"
+    },
+    {
+        "City": "kz"
+    },
+    {
+        "City": "n\u00fcrnberg"
+    },
+    {
+        "StreetName": "sao paulo/brasilien rua santa efigenia"
+    },
+    {
+        "HouseNumber": "6",
+        "StreetName": "bremen-burg burger-dorfstr.",
+        "City": "bremen"
+    },
+    {
+        "City": "lodz/polen"
+    },
+    {
+        "HouseNumber": "12",
+        "StreetName": "bad kreuznach sch\u00f6ne aussicht"
+    },
+    {
+        "HouseNumber": "3065",
+        "StreetName": "san francisco calif. usa street",
+        "City": "clay"
+    }
+]

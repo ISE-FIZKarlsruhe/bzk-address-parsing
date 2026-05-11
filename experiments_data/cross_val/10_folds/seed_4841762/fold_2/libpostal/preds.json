@@ -1,0 +1,416 @@
+[
+    {
+        "StreetName": "im moore",
+        "HouseNumber": "35"
+    },
+    {
+        "city_district": "altona"
+    },
+    {
+        "house": "tirschenreuth",
+        "StreetName": "maximiliansplatz",
+        "HouseNumber": "1/kreis",
+        "state_district": "oberpfalz"
+    },
+    {
+        "City": "hamburg"
+    },
+    {
+        "house": "bielsko ul.3-go maja 1a durch die poln.mil.mission berlin"
+    },
+    {
+        "category": "dudweiler",
+        "near": "im",
+        "StreetName": "allement",
+        "HouseNumber": "5"
+    },
+    {
+        "City": "gorna"
+    },
+    {
+        "City": "worms"
+    },
+    {
+        "level": "weiler krs.",
+        "StreetName": "schw.",
+        "City": "gm\u00fcnd"
+    },
+    {
+        "StreetName": "schweinfurt/m. klingenh\u00f6he",
+        "HouseNumber": "14"
+    },
+    {
+        "City": "bochum",
+        "StreetName": "hattingerstr.",
+        "HouseNumber": "211"
+    },
+    {
+        "City": "kassel",
+        "state_district": "kreis kassel",
+        "State": "hessen"
+    },
+    {
+        "house": "klingenberg/m.",
+        "City": "michelstadt"
+    },
+    {
+        "house": "tarrassa barcelona",
+        "StreetName": "lauria",
+        "HouseNumber": "113",
+        "level": "bajos"
+    },
+    {
+        "StreetName": "hannover kochstr.",
+        "HouseNumber": "17"
+    },
+    {
+        "level": "richen krs.",
+        "City": "sinsheim"
+    },
+    {
+        "house": "deportation."
+    },
+    {
+        "HouseNumber": "3103",
+        "StreetName": "milanstr.",
+        "City": "new orleans",
+        "State": "la",
+        "Country": "u.s.a."
+    },
+    {
+        "house": "bnei brack isr. raw",
+        "StreetName": "oto st.",
+        "HouseNumber": "16"
+    },
+    {
+        "City": "bamberg"
+    },
+    {
+        "house": "giwat",
+        "StreetName": "alija str. nr. 184___israel",
+        "HouseNumber": "nr. 11"
+    },
+    {
+        "house": "weinheim/bergstr.",
+        "StreetName": "hauptstr.",
+        "HouseNumber": "78/kreis",
+        "City": "weinheim"
+    },
+    {
+        "City": "biedenkopf"
+    },
+    {
+        "house": "montbeliard 25 doubs france",
+        "HouseNumber": "46 j.",
+        "StreetName": "rue du mont bart"
+    },
+    {
+        "house": "haspe-hagen"
+    },
+    {
+        "City": "th\u00fcngen"
+    },
+    {
+        "StreetName": "hettenleidelheim peter schwalbstr.",
+        "HouseNumber": "3"
+    },
+    {
+        "City": "n\u00fcrnberg"
+    },
+    {
+        "StreetName": "new york___n.y. usa___cabrini blvd.",
+        "HouseNumber": "33___282"
+    },
+    {
+        "City": "bremen"
+    },
+    {
+        "house": "kfar saba machano",
+        "City": "ognen",
+        "Country": "israel"
+    },
+    {
+        "StreetName": "schikun hastadruthi___bei givath",
+        "HouseNumber": "14/3",
+        "City": "rambam",
+        "Country": "israel"
+    },
+    {
+        "house": "ghetto",
+        "City": "rokitno"
+    },
+    {
+        "City": "riga",
+        "Country": "/lettland"
+    },
+    {
+        "house": "ingelheim-mitte",
+        "StreetName": "zuckerberg",
+        "HouseNumber": "23"
+    },
+    {
+        "HouseNumber": "46___1",
+        "house": "highstoen mansions",
+        "suburb": "camden town",
+        "City": "london",
+        "StreetName": "n.w"
+    },
+    {
+        "house": "maria nostra-ungarn"
+    },
+    {
+        "StreetName": "tel aviv. hasan bek",
+        "HouseNumber": "14"
+    },
+    {
+        "house": "naharia israel trumeldorf",
+        "HouseNumber": "246/7"
+    },
+    {
+        "house": "kattowitz/o.s."
+    },
+    {
+        "house": "wahrscheinlich auschwitz"
+    },
+    {
+        "house": "czenstochau/polen"
+    },
+    {
+        "StreetName": "acco tzafon israel str. herzl",
+        "HouseNumber": "block 1/4"
+    },
+    {
+        "house": "petach tikwa maabara zrif 112"
+    },
+    {
+        "StreetName": "haifa leah str.___israel",
+        "HouseNumber": "nr. 10"
+    },
+    {
+        "HouseNumber": "1037",
+        "StreetName": "bergen str.",
+        "city_district": "brooklyn",
+        "State": "new york"
+    },
+    {
+        "City": "remscheid"
+    },
+    {
+        "City": "berlin"
+    },
+    {
+        "StreetName": "2114-79 st.",
+        "City": "jackson heights.",
+        "State": "n.y.",
+        "Country": "usa"
+    },
+    {
+        "suburb": "bingerbr\u00fcck"
+    },
+    {
+        "City": "theresienstadt"
+    },
+    {
+        "StreetName": "im ghetto",
+        "City": "rokitno"
+    },
+    {
+        "house": "der deportation"
+    },
+    {
+        "house": "new york usa",
+        "HouseNumber": "220",
+        "StreetName": "west 98th str."
+    },
+    {
+        "house": "heiligenhaus leubeck",
+        "HouseNumber": "8/mettmann"
+    },
+    {
+        "house": "k\u00f6ln-d\u00fcnnwald"
+    },
+    {
+        "state_district": "leer/ostfriesland"
+    },
+    {
+        "house": "pardess chana malben"
+    },
+    {
+        "City": "lorup"
+    },
+    {
+        "Country": "usa"
+    },
+    {
+        "house": "saarbr\u00fccken",
+        "StreetName": "paul-marien-str.",
+        "HouseNumber": "1"
+    },
+    {
+        "City": "schnaittenbach"
+    },
+    {
+        "StreetName": "palestina chadar josef",
+        "HouseNumber": "146"
+    },
+    {
+        "house": "hamburg",
+        "StreetName": "anzengruberstra\u00dfe.",
+        "HouseNumber": "21"
+    },
+    {
+        "City": "rogasen"
+    },
+    {
+        "City": "lodz",
+        "Country": "polen"
+    },
+    {
+        "house": "monaco/mo."
+    },
+    {
+        "City": "steinbach am glan"
+    },
+    {
+        "StreetName": "saarbr\u00fccken___graf-johann-str.",
+        "HouseNumber": "3___28"
+    },
+    {
+        "City": "heilshorn"
+    },
+    {
+        "house": "bous saar"
+    },
+    {
+        "City": "berlin"
+    },
+    {
+        "City": "bochum"
+    },
+    {
+        "house": "karlsruhe/baden",
+        "StreetName": "karlstr.",
+        "HouseNumber": "83"
+    },
+    {
+        "suburb": "hohenrode"
+    },
+    {
+        "City": "neuwied"
+    },
+    {
+        "HouseNumber": "3252",
+        "StreetName": "33rd st",
+        "suburb": "astoria",
+        "City": "new-york",
+        "Country": "usa"
+    },
+    {
+        "StreetName": "seubersdorf bundesstr. 77/kreis parsberg-opf."
+    },
+    {
+        "City": "velbert"
+    },
+    {
+        "City": "hamburg"
+    },
+    {
+        "City": "hoffenheim___sinsheim",
+        "Country": "kr."
+    },
+    {
+        "house": "frankfurt a/m."
+    },
+    {
+        "house": "sarajevo ademowica"
+    },
+    {
+        "house": "tel-aviv kir. schalom",
+        "HouseNumber": "42"
+    },
+    {
+        "City": "boryslaw/polen"
+    },
+    {
+        "suburb": "friedrichsrode"
+    },
+    {
+        "house": "bad t\u00f6lz",
+        "StreetName": "marktstr.",
+        "HouseNumber": "75"
+    },
+    {
+        "HouseNumber": "284",
+        "StreetName": "e 2nd.str",
+        "City": "new york city",
+        "State": "n.y.",
+        "Country": "usa"
+    },
+    {
+        "City": "bremen"
+    },
+    {
+        "house": "hofkirchen b/vilshofen"
+    },
+    {
+        "City": "heidenheim"
+    },
+    {
+        "City": "posen/ polen"
+    },
+    {
+        "house": "jaffo rh.",
+        "HouseNumber": "35/2"
+    },
+    {
+        "suburb": "hohenrode"
+    },
+    {
+        "City": "bystra",
+        "Country": "polen"
+    },
+    {
+        "house": "k\u00f6ln-d\u00fcnnwald"
+    },
+    {
+        "City": "lippstadt",
+        "StreetName": "i.w."
+    },
+    {
+        "City": "ramat gan"
+    },
+    {
+        "City": "warschau"
+    },
+    {
+        "house": "dinkelsb\u00fchl/mfr."
+    },
+    {
+        "City": "chrubieszow",
+        "Country": "polen"
+    },
+    {
+        "house": "prayjstajn cestochau"
+    },
+    {
+        "house": "bischofsburg/ostpr."
+    },
+    {
+        "City": "kassel"
+    },
+    {
+        "City": "breslau"
+    },
+    {
+        "house": "vohwinkel/wupptl.",
+        "StreetName": "letto-vorbeckstr.",
+        "HouseNumber": "58"
+    },
+    {
+        "City": "wiesbaden"
+    },
+    {
+        "house": "offenbach/mainbieber seligenst\u00e4dterstr.18",
+        "HouseNumber": "1/10"
+    }
+]

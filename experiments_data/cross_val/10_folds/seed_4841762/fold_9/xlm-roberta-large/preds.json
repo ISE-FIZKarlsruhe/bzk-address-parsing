@@ -1,0 +1,472 @@
+[
+    {
+        "Name": "Danzig"
+    },
+    {
+        "City": "Elisabethgrad",
+        "Country": "Russland"
+    },
+    {
+        "Name": "Jaffo",
+        "StreetName": "Str. 344",
+        "Unit": "No.",
+        "HouseNumber": "6"
+    },
+    {
+        "City": "Bad Lauterberg/H."
+    },
+    {
+        "Name": "Akko",
+        "City": "Bei Haifa"
+    },
+    {
+        "StreetName": "Zduska",
+        "City": "Vola",
+        "Country": "Polen"
+    },
+    {
+        "HouseNumber": "5203",
+        "StreetName": "Durocher Ave",
+        "Unit": "Apt 3",
+        "City": "Montreal",
+        "Country": "Canada"
+    },
+    {
+        "City": "Wiesbaden"
+    },
+    {
+        "City": "Czernowitz"
+    },
+    {
+        "Name": "d.",
+        "City": "Deportation"
+    },
+    {
+        "Name": "Bohnsdorf",
+        "OOV": "",
+        "Country": "b",
+        "City": "Berlin-Gr\u00fcnau"
+    },
+    {
+        "City": "Essen"
+    },
+    {
+        "City": "Bukarest"
+    },
+    {
+        "Name": "Nordheim/Krs.",
+        "City": "Heilbronn/N."
+    },
+    {
+        "Name": "Tagu-Mures",
+        "City": "Rum."
+    },
+    {
+        "Name": "DP Lager",
+        "City": "Lechfeld / Kreis Schwabm\u00fcnchen"
+    },
+    {
+        "Name": "Petach Tikwa",
+        "StreetName": "Maabra",
+        "City": "Zrif",
+        "PostalCode": "112"
+    },
+    {
+        "Name": "Caica",
+        "OOV": "Postal 3579",
+        "City": "Sao Paulo",
+        "Country": "Brasilien"
+    },
+    {
+        "City": "Berlin"
+    },
+    {
+        "City": "Dresden"
+    },
+    {
+        "StreetName": "Hohenrode",
+        "Unit": "Haus-Nr",
+        "HouseNumber": "29"
+    },
+    {
+        "City": "Neustadt/Saale"
+    },
+    {
+        "City": "Hamburg",
+        "OOV": "13",
+        "StreetName": "Isestr.",
+        "PostalCode": "55"
+    },
+    {
+        "City": "Dupnitza"
+    },
+    {
+        "Name": "Pitest",
+        "City": "Rum"
+    },
+    {
+        "City": "Dortmund-L\u00fctgendortmund"
+    },
+    {
+        "City": "Warschau",
+        "StreetName": "Solec",
+        "HouseNumber": "38 m",
+        "Unit": "39",
+        "Country": "Polen"
+    },
+    {
+        "Name": "Terbetscha",
+        "StreetName": "",
+        "City": "Lemberg",
+        "OOV": "Oesterreich",
+        "Country": "Polen"
+    },
+    {
+        "Name": "Wuppertal-E.",
+        "StreetName": "Schleswigerstr.",
+        "HouseNumber": "62"
+    },
+    {
+        "Name": "Sdeh Warburg Erif",
+        "HouseNumber": "5",
+        "StreetName": "b.",
+        "City": "Kfar Saba"
+    },
+    {
+        "HouseNumber": "69",
+        "StreetName": "Red Ave.",
+        "City": "Brooklyn",
+        "State": "N",
+        "Country": "USA."
+    },
+    {
+        "Name": "Tel-Aviv",
+        "City": "",
+        "Country": "Israel",
+        "HardSep": "",
+        "StreetName": "Bartinowa",
+        "HouseNumber": "19"
+    },
+    {
+        "City": "Bochum",
+        "StreetName": "Hattinger Str.",
+        "HouseNumber": "211"
+    },
+    {
+        "Name": "Nordheim/Krs.",
+        "City": "Heilbronn/N",
+        "Country": "",
+        "StreetName": "Kelterstr.",
+        "HouseNumber": "37."
+    },
+    {
+        "Name": "Temesvar",
+        "City": "Banat"
+    },
+    {
+        "City": "Radziwilow",
+        "Country": "Polen"
+    },
+    {
+        "City": "Berlin"
+    },
+    {
+        "HouseNumber": "451",
+        "StreetName": "Orange Street SE",
+        "City": "Washington DC"
+    },
+    {
+        "City": "Berlin"
+    },
+    {
+        "City": "Pabianice",
+        "Country": "Polen"
+    },
+    {
+        "City": "Frankfurt/Main",
+        "OOV": "",
+        "StreetName": "Voltastr.",
+        "HouseNumber": "51"
+    },
+    {
+        "Name": "Obernau, Krs.",
+        "City": "T\u00fcbingen",
+        "StreetName": "Niedernauer Str.",
+        "HouseNumber": "59"
+    },
+    {
+        "City": "Weiskirchen/Offenbach"
+    },
+    {
+        "Name": "Ffm."
+    },
+    {
+        "City": "Kassel",
+        "OOV": "",
+        "StreetName": "Hafenstr.",
+        "HouseNumber": "36 1/2"
+    },
+    {
+        "Name": "Petricken. Kr.",
+        "City": "Labian"
+    },
+    {
+        "Name": "Forbach",
+        "OOV": "Frankreich",
+        "HouseNumber": "189 a",
+        "StreetName": "Rue National"
+    },
+    {
+        "HouseNumber": "33",
+        "StreetName": "Sophienstr.",
+        "Unit": "Parz. 105",
+        "City": "Hellbrook"
+    },
+    {
+        "City": "Debreczin",
+        "Country": "Ungarn"
+    },
+    {
+        "City": "Sarajevo",
+        "Country": "Jugoslavien"
+    },
+    {
+        "OOV": "18",
+        "Name": "01.03"
+    },
+    {
+        "City": "Biedenkopf",
+        "OOV": "",
+        "StreetName": "Freiherr-v.-Stein-Str.",
+        "HouseNumber": "43"
+    },
+    {
+        "City": "Hanau"
+    },
+    {
+        "City": "Piestany",
+        "Name": "",
+        "Country": "CSR"
+    },
+    {
+        "Name": "pszeszow/Polen",
+        "StreetName": "Lwowska",
+        "HouseNumber": "40"
+    },
+    {
+        "City": "Oehringen"
+    },
+    {
+        "City": "Steinbach am Glan"
+    },
+    {
+        "City": "Budapest",
+        "Country": "Ungarn"
+    },
+    {
+        "Name": "Neu\u00df"
+    },
+    {
+        "City": "M\u00fcnchen",
+        "OOV": "",
+        "StreetName": "Odeonsplatz",
+        "HouseNumber": "1/3"
+    },
+    {
+        "City": "Wiesbaden"
+    },
+    {
+        "City": "Buenos Aires",
+        "Country": "Argentinien"
+    },
+    {
+        "City": "Bremen"
+    },
+    {
+        "City": "Birkenau/Hessen"
+    },
+    {
+        "Name": "Lemberg",
+        "Country": "Polen"
+    },
+    {
+        "HouseNumber": "284",
+        "StreetName": "E 2nd.Str.",
+        "City": "New York City",
+        "State": "N.Y.",
+        "Country": "USA"
+    },
+    {
+        "City": "Burghausen"
+    },
+    {
+        "City": "M\u00fcnchen"
+    },
+    {
+        "City": "Chitomir",
+        "Country": "Russland"
+    },
+    {
+        "City": "G\u00f6pfersgr\u00fcn"
+    },
+    {
+        "Name": "Audincourt/Doubs",
+        "Country": "Frankreich",
+        "HouseNumber": "3",
+        "StreetName": "Rue de la",
+        "City": "Yvotte"
+    },
+    {
+        "HouseNumber": "121",
+        "StreetName": "Tappan Avenue",
+        "City": "Belleville",
+        "OOV": "9",
+        "Country": "USA"
+    },
+    {
+        "Name": "Bous",
+        "StreetName": "Kirchstr.",
+        "HouseNumber": "19"
+    },
+    {
+        "Name": "Coesfeld",
+        "StreetName": "Bahnhofstr.",
+        "HouseNumber": "56"
+    },
+    {
+        "Name": "Vicente Lopes",
+        "State": "Prov",
+        "City": "Buenos-Aires",
+        "OOV": "Argent",
+        "StreetName": "25, de Mayo",
+        "HouseNumber": "102"
+    },
+    {
+        "City": "Hannover",
+        "StreetName": "G\u00f6ttinger Chaussee",
+        "HouseNumber": "39"
+    },
+    {
+        "City": "Sarajevo (Jug."
+    },
+    {
+        "City": "Berlin"
+    },
+    {
+        "Name": "R\u00f6thenbach/Pegnitz",
+        "StreetName": "Bierweg",
+        "HouseNumber": "1"
+    },
+    {
+        "City": "Charlottenburg"
+    },
+    {
+        "City": "Uffenheim"
+    },
+    {
+        "Name": "Bat Yam",
+        "Country": "Israel"
+    },
+    {
+        "Name": "Madiorban-Hedersch/Ung",
+        "City": ""
+    },
+    {
+        "Name": "Hofheim T.",
+        "StreetName": "H\u00f6lderlin-Str",
+        "HouseNumber": "4",
+        "City": "Kreis Main-Taunus",
+        "State": ""
+    },
+    {
+        "City": "Bielefeld"
+    },
+    {
+        "Name": "Bevensen",
+        "City": "Uelzen"
+    },
+    {
+        "City": "Dudweiler"
+    },
+    {
+        "StreetName": "Jerusalem",
+        "Name": "Mekor Chaim",
+        "HouseNumber": "2",
+        "OOV": "83"
+    },
+    {
+        "City": "Sosnowice",
+        "Country": "Polen"
+    },
+    {
+        "City": "Belgrad"
+    },
+    {
+        "City": "Aachen"
+    },
+    {
+        "Name": "Richen"
+    },
+    {
+        "Name": "Targu",
+        "City": "Neamtz",
+        "Country": "Rum\u00e4nien"
+    },
+    {
+        "City": "Wereshchaky",
+        "Country": "Ukraine"
+    },
+    {
+        "Name": "Ranana"
+    },
+    {
+        "City": "Coesfeld"
+    },
+    {
+        "City": "Braunschweig"
+    },
+    {
+        "City": "N\u00fcrnberg",
+        "OOV": "",
+        "StreetName": "Nibelungenstrasse",
+        "HouseNumber": "8"
+    },
+    {
+        "City": "Hamburg",
+        "Name": "Jenfeld",
+        "StreetName": "Oejendorferweg",
+        "HouseNumber": "14"
+    },
+    {
+        "City": "Cronenberg"
+    },
+    {
+        "Name": "Rawitsch/Krs.",
+        "City": "Breslau"
+    },
+    {
+        "City": "Trespol",
+        "Country": "Polen"
+    },
+    {
+        "City": "Wehlau i/Ostpr."
+    },
+    {
+        "Name": "Gronau Krs",
+        "City": "Neisse"
+    },
+    {
+        "City": "Focsani",
+        "Country": "Rum\u00e4nien"
+    },
+    {
+        "Name": "Rava",
+        "City": "Russka",
+        "Country": "Russland",
+        "OOV": ""
+    },
+    {
+        "City": "RZYKI",
+        "Country": "POLEN"
+    }
+]

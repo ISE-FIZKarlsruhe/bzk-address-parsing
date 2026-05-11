@@ -1,0 +1,466 @@
+[
+    {
+        "Name": "Kempten/Allg\u00e4u",
+        "HardSep": "",
+        "City": "Freudenberg",
+        "HouseNumber": "1"
+    },
+    {
+        "City": "M\u00fclheim/Ruhr"
+    },
+    {
+        "Name": "Petnerhas",
+        "Country": "Ungarn"
+    },
+    {
+        "City": "Frankfurt",
+        "Name": "a.M."
+    },
+    {
+        "HouseNumber": "614",
+        "StreetName": "West 136th Street",
+        "City": "New York"
+    },
+    {
+        "Name": "Wongrowitz"
+    },
+    {
+        "Name": "Lodz"
+    },
+    {
+        "Name": "Roedingen Bez.",
+        "City": "Aachen"
+    },
+    {
+        "Name": "Raanana K.K.L",
+        "HouseNumber": "78",
+        "City": "Isr."
+    },
+    {
+        "City": "Weilbach i. Taunus"
+    },
+    {
+        "City": "N\u00fcrnberg"
+    },
+    {
+        "Name": "Motzen/Krs.",
+        "City": "Teltow"
+    },
+    {
+        "Name": "Homberg Krs. Moers",
+        "StreetName": "Kapellstr.",
+        "HouseNumber": "10",
+        "OOV": "Reg. Bez.",
+        "City": "D\u00fcsseldorf"
+    },
+    {
+        "Name": "Trier"
+    },
+    {
+        "Name": "Homberg"
+    },
+    {
+        "City": "Ittlingen"
+    },
+    {
+        "Name": "K",
+        "City": "Jasenovac"
+    },
+    {
+        "Name": "T\u00fcrkheim, Krs.",
+        "City": "Mindelheim"
+    },
+    {
+        "City": "Wiedelah"
+    },
+    {
+        "City": "N\u00fcrnberg"
+    },
+    {
+        "City": "S\u00fclzbach/Opf."
+    },
+    {
+        "Name": "Eichstetten Kr.",
+        "City": "Emmendingen"
+    },
+    {
+        "City": "Ittlingen"
+    },
+    {
+        "Name": "Emerting"
+    },
+    {
+        "City": "Peterkowka"
+    },
+    {
+        "City": "Remscheid"
+    },
+    {
+        "Name": "Amberg",
+        "StreetName": "Grabenstr.",
+        "HouseNumber": "15",
+        "City": "Opf."
+    },
+    {
+        "Name": "Coesfeld",
+        "StreetName": "Bahnhofstr.",
+        "HouseNumber": "56"
+    },
+    {
+        "StreetName": "Guldbrandsg.",
+        "HouseNumber": "34",
+        "City": "Boras",
+        "Country": "Schweden"
+    },
+    {
+        "Name": "Wuppertal",
+        "StreetName": "Osterberg",
+        "HouseNumber": "52",
+        "City": "Wuppertal"
+    },
+    {
+        "City": "Frankfurt a/Main"
+    },
+    {
+        "City": "Scheumargorosch/Rum.",
+        "Name": ""
+    },
+    {
+        "HouseNumber": "36",
+        "StreetName": "Neuer Wall",
+        "OOV": "10"
+    },
+    {
+        "Name": "Izbica",
+        "StreetName": "Kujawska",
+        "City": "Krs. Kolo/Posen"
+    },
+    {
+        "City": "Rochester",
+        "Name": "",
+        "Country": "N",
+        "State": "Y",
+        "OOV": "",
+        "HouseNumber": "300",
+        "StreetName": "Joseph Ave."
+    },
+    {
+        "Name": "Ghetto",
+        "City": "Rokitno"
+    },
+    {
+        "City": "Tel-Aviv",
+        "Country": "Israel",
+        "StreetName": "Bartinorastr.",
+        "HouseNumber": "19"
+    },
+    {
+        "Name": "Dacha",
+        "City": "Wojczynska",
+        "Country": "West Ukraine"
+    },
+    {
+        "Name": "Rochest N.Y.",
+        "Country": "USA",
+        "OOV": "",
+        "HouseNumber": "1441",
+        "StreetName": "Monroe Avenue"
+    },
+    {
+        "Name": "Bingerbr\u00fcck",
+        "StreetName": "Strombergstr.",
+        "HouseNumber": "9"
+    },
+    {
+        "City": "Elberfeld"
+    },
+    {
+        "Name": "Neudek/Krs.",
+        "City": "Neutitschein",
+        "Country": "CSR."
+    },
+    {
+        "City": "Magdeburg"
+    },
+    {
+        "City": "Coesfeld"
+    },
+    {
+        "Name": "Weiler Krs",
+        "StreetName": "",
+        "City": "Schw. Gm\u00fcnd"
+    },
+    {
+        "City": "Prleworsk",
+        "Country": "Polen"
+    },
+    {
+        "City": "Szczekociny"
+    },
+    {
+        "Name": "Wuppertal",
+        "StreetName": "Hochstr.",
+        "HouseNumber": "54",
+        "OOV": "Reg. Bez.:",
+        "City": "D\u00fcsseldorf"
+    },
+    {
+        "City": "Wiesbaden"
+    },
+    {
+        "City": "Schlat"
+    },
+    {
+        "Name": "Tel-Baruch Rh.",
+        "StreetName": "S. Mesan",
+        "HouseNumber": "Nr. 9"
+    },
+    {
+        "City": "Frankfurt a/M",
+        "Name": ""
+    },
+    {
+        "Name": "Radewell",
+        "City": "Halle"
+    },
+    {
+        "City": "Mannheim"
+    },
+    {
+        "City": "Kiustendil"
+    },
+    {
+        "City": "Sao Paulo"
+    },
+    {
+        "Name": "Jaffo",
+        "OOV": "",
+        "Unit": "Rh",
+        "HouseNumber": "2"
+    },
+    {
+        "City": "Rowne",
+        "Country": "Polen"
+    },
+    {
+        "HouseNumber": "31-77",
+        "StreetName": "32nd Street",
+        "City": "Long Island City",
+        "OOV": "6",
+        "State": "N.Y",
+        "Country": "USA"
+    },
+    {
+        "Name": "Peitschendorf, Reg.Bez.",
+        "City": "M\u00fcnster"
+    },
+    {
+        "City": "Essen",
+        "OOV": "",
+        "StreetName": "Hans-Lutherstr",
+        "HouseNumber": "3"
+    },
+    {
+        "Name": "Hbg",
+        "City": "Bergedorf"
+    },
+    {
+        "Name": "Obernau, Krs.",
+        "City": "T\u00fcbingen"
+    },
+    {
+        "Name": "Erskurt/damals",
+        "Country": "Rumaenien"
+    },
+    {
+        "City": "Stuttgart-Bad Cannstatt"
+    },
+    {
+        "Name": "Weener",
+        "Country": "Ostfr."
+    },
+    {
+        "StreetName": "Hohenrode",
+        "Unit": "Haus-Nr",
+        "HouseNumber": "29"
+    },
+    {
+        "City": "T\u00fcschendorf"
+    },
+    {
+        "City": "Hamburg, Sasel",
+        "StreetName": "Saselbekweg",
+        "HouseNumber": "50"
+    },
+    {
+        "City": "Kiel"
+    },
+    {
+        "City": "F\u00fcrstenfeldbruck"
+    },
+    {
+        "City": "F\u00fcrstenfeldbruck"
+    },
+    {
+        "City": "Stefanesti",
+        "Country": "Rum\u00e4nien"
+    },
+    {
+        "Name": "Rum."
+    },
+    {
+        "City": "Wetzlar"
+    },
+    {
+        "City": "Frankfurt a.M."
+    },
+    {
+        "HouseNumber": "10",
+        "StreetName": "Osborne Terrace",
+        "City": "Newark",
+        "State": "N.J.",
+        "Country": "USA"
+    },
+    {
+        "Name": "Ingelheim Zuckerberg",
+        "HouseNumber": "23"
+    },
+    {
+        "City": "Dinkelsb\u00fchl",
+        "Country": "Mfr."
+    },
+    {
+        "Name": "Neustadt O/S."
+    },
+    {
+        "Name": "Kirjat",
+        "City": "Motzkin",
+        "Country": "Israel"
+    },
+    {
+        "Name": "Tel Aviv Sch. Makabi",
+        "StreetName": "Chadacha Str.",
+        "HouseNumber": "17 No. 7",
+        "Unit": ""
+    },
+    {
+        "Name": "Essen",
+        "StreetName": "Sundernholz",
+        "HouseNumber": "20"
+    },
+    {
+        "City": "Neuwied",
+        "Name": "Rh.",
+        "StreetName": "Werftstr.",
+        "HouseNumber": "8"
+    },
+    {
+        "City": "Debreczin",
+        "Country": "Ungarn"
+    },
+    {
+        "City": "Hannover"
+    },
+    {
+        "City": "M\u00fchlheim"
+    },
+    {
+        "Name": "N\u00fcrschan",
+        "City": "Bez.Mies/B\u00f6hmen"
+    },
+    {
+        "Name": "Amberg",
+        "StreetName": "Grabenstr.",
+        "HouseNumber": "15",
+        "City": "Opf."
+    },
+    {
+        "City": "G\u00f6ttingen",
+        "StreetName": "J\u00fcdenstr.",
+        "HouseNumber": "45"
+    },
+    {
+        "Name": "Sosnowiec/Polen",
+        "StreetName": "ul. Curie-Sklodowska",
+        "HouseNumber": "14",
+        "Unit": "Str. 43"
+    },
+    {
+        "HouseNumber": "2937",
+        "StreetName": "West 25th Str.",
+        "City": "Brooklyn",
+        "State": "",
+        "Country": "N"
+    },
+    {
+        "Name": "Caica",
+        "OOV": "Postal 3579",
+        "City": "Sao Paulo",
+        "Country": "Brasilien"
+    },
+    {
+        "City": "Holzkirchen",
+        "HardSep": "",
+        "StreetName": "Baumgartenstr.",
+        "HouseNumber": "16"
+    },
+    {
+        "City": "Gelsenkirchen"
+    },
+    {
+        "City": "Kaiserslautern"
+    },
+    {
+        "City": "Hannover",
+        "StreetName": "Wittekamp",
+        "HouseNumber": "Nr. 45"
+    },
+    {
+        "StreetName": "Worpswede",
+        "HouseNumber": "169",
+        "City": "Krs. Osterholz"
+    },
+    {
+        "City": "Leopoldshall",
+        "Country": "Anhalt"
+    },
+    {
+        "Name": "Binningen",
+        "City": "Krs. Cochem"
+    },
+    {
+        "Name": "K",
+        "Country": "KZ"
+    },
+    {
+        "City": "N\u00fcrnberg"
+    },
+    {
+        "City": "Sao Paulo",
+        "Country": "Brasilien",
+        "HardSep": "",
+        "StreetName": "Rua Santa Efigenia"
+    },
+    {
+        "Name": "Bremen-Burg",
+        "StreetName": "Burger-Dorfstr.",
+        "HouseNumber": "6",
+        "City": "Bremen"
+    },
+    {
+        "City": "Lodz",
+        "Country": "Polen"
+    },
+    {
+        "City": "Bad Kreuznach",
+        "StreetName": "Sch\u00f6ne Aussicht",
+        "HouseNumber": "12"
+    },
+    {
+        "City": "San Francisco",
+        "State": "Calif",
+        "Country": "USA",
+        "HouseNumber": "3065",
+        "StreetName": "Clay Street"
+    }
+]

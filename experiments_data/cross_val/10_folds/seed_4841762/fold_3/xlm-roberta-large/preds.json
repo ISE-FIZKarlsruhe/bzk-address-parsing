@@ -1,0 +1,485 @@
+[
+    {
+        "StreetName": "Toulouse (Hte. Garonne",
+        "HouseNumber": "140",
+        "City": "Cit\u00e9 Madrid"
+    },
+    {
+        "Name": "Deportation"
+    },
+    {
+        "Name": "Pilzen / CSR"
+    },
+    {
+        "Name": "Ingelheim/Krs.",
+        "City": "Bingen",
+        "OOV": "",
+        "StreetName": "Ob. B\u00f6hlstr.",
+        "HouseNumber": "4"
+    },
+    {
+        "City": "Auschwitz"
+    },
+    {
+        "City": "Coethen",
+        "Country": "",
+        "State": "Anhalt"
+    },
+    {
+        "City": "Breslau"
+    },
+    {
+        "City": "Hettenleidelheim"
+    },
+    {
+        "HouseNumber": "241",
+        "StreetName": "West 108th Street",
+        "City": "New York",
+        "OOV": "25"
+    },
+    {
+        "City": "Tulcea",
+        "Country": "Rum\u00e4nien"
+    },
+    {
+        "City": "Dinkelsb\u00fchl",
+        "Country": "Mfr"
+    },
+    {
+        "City": "Kielce",
+        "Country": "Polen"
+    },
+    {
+        "City": "Lodz",
+        "Country": "Polen"
+    },
+    {
+        "City": "Remscheid"
+    },
+    {
+        "City": "Dupnitza"
+    },
+    {
+        "City": "ODESSA",
+        "Country": "RUSSLAND"
+    },
+    {
+        "StreetName": "Schnellroda",
+        "City": "Kr.Merseburg"
+    },
+    {
+        "City": "Darmstadt"
+    },
+    {
+        "Name": "Jaffo Chivat",
+        "StreetName": "Alya Str.",
+        "HouseNumber": "233 Nr",
+        "Unit": "1"
+    },
+    {
+        "HouseNumber": "2680",
+        "StreetName": "Heath Ave.",
+        "Unit": "Apt. 2",
+        "City": "Bronx",
+        "State": "63 NY",
+        "Country": "USA"
+    },
+    {
+        "City": "Krzemieniec",
+        "Country": "Polen"
+    },
+    {
+        "Name": "Handorf",
+        "StreetName": "St.",
+        "City": "Anna",
+        "OOV": ""
+    },
+    {
+        "Name": "Tagu-Mures",
+        "City": "Rum."
+    },
+    {
+        "City": "Czenstochau",
+        "Country": "Polen"
+    },
+    {
+        "HouseNumber": "1700",
+        "StreetName": "Harrison Ave.",
+        "City": "Bronx.",
+        "Country": "N.Y."
+    },
+    {
+        "Name": "Osterhofen",
+        "StreetName": "Georgiplatz",
+        "HouseNumber": "247",
+        "City": "Vilshofen"
+    },
+    {
+        "Name": "Bevensen",
+        "City": "Uelzen"
+    },
+    {
+        "StreetName": "Halmei",
+        "City": "Szatmar",
+        "Country": "Rum\u00e4nien"
+    },
+    {
+        "City": "Friedrichsrode",
+        "Country": "Th\u00fcringen"
+    },
+    {
+        "City": "Wilno"
+    },
+    {
+        "HouseNumber": "45",
+        "StreetName": "Ruppin Str.",
+        "City": "Tel-Aviv",
+        "Country": "Israel",
+        "OOV": ""
+    },
+    {
+        "City": "Bergedorf",
+        "HardSep": "",
+        "StreetName": "Brinkmannstr.",
+        "HouseNumber": "16"
+    },
+    {
+        "City": "Remscheid"
+    },
+    {
+        "Name": "Plaidt"
+    },
+    {
+        "Name": "Kibarty b",
+        "City": "Eydkunen"
+    },
+    {
+        "City": "Erlangen"
+    },
+    {
+        "City": "Michelstadt im Odw."
+    },
+    {
+        "City": "Rzochow",
+        "Country": "Polen"
+    },
+    {
+        "Name": "Bendzin",
+        "Country": "Polen"
+    },
+    {
+        "City": "Thorn",
+        "State": "",
+        "Country": "Westpreussen"
+    },
+    {
+        "City": "Warschau",
+        "Country": "Polen"
+    },
+    {
+        "Name": "Bous"
+    },
+    {
+        "City": "Saloniki"
+    },
+    {
+        "City": "Tel Aviv",
+        "Country": "Israel",
+        "StreetName": "Javnestr",
+        "HouseNumber": ": 16."
+    },
+    {
+        "Name": "XXXXXX",
+        "City": "Farenland",
+        "OOV": "5"
+    },
+    {
+        "Name": "K.Z.",
+        "City": "Mauthausen"
+    },
+    {
+        "Name": "20",
+        "StreetName": "Orchideenstieg",
+        "HouseNumber": "9."
+    },
+    {
+        "Name": "<UNK> Ffm.-H\u00f6chst",
+        "StreetName": "Gartenstrasse",
+        "HouseNumber": "7"
+    },
+    {
+        "City": "Lodz",
+        "Country": "Polen"
+    },
+    {
+        "City": "Bad Mergentheim",
+        "OOV": "",
+        "StreetName": "Untere Mauergasse",
+        "HouseNumber": "23"
+    },
+    {
+        "Name": "Klingenberg/M. ;",
+        "City": "Michelstadt"
+    },
+    {
+        "City": "Auschwitz"
+    },
+    {
+        "Name": "Trier",
+        "StreetName": "Im",
+        "City": "Froschepfuhl",
+        "HouseNumber": "129"
+    },
+    {
+        "City": "Aachen",
+        "HardSep": "",
+        "StreetName": "W\u00fcllnerstr.",
+        "HouseNumber": "2a"
+    },
+    {
+        "City": "M\u00fcnchen"
+    },
+    {
+        "City": "Wehr/Baden",
+        "Name": "",
+        "HardSep": "",
+        "StreetName": "Enkendorfstr.",
+        "HouseNumber": "15."
+    },
+    {
+        "Name": "Audincourt/Doubs",
+        "Country": "France",
+        "OOV": "",
+        "HouseNumber": "3",
+        "StreetName": "Rue de la Yvotte"
+    },
+    {
+        "Name": "K.Z.",
+        "City": "Mauthausen"
+    },
+    {
+        "City": "Aachen"
+    },
+    {
+        "City": "Wiesbaden"
+    },
+    {
+        "City": "Szynawa",
+        "Country": "Polen"
+    },
+    {
+        "City": "Rostoko/Bukowina"
+    },
+    {
+        "Name": "Wuppertal-E.",
+        "StreetName": "Flensburgerstr.",
+        "HouseNumber": "56",
+        "OOV": "Reg",
+        "Unit": "Bez.",
+        "City": "D\u00fcsseldorf"
+    },
+    {
+        "City": "Stuttgart-Bad Cannstatt"
+    },
+    {
+        "City": "Wilna",
+        "Country": "Polen"
+    },
+    {
+        "Name": "Feldafing Obb",
+        "StreetName": "DP-Camp.",
+        "Unit": "Block IV a",
+        "PostalCode": "Z.30"
+    },
+    {
+        "Name": "Wangen i.A..",
+        "StreetName": "Finkenweg",
+        "HouseNumber": "5"
+    },
+    {
+        "Name": "Richen"
+    },
+    {
+        "City": "Zamosc",
+        "Country": "Polen"
+    },
+    {
+        "City": "Ostwock",
+        "Country": "Polen"
+    },
+    {
+        "Name": "Landsberg a",
+        "City": "Lech",
+        "OOV": "DP.",
+        "StreetName": "Lag",
+        "PostalCode": "B",
+        "HouseNumber": "33"
+    },
+    {
+        "Name": "d.",
+        "City": "Deportation"
+    },
+    {
+        "City": "Stanislawow",
+        "Country": "Polen"
+    },
+    {
+        "Name": "Olkusz i.D."
+    },
+    {
+        "City": "Hannover Im",
+        "StreetName": "Moore",
+        "HouseNumber": "35"
+    },
+    {
+        "StreetName": "Pungesti",
+        "City": "Vaslui"
+    },
+    {
+        "Name": "Ruskowa"
+    },
+    {
+        "City": "Rokitno",
+        "Country": "Polen"
+    },
+    {
+        "City": "Frankfurt/Main",
+        "StreetName": "Sellerstr.",
+        "HouseNumber": "30",
+        "Country": "",
+        "State": "Hessen"
+    },
+    {
+        "Name": "Rum."
+    },
+    {
+        "Name": "Ber Schewa Isr.",
+        "StreetName": "Ruben Halperin",
+        "City": "Schikun Amidar",
+        "PostalCode": "Nr",
+        "HouseNumber": "176"
+    },
+    {
+        "Name": "starnberg",
+        "StreetName": "Riederweg",
+        "HouseNumber": "40a"
+    },
+    {
+        "Name": "in",
+        "City": "der Deportation"
+    },
+    {
+        "City": "Kolmar/Posen",
+        "Name": ""
+    },
+    {
+        "Name": "Frankenthal/Pf.",
+        "StreetName": "Willestr.",
+        "HouseNumber": "2"
+    },
+    {
+        "City": "Offenbach / Main.",
+        "Country": "Hessen"
+    },
+    {
+        "City": "Magdeburg"
+    },
+    {
+        "Name": "Sudberg"
+    },
+    {
+        "Name": "Ittlingen Krs.",
+        "City": "Sinsheim"
+    },
+    {
+        "Name": "Caracas",
+        "StreetName": "Urb. Los Caobos Avda Bogota Qta",
+        "Unit": "",
+        "City": "Milagros"
+    },
+    {
+        "City": "Hamburg",
+        "OOV": "20",
+        "HouseNumber": "",
+        "StreetName": "Isestr."
+    },
+    {
+        "City": "Osnabr\u00fcck"
+    },
+    {
+        "Name": "Bonn"
+    },
+    {
+        "City": "N\u00fcrnberg",
+        "OOV": "",
+        "StreetName": "Pfeiffergasse",
+        "HouseNumber": "6"
+    },
+    {
+        "Name": "Goldberg"
+    },
+    {
+        "HouseNumber": "350",
+        "StreetName": "No. Fuller Ave",
+        "City": "Los Angeles",
+        "OOV": "36",
+        "State": "Calif.",
+        "Country": "USA"
+    },
+    {
+        "City": "New York",
+        "Country": "N",
+        "State": "Y",
+        "OOV": "",
+        "HouseNumber": "210",
+        "StreetName": "West 70 Str.",
+        "Unit": "Apt. 301"
+    },
+    {
+        "City": "Buchdorf/Schwb.",
+        "Name": ""
+    },
+    {
+        "City": "Buenos Aires",
+        "StreetName": "Ayacucho",
+        "HouseNumber": "23, 5p",
+        "Unit": "dep. I",
+        "Country": "Argentinien"
+    },
+    {
+        "Country": "Polen"
+    },
+    {
+        "Name": "Iwitz"
+    },
+    {
+        "City": "Heilbronn/N"
+    },
+    {
+        "Name": "Tirschenreuth",
+        "StreetName": "Maximiliansplatz",
+        "HouseNumber": "1",
+        "State": "Kreis Oberpfalz"
+    },
+    {
+        "HouseNumber": "451",
+        "StreetName": "Orange Street SE",
+        "City": "Washington DC"
+    },
+    {
+        "City": "Krzemieniec",
+        "Country": "Polen"
+    },
+    {
+        "Name": "Diepholz",
+        "City": "Barackenlager, Baracke",
+        "StreetName": "",
+        "HouseNumber": "4"
+    },
+    {
+        "City": "Mannheim"
+    },
+    {
+        "City": "Schweinfurt"
+    }
+]

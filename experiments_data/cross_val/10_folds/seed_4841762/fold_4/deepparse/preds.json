@@ -1,0 +1,409 @@
+[
+    {
+        "HouseNumber": "46",
+        "StreetName": "highstoen mansions camden",
+        "City": "town london",
+        "Country": "n.w",
+        "PostalCode": "1"
+    },
+    {
+        "HouseNumber": "4",
+        "StreetName": "berlin n 65 iranische str."
+    },
+    {
+        "HouseNumber": "7",
+        "StreetName": "neustadt/aisch kirchpl."
+    },
+    {
+        "StreetName": "hannover"
+    },
+    {
+        "City": "gnesen"
+    },
+    {
+        "City": "?"
+    },
+    {
+        "HouseNumber": "210",
+        "StreetName": "new york n.y. usa",
+        "Unit": "west 70 str. apt. 301"
+    },
+    {
+        "City": "burgas"
+    },
+    {
+        "HouseNumber": "123",
+        "StreetName": "rue brognies",
+        "City": "br\u00fcssel"
+    },
+    {
+        "StreetName": "niedaltdorf/saar",
+        "City": "st. antoniusheim"
+    },
+    {
+        "StreetName": "st. johann-saarbr\u00fccken"
+    },
+    {
+        "City": "n\u00fcrnberg"
+    },
+    {
+        "City": "kz"
+    },
+    {
+        "City": "krakau"
+    },
+    {
+        "HouseNumber": "201",
+        "StreetName": "reichenbach krs. karlsruhe ortsstr."
+    },
+    {
+        "City": "neuwied"
+    },
+    {
+        "City": "geisenheim/hessen"
+    },
+    {
+        "HouseNumber": "27",
+        "StreetName": "wuppertal-sudberg hintersudberg",
+        "City": "reg.bez.",
+        "Country": "d\u00fcsseldorf"
+    },
+    {
+        "StreetName": "marienchor kreis",
+        "City": "leer"
+    },
+    {
+        "City": "sofia bulg."
+    },
+    {
+        "HouseNumber": "1285",
+        "StreetName": "brook ave bronx",
+        "Unit": "56",
+        "City": "new",
+        "Country": "york"
+    },
+    {
+        "HouseNumber": "16",
+        "StreetName": "bnei brack isr. raw oto st."
+    },
+    {
+        "HouseNumber": "3/51",
+        "StreetName": "roscoe street bondi",
+        "City": "sydney/austr."
+    },
+    {
+        "StreetName": "lud str. kaf nr. 6"
+    },
+    {
+        "StreetName": "zborow -",
+        "City": "polen"
+    },
+    {
+        "City": "elisenfels"
+    },
+    {
+        "City": "kolmar/posen"
+    },
+    {
+        "City": "michelstadt/odw."
+    },
+    {
+        "StreetName": "hannover"
+    },
+    {
+        "HouseNumber": "45",
+        "StreetName": "ruppin str.",
+        "City": "tel-aviv (israel)"
+    },
+    {
+        "StreetName": "bremen",
+        "City": "klitzenburg7(gr\u00f6p.)"
+    },
+    {
+        "StreetName": "gronau",
+        "City": "krs.neisse"
+    },
+    {
+        "City": "osnabr\u00fcck"
+    },
+    {
+        "City": "breitengu\u00dfbach"
+    },
+    {
+        "City": "haspe-hagen"
+    },
+    {
+        "City": "radom"
+    },
+    {
+        "HouseNumber": "24",
+        "StreetName": "landsweiler-reden hauptstr."
+    },
+    {
+        "StreetName": "warschau /",
+        "City": "polen"
+    },
+    {
+        "City": "sofia"
+    },
+    {
+        "City": "goldberg"
+    },
+    {
+        "City": "ffm"
+    },
+    {
+        "City": "mauthausen"
+    },
+    {
+        "HouseNumber": "1",
+        "StreetName": "mannheim verl. schlachthofstr."
+    },
+    {
+        "StreetName": "dp-lager",
+        "City": "gabersee b. wasservurg/inn"
+    },
+    {
+        "StreetName": "losone csr"
+    },
+    {
+        "StreetName": "hannover"
+    },
+    {
+        "HouseNumber": "20",
+        "StreetName": "givataim/israel katznelsohnstr."
+    },
+    {
+        "HouseNumber": "31-77",
+        "StreetName": "32nd street long",
+        "Unit": "island city 6",
+        "City": "n.y.",
+        "Country": "usa"
+    },
+    {
+        "City": "krakau"
+    },
+    {
+        "StreetName": "kz buchenwald"
+    },
+    {
+        "StreetName": "sch\u00fcttorf",
+        "City": "kreis-bentheim"
+    },
+    {
+        "StreetName": "rixdorf",
+        "City": "(berlin-neuk\u00f6ln)"
+    },
+    {
+        "HouseNumber": "6",
+        "StreetName": "london n.w.",
+        "City": "canfield gardena",
+        "PostalCode": "72"
+    },
+    {
+        "City": "lehrberg/bayern"
+    },
+    {
+        "City": "meckesheim/baden"
+    },
+    {
+        "City": "sosnowice/polen"
+    },
+    {
+        "City": "schenklengsfeld"
+    },
+    {
+        "HouseNumber": "15",
+        "StreetName": "biberach bachgasse"
+    },
+    {
+        "StreetName": "bremen",
+        "City": "halligenstrasse 17/bremen"
+    },
+    {
+        "City": "auschwitz"
+    },
+    {
+        "HouseNumber": "eugenstr.",
+        "StreetName": "berlin n 65 prinz",
+        "City": "postfach",
+        "PostalCode": "1"
+    },
+    {
+        "City": "insterburg/ostpreussen"
+    },
+    {
+        "City": "m\u00fcnchen am harras",
+        "PostalCode": "7/2"
+    },
+    {
+        "StreetName": "kiriat schmone",
+        "City": "israel schikun waf",
+        "PostalCode": "421/5"
+    },
+    {
+        "HouseNumber": "20",
+        "StreetName": "grossauheim hauptstr.",
+        "City": "hanau"
+    },
+    {
+        "City": "?"
+    },
+    {
+        "HouseNumber": "14",
+        "StreetName": "friedrichschafen a.b. scheffelstr."
+    },
+    {
+        "City": "geismar"
+    },
+    {
+        "HouseNumber": "50",
+        "StreetName": "bad lauterberg/h. drahth\u00fcttenweg"
+    },
+    {
+        "City": "ffm."
+    },
+    {
+        "HouseNumber": "170",
+        "StreetName": "clymer street brooklyn",
+        "City": "n.y.",
+        "Country": "usa"
+    },
+    {
+        "City": "tel-aviv israel"
+    },
+    {
+        "City": "kolmar/posen"
+    },
+    {
+        "HouseNumber": "44",
+        "StreetName": "holon blokonim"
+    },
+    {
+        "StreetName": "hannover",
+        "City": "g\u00f6ttinger chaussee 39."
+    },
+    {
+        "City": "verschollen"
+    },
+    {
+        "StreetName": "riga latvia"
+    },
+    {
+        "HouseNumber": "166",
+        "StreetName": "urfahr/linz \u00f6sterr. gr\u00fcndberg"
+    },
+    {
+        "City": "augsburg g\u00e4rtnerstr. 29/ii"
+    },
+    {
+        "City": "wiesbaden"
+    },
+    {
+        "City": "sao",
+        "Country": "paulo"
+    },
+    {
+        "City": "lanout/polen"
+    },
+    {
+        "City": "schiffweiler"
+    },
+    {
+        "City": "warschau/polen"
+    },
+    {
+        "City": "odrin/t\u00fcrkei"
+    },
+    {
+        "City": "roman/rum\u00e4nien"
+    },
+    {
+        "City": "kaunas litauen"
+    },
+    {
+        "City": "sofia bulg."
+    },
+    {
+        "StreetName": "kfar tabor doar",
+        "City": "na hagalil hatachton"
+    },
+    {
+        "HouseNumber": "4",
+        "StreetName": "schw\u00e4b. gm\u00fcnd m\u00f6hlerstr."
+    },
+    {
+        "City": "f\u00fcrth/bayern"
+    },
+    {
+        "City": "billings"
+    },
+    {
+        "HouseNumber": "47",
+        "StreetName": "darmstadt hessen schlo\u00dfgartenstr.",
+        "City": "ptr.",
+        "PostalCode": "1"
+    },
+    {
+        "StreetName": "chawazelet",
+        "City": "b. rechwowoth/israel"
+    },
+    {
+        "StreetName": "klingenberg/m.",
+        "City": "; michelstadt"
+    },
+    {
+        "StreetName": "hannover",
+        "City": "g\u00f6ttinger chaussee 39."
+    },
+    {
+        "StreetName": "moshav zahal post",
+        "City": "na galil maaravi/israel"
+    },
+    {
+        "StreetName": "ramat-gan rchov",
+        "City": "haroe",
+        "Country": "88/israel"
+    },
+    {
+        "StreetName": "ber szewa szykun",
+        "City": "d2a israel"
+    },
+    {
+        "HouseNumber": "43",
+        "StreetName": "naumannplatz"
+    },
+    {
+        "HouseNumber": "34",
+        "StreetName": "mainz-gonsenheim eleonorenstr."
+    },
+    {
+        "HouseNumber": "35",
+        "StreetName": "eitorf bahnhofstr.",
+        "City": "reg.bez.",
+        "Country": "k\u00f6ln"
+    },
+    {
+        "HouseNumber": "1",
+        "StreetName": "higholere ave. rockdale",
+        "City": "nsw sydney australien"
+    },
+    {
+        "City": "aurich"
+    },
+    {
+        "City": "chicago/ill."
+    },
+    {
+        "City": "ostvock/polen"
+    },
+    {
+        "HouseNumber": "55b",
+        "StreetName": "kinzenbach krs. wetzlar waldstr."
+    },
+    {
+        "HouseNumber": "4",
+        "StreetName": "tel-aviv ben ami str.",
+        "City": "israel"
+    }
+]

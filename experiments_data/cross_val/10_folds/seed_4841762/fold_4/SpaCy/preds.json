@@ -1,0 +1,455 @@
+[
+    {
+        "HouseNumber": "46",
+        "StreetName": "Highstoen Mansions",
+        "Neighborhood": "Camden Town",
+        "City": "London"
+    },
+    {
+        "City": "Berlin",
+        "HouseNumber": "65___4",
+        "StreetName": "Iranische"
+    },
+    {
+        "City": "Neustadt",
+        "HouseNumber": "7"
+    },
+    {
+        "City": "Hannover"
+    },
+    {
+        "City": "Gnesen"
+    },
+    {
+        "City": "?"
+    },
+    {
+        "City": "New York",
+        "State": "N.Y.",
+        "Country": "USA",
+        "HouseNumber": "210",
+        "StreetName": "West 70 Str. Apt."
+    },
+    {
+        "City": "Burgas"
+    },
+    {
+        "HouseNumber": "123",
+        "StreetName": "Rue Brognies"
+    },
+    {
+        "City": "Niedaltdorf",
+        "State": "Saar",
+        "StreetName": "St. Antoniusheim"
+    },
+    {
+        "City": "St. Johann-Saarbr\u00fccken"
+    },
+    {
+        "City": "N\u00fcrnberg"
+    },
+    {
+        "City": "KZ"
+    },
+    {
+        "City": "Krakau"
+    },
+    {
+        "City": "Reichenbach",
+        "StreetName": "Ortsstr.",
+        "HouseNumber": "201"
+    },
+    {
+        "City": "Neuwied"
+    },
+    {
+        "City": "Geisenheim",
+        "State": "Hessen"
+    },
+    {
+        "City": "Wuppertal-Sudberg",
+        "StreetName": "Hintersudberg",
+        "HouseNumber": "27"
+    },
+    {
+        "City": "Marienchor",
+        "District": "Leer"
+    },
+    {
+        "City": "Sofia",
+        "Country": "Bulg."
+    },
+    {
+        "HouseNumber": "1285",
+        "StreetName": "Brook Ave",
+        "District": "New York"
+    },
+    {
+        "City": "Bnei Brack",
+        "Country": "Isr.",
+        "StreetName": "Raw Oto St.",
+        "HouseNumber": "16"
+    },
+    {
+        "HouseNumber": "51",
+        "StreetName": "Roscoe Street",
+        "Neighborhood": "Bondi",
+        "City": "Sydney",
+        "Country": "Austr."
+    },
+    {
+        "City": "Lud",
+        "StreetName": "Str. Kaf Nr.",
+        "HouseNumber": "6"
+    },
+    {
+        "City": "Zborow",
+        "Country": "Polen"
+    },
+    {
+        "City": "Elisenfels"
+    },
+    {
+        "City": "Kolmar"
+    },
+    {
+        "City": "Michelstadt"
+    },
+    {
+        "City": "Hannover"
+    },
+    {
+        "HouseNumber": "45",
+        "StreetName": "Ruppin Str.",
+        "Country": "Israel"
+    },
+    {
+        "City": "Bremen"
+    },
+    {
+        "City": "Gronau",
+        "District": "Neisse"
+    },
+    {
+        "City": "Osnabr\u00fcck"
+    },
+    {
+        "City": "Breitengu\u00dfbach"
+    },
+    {
+        "City": "Haspe-Hagen"
+    },
+    {
+        "City": "Radom"
+    },
+    {
+        "City": "Landsweiler-Reden",
+        "StreetName": "Hauptstr.",
+        "HouseNumber": "24"
+    },
+    {
+        "City": "Warschau",
+        "Country": "Polen"
+    },
+    {
+        "City": "Sofia"
+    },
+    {
+        "City": "Goldberg"
+    },
+    {
+        "City": "Ffm"
+    },
+    {
+        "City": "Mauthausen"
+    },
+    {
+        "City": "Mannheim",
+        "StreetName": "verl. Schlachthofstr.",
+        "HouseNumber": "1"
+    },
+    {
+        "Neighborhood": "Gabersee",
+        "City": "Wasservurg/Inn"
+    },
+    {
+        "City": "Losone",
+        "Country": "CSR"
+    },
+    {
+        "City": "Hannover"
+    },
+    {
+        "City": "Givataim",
+        "Country": "Israel",
+        "StreetName": "Katznelsohnstr.",
+        "HouseNumber": "20"
+    },
+    {
+        "HouseNumber": "31-77",
+        "StreetName": "32nd Street",
+        "Neighborhood": "Long Island City",
+        "City": "N.Y.",
+        "Country": "USA"
+    },
+    {
+        "City": "Krakau"
+    },
+    {
+        "City": "KZ",
+        "District": "Buchenwald"
+    },
+    {
+        "Neighborhood": "Sch\u00fcttorf",
+        "HouseNumber": "Kreis-Bentheim"
+    },
+    {
+        "City": "Rixdorf",
+        "District": "Berlin-Neuk\u00f6ln"
+    },
+    {
+        "City": "London",
+        "State": "N.W.",
+        "HouseNumber": "72",
+        "StreetName": "Canfield Gardena"
+    },
+    {
+        "City": "Lehrberg",
+        "State": "Bayern"
+    },
+    {
+        "City": "Meckesheim"
+    },
+    {
+        "City": "Sosnowice",
+        "Country": "Polen"
+    },
+    {
+        "City": "Schenklengsfeld"
+    },
+    {
+        "City": "Biberach",
+        "StreetName": "Bachgasse",
+        "HouseNumber": "15"
+    },
+    {
+        "City": "Bremen",
+        "StreetName": "Halligenstrasse",
+        "HouseNumber": "17",
+        "District": "Bremen"
+    },
+    {
+        "City": "Auschwitz"
+    },
+    {
+        "City": "Berlin___Postfach",
+        "HouseNumber": "65___1",
+        "StreetName": "Prinz Eugenstr."
+    },
+    {
+        "City": "Insterburg"
+    },
+    {
+        "City": "M\u00fcnchen",
+        "StreetName": "Harras",
+        "HouseNumber": "7/2"
+    },
+    {
+        "Neighborhood": "Kiriat Schmone",
+        "Country": "Israel",
+        "StreetName": "Schikun Waf",
+        "HouseNumber": "421"
+    },
+    {
+        "City": "Grossauheim___Hanau",
+        "StreetName": "Hauptstr.",
+        "HouseNumber": "20"
+    },
+    {
+        "City": "?"
+    },
+    {
+        "City": "Friedrichschafen a.B.",
+        "StreetName": "Scheffelstr.",
+        "HouseNumber": "14"
+    },
+    {
+        "City": "Geismar"
+    },
+    {
+        "City": "Bad Lauterberg",
+        "StreetName": "Drahth\u00fcttenweg",
+        "HouseNumber": "50"
+    },
+    {
+        "City": "Ffm."
+    },
+    {
+        "HouseNumber": "170",
+        "StreetName": "Clymer Street",
+        "City": "Brooklyn",
+        "State": "N.Y.",
+        "Country": "USA"
+    },
+    {
+        "City": "Tel-Aviv",
+        "Country": "Israel"
+    },
+    {
+        "City": "Kolmar"
+    },
+    {
+        "City": "Holon",
+        "StreetName": "Blokonim",
+        "HouseNumber": "44"
+    },
+    {
+        "City": "Hannover",
+        "StreetName": "G\u00f6ttinger Chaussee",
+        "HouseNumber": "39."
+    },
+    {
+        "Country": "verschollen"
+    },
+    {
+        "City": "RIGA",
+        "Neighborhood": "LATVIA"
+    },
+    {
+        "Neighborhood": "Urfahr",
+        "City": "Linz",
+        "Country": "\u00d6sterr.",
+        "StreetName": "Gr\u00fcndberg",
+        "HouseNumber": "166"
+    },
+    {
+        "City": "Augsburg",
+        "StreetName": "G\u00e4rtnerstr.",
+        "HouseNumber": "29"
+    },
+    {
+        "City": "Wiesbaden"
+    },
+    {
+        "City": "Sao Paulo"
+    },
+    {
+        "City": "Lanout",
+        "Country": "Polen"
+    },
+    {
+        "City": "Schiffweiler"
+    },
+    {
+        "City": "Warschau",
+        "Country": "Polen"
+    },
+    {
+        "City": "Odrin",
+        "Country": "T\u00fcrkei"
+    },
+    {
+        "City": "Roman",
+        "Country": "Rum\u00e4nien"
+    },
+    {
+        "City": "Kaunas"
+    },
+    {
+        "City": "Sofia",
+        "Country": "Bulg."
+    },
+    {
+        "City": "Kfar Tabor",
+        "Neighborhood": "Doar Na",
+        "StreetName": "Hatachton"
+    },
+    {
+        "City": "Schw\u00e4b. Gm\u00fcnd",
+        "StreetName": "M\u00f6hlerstr.",
+        "HouseNumber": "4"
+    },
+    {
+        "City": "F\u00fcrth",
+        "State": "Bayern"
+    },
+    {
+        "City": "Billings"
+    },
+    {
+        "City": "Darmstadt",
+        "State": "Hessen",
+        "StreetName": "Schlo\u00dfgartenstr.",
+        "HouseNumber": "47"
+    },
+    {
+        "City": "Chawazelet___Rechwowoth",
+        "Country": "Israel"
+    },
+    {
+        "City": "Klingenberg/M. ; Michelstadt"
+    },
+    {
+        "City": "Hannover",
+        "StreetName": "G\u00f6ttinger Chaussee",
+        "HouseNumber": "39."
+    },
+    {
+        "City": "Moshav",
+        "Neighborhood": "Zahal",
+        "StreetName": "Galil Maaravi",
+        "Country": "Israel"
+    },
+    {
+        "City": "Ramat-Gan",
+        "StreetName": "Rchov Haroe",
+        "HouseNumber": "88",
+        "Country": "Israel"
+    },
+    {
+        "City": "BER SZEWA",
+        "Country": "Israel"
+    },
+    {
+        "City": "Naumannplatz"
+    },
+    {
+        "StreetName": "Eleonorenstr.",
+        "HouseNumber": "34"
+    },
+    {
+        "City": "Eitorf",
+        "StreetName": "Bahnhofstr.",
+        "HouseNumber": "35"
+    },
+    {
+        "HouseNumber": "1",
+        "StreetName": "Higholere Ave.",
+        "Neighborhood": "Rockdale",
+        "State": "NSW",
+        "City": "Sydney",
+        "Country": "Australien"
+    },
+    {
+        "Neighborhood": "Aurich"
+    },
+    {
+        "City": "Chicago",
+        "State": "Ill."
+    },
+    {
+        "City": "Ostvock",
+        "Country": "Polen"
+    },
+    {
+        "City": "Kinzenbach",
+        "District": "Wetzlar",
+        "StreetName": "Waldstr.",
+        "HouseNumber": "55b"
+    },
+    {
+        "City": "Tel-Aviv",
+        "StreetName": "Ben Ami Str. 4",
+        "Country": "Israel"
+    }
+]

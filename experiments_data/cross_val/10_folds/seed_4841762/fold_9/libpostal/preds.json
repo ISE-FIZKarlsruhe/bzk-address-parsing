@@ -1,0 +1,413 @@
+[
+    {
+        "City": "danzig"
+    },
+    {
+        "house": "elisabethgrad/",
+        "Country": "russland"
+    },
+    {
+        "StreetName": "jaffo str. 344",
+        "unit": "no. 6"
+    },
+    {
+        "house": "bad lauterberg/h."
+    },
+    {
+        "category": "akko",
+        "near": "bei",
+        "City": "haifa"
+    },
+    {
+        "house": "zduska",
+        "City": "vola",
+        "Country": "polen"
+    },
+    {
+        "HouseNumber": "5203",
+        "StreetName": "durocher ave",
+        "unit": "apt 3",
+        "City": "montreal/",
+        "Country": "canada"
+    },
+    {
+        "City": "wiesbaden"
+    },
+    {
+        "City": "czernowitz"
+    },
+    {
+        "house": "d. deportation"
+    },
+    {
+        "house": "bohnsdorf b berlin-gr\u00fcnau"
+    },
+    {
+        "City": "essen"
+    },
+    {
+        "City": "bukarest"
+    },
+    {
+        "house": "nordheim/krs. heilbronn/n."
+    },
+    {
+        "house": "tagu-mures/rum."
+    },
+    {
+        "house": "dp lager lechfeld / kreis",
+        "City": "schwabm\u00fcnchen"
+    },
+    {
+        "house": "petach tikwa maabra zrif 112"
+    },
+    {
+        "StreetName": "caica postal",
+        "HouseNumber": "3579",
+        "City": "sao paulo",
+        "Country": "/brasilien"
+    },
+    {
+        "City": "berlin"
+    },
+    {
+        "City": "dresden"
+    },
+    {
+        "StreetName": "hohenrode haus-nr.",
+        "HouseNumber": "29"
+    },
+    {
+        "City": "neustadt/saale"
+    },
+    {
+        "StreetName": "hamburg___isestr.",
+        "HouseNumber": "13___55"
+    },
+    {
+        "house": "dupnitza"
+    },
+    {
+        "house": "pitest/rum."
+    },
+    {
+        "house": "dortmund-l\u00fctgendortmund"
+    },
+    {
+        "house": "warschau",
+        "StreetName": "solec",
+        "HouseNumber": "38___39/polen",
+        "unit": "m."
+    },
+    {
+        "StreetName": "terbetscha",
+        "City": "lemberg",
+        "Country": "oesterreich polen"
+    },
+    {
+        "house": "wuppertal-e.",
+        "StreetName": "schleswigerstr.",
+        "HouseNumber": "62"
+    },
+    {
+        "house": "sdeh warburg erif",
+        "HouseNumber": "5 b.",
+        "City": "kfar saba"
+    },
+    {
+        "HouseNumber": "69",
+        "StreetName": "red ave.",
+        "city_district": "brooklyn",
+        "State": "n.y.",
+        "Country": "usa."
+    },
+    {
+        "StreetName": "tel-aviv/israel bartinowa",
+        "HouseNumber": "19"
+    },
+    {
+        "house": "bochum",
+        "StreetName": "hattinger str.",
+        "HouseNumber": "211"
+    },
+    {
+        "house": "nordheim/krs. heilbronn/n",
+        "StreetName": "kelterstr.",
+        "HouseNumber": "37"
+    },
+    {
+        "house": "temesvar/banat"
+    },
+    {
+        "City": "radziwilow/polen"
+    },
+    {
+        "City": "berlin"
+    },
+    {
+        "HouseNumber": "451",
+        "StreetName": "orange street se",
+        "City": "washington",
+        "State": "dc"
+    },
+    {
+        "City": "berlin"
+    },
+    {
+        "City": "pabianice",
+        "Country": "polen"
+    },
+    {
+        "City": "frankfurt/main",
+        "StreetName": "voltastr.",
+        "HouseNumber": "51"
+    },
+    {
+        "level": "obernau krs.",
+        "City": "t\u00fcbingen",
+        "StreetName": "niedernauer str.",
+        "HouseNumber": "59"
+    },
+    {
+        "house": "weiskirchen/offenbach"
+    },
+    {
+        "house": "ffm."
+    },
+    {
+        "house": "kassel",
+        "StreetName": "hafenstr.",
+        "HouseNumber": "36 1/2"
+    },
+    {
+        "house": "petricken.",
+        "StreetName": "kr.",
+        "City": "labian"
+    },
+    {
+        "City": "forbach",
+        "StreetName": "frankreich___rue national",
+        "HouseNumber": "189 a"
+    },
+    {
+        "HouseNumber": "33___105",
+        "StreetName": "sophienstr. parz.___kleingartenver. hellbrook"
+    },
+    {
+        "City": "debreczin/",
+        "Country": "ungarn"
+    },
+    {
+        "house": "sarajevo jugoslavien"
+    },
+    {
+        "house": "18.01.03"
+    },
+    {
+        "StreetName": "biedenkopf freiherr-v.-stein-str.",
+        "HouseNumber": "43"
+    },
+    {
+        "City": "hanau"
+    },
+    {
+        "house": "piestany/csr"
+    },
+    {
+        "house": "pszeszow/polen",
+        "StreetName": "lwowska",
+        "HouseNumber": "40"
+    },
+    {
+        "City": "oehringen"
+    },
+    {
+        "City": "steinbach am glan"
+    },
+    {
+        "City": "budapest",
+        "Country": "/ungarn"
+    },
+    {
+        "house": "neu\u00df"
+    },
+    {
+        "house": "m\u00fcnchen",
+        "StreetName": "odeonsplatz",
+        "HouseNumber": "1/3"
+    },
+    {
+        "City": "wiesbaden"
+    },
+    {
+        "City": "buenos aires/",
+        "Country": "argentinien"
+    },
+    {
+        "City": "bremen"
+    },
+    {
+        "house": "birkenau/hessen"
+    },
+    {
+        "City": "lemberg",
+        "Country": "polen"
+    },
+    {
+        "HouseNumber": "284",
+        "StreetName": "e 2nd.str",
+        "City": "new york city",
+        "State": "n.y.",
+        "Country": "usa"
+    },
+    {
+        "City": "burghausen"
+    },
+    {
+        "City": "m\u00fcnchen"
+    },
+    {
+        "house": "chitomir/",
+        "Country": "russland"
+    },
+    {
+        "suburb": "g\u00f6pfersgr\u00fcn"
+    },
+    {
+        "house": "audincourt/doubs/frankreich",
+        "HouseNumber": "3",
+        "StreetName": "rue de la yvotte"
+    },
+    {
+        "HouseNumber": "121___9",
+        "StreetName": "tappan avenue belleville___n.y./kreis",
+        "Country": "usa"
+    },
+    {
+        "house": "bous",
+        "StreetName": "kirchstr.",
+        "HouseNumber": "19"
+    },
+    {
+        "house": "coesfeld",
+        "StreetName": "bahnhofstr.",
+        "HouseNumber": "56"
+    },
+    {
+        "house": "vicente lopes prov. buenos-aires/argent.",
+        "StreetName": "25 de mayo",
+        "HouseNumber": "102"
+    },
+    {
+        "house": "hannover",
+        "StreetName": "g\u00f6ttinger chaussee",
+        "HouseNumber": "39"
+    },
+    {
+        "house": "sarajevo jug."
+    },
+    {
+        "City": "berlin"
+    },
+    {
+        "house": "r\u00f6thenbach/pegnitz",
+        "StreetName": "bierweg",
+        "HouseNumber": "1"
+    },
+    {
+        "suburb": "charlottenburg"
+    },
+    {
+        "City": "uffenheim"
+    },
+    {
+        "City": "bat yam",
+        "Country": "israel"
+    },
+    {
+        "house": "madiorban-hedersch/ung."
+    },
+    {
+        "house": "hofheim t. h\u00f6lderlin-str.4 kreis main-taunus"
+    },
+    {
+        "City": "bielefeld"
+    },
+    {
+        "City": "bevensen",
+        "state_district": "uelzen"
+    },
+    {
+        "suburb": "dudweiler"
+    },
+    {
+        "StreetName": "jerusalem mekor chaim",
+        "HouseNumber": "2/83"
+    },
+    {
+        "City": "sosnowice/polen"
+    },
+    {
+        "City": "belgrad"
+    },
+    {
+        "City": "aachen"
+    },
+    {
+        "city_district": "richen"
+    },
+    {
+        "City": "targu neamtz",
+        "Country": "rum\u00e4nien"
+    },
+    {
+        "house": "wereshchaky-ukraine"
+    },
+    {
+        "City": "ranana"
+    },
+    {
+        "City": "coesfeld"
+    },
+    {
+        "City": "braunschweig"
+    },
+    {
+        "house": "n\u00fcrnberg",
+        "StreetName": "nibelungenstrasse",
+        "HouseNumber": "8"
+    },
+    {
+        "house": "hamburg jenfeld",
+        "StreetName": "oejendorferweg",
+        "HouseNumber": "14"
+    },
+    {
+        "City": "cronenberg"
+    },
+    {
+        "house": "rawitsch/krs. breslau"
+    },
+    {
+        "house": "trespol/polen"
+    },
+    {
+        "house": "wehlau i/ostpr."
+    },
+    {
+        "house": "gronau krs.neisse"
+    },
+    {
+        "City": "focsani/",
+        "Country": "rum\u00e4nien"
+    },
+    {
+        "StreetName": "rava",
+        "City": "russka",
+        "Country": "russland"
+    },
+    {
+        "City": "rzyki",
+        "Country": "polen"
+    }
+]

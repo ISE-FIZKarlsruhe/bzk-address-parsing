@@ -1,0 +1,391 @@
+[
+    {
+        "City": "danzig"
+    },
+    {
+        "City": "elisabethgrad/russland"
+    },
+    {
+        "HouseNumber": "344 no.",
+        "StreetName": "jaffo str.",
+        "Unit": "6"
+    },
+    {
+        "City": "bad lauterberg/h."
+    },
+    {
+        "City": "akko bei haifa"
+    },
+    {
+        "StreetName": "zduska vola",
+        "City": "polen"
+    },
+    {
+        "HouseNumber": "5203",
+        "StreetName": "durocher ave apt",
+        "City": "montreal/canada",
+        "PostalCode": "3"
+    },
+    {
+        "City": "wiesbaden"
+    },
+    {
+        "City": "czernowitz"
+    },
+    {
+        "StreetName": "d. deportation"
+    },
+    {
+        "StreetName": "bohnsdorf",
+        "City": "b berlin-gr\u00fcnau"
+    },
+    {
+        "City": "essen"
+    },
+    {
+        "City": "bukarest"
+    },
+    {
+        "StreetName": "nordheim/krs.",
+        "City": "heilbronn/n."
+    },
+    {
+        "City": "tagu-mures/rum."
+    },
+    {
+        "StreetName": "dp lager lechfeld /",
+        "City": "kreis schwabm\u00fcnchen"
+    },
+    {
+        "HouseNumber": "112",
+        "StreetName": "petach tikwa maabra zrif"
+    },
+    {
+        "StreetName": "caica postal",
+        "City": "sao",
+        "Country": "paulo/brasilien",
+        "PostalCode": "3579"
+    },
+    {
+        "City": "berlin"
+    },
+    {
+        "City": "dresden"
+    },
+    {
+        "HouseNumber": "29",
+        "StreetName": "hohenrode haus-nr."
+    },
+    {
+        "City": "neustadt/saale"
+    },
+    {
+        "HouseNumber": "13",
+        "StreetName": "hamburg",
+        "Unit": "isestr. 55"
+    },
+    {
+        "City": "dupnitza"
+    },
+    {
+        "City": "pitest/rum."
+    },
+    {
+        "City": "dortmund-l\u00fctgendortmund"
+    },
+    {
+        "HouseNumber": "38 m.",
+        "StreetName": "warschau solec",
+        "City": "39/polen"
+    },
+    {
+        "StreetName": "terbetscha lemberg(oesterreich) polen"
+    },
+    {
+        "HouseNumber": "62",
+        "StreetName": "wuppertal-e. schleswigerstr."
+    },
+    {
+        "StreetName": "sdeh warburg erif",
+        "City": "b. kfar",
+        "Country": "saba",
+        "PostalCode": "5"
+    },
+    {
+        "HouseNumber": "69",
+        "StreetName": "red ave. brooklyn n.y. usa."
+    },
+    {
+        "HouseNumber": "19",
+        "StreetName": "tel-aviv/israel bartinowa"
+    },
+    {
+        "HouseNumber": "211",
+        "StreetName": "bochum hattinger str."
+    },
+    {
+        "StreetName": "nordheim/krs.",
+        "City": "heilbronn/n kelterstr. 37."
+    },
+    {
+        "City": "temesvar/banat"
+    },
+    {
+        "City": "radziwilow/polen"
+    },
+    {
+        "City": "berlin"
+    },
+    {
+        "HouseNumber": "451",
+        "StreetName": "orange street se",
+        "City": "washington",
+        "Country": "dc"
+    },
+    {
+        "City": "berlin"
+    },
+    {
+        "StreetName": "pabianice",
+        "City": "- polen"
+    },
+    {
+        "HouseNumber": "51",
+        "StreetName": "frankfurt/main voltastr."
+    },
+    {
+        "HouseNumber": "59",
+        "StreetName": "obernau krs. t\u00fcbingen niedernauer str."
+    },
+    {
+        "City": "weiskirchen/offenbach"
+    },
+    {
+        "City": "ffm."
+    },
+    {
+        "HouseNumber": "36",
+        "StreetName": "kassel hafenstr.",
+        "PostalCode": "1/2"
+    },
+    {
+        "StreetName": "petricken.",
+        "City": "kr. labian"
+    },
+    {
+        "HouseNumber": "189",
+        "StreetName": "forbach (frankreich)",
+        "Unit": "a rue national"
+    },
+    {
+        "HouseNumber": "33 105",
+        "StreetName": "sophienstr. parz.",
+        "City": "kleingartenver. hellbrook"
+    },
+    {
+        "City": "debreczin/ungarn"
+    },
+    {
+        "StreetName": "sarajevo",
+        "City": "jugoslavien"
+    },
+    {
+        "PostalCode": "18.01.03"
+    },
+    {
+        "HouseNumber": "43",
+        "StreetName": "biedenkopf freiherr-v.-stein-str."
+    },
+    {
+        "City": "hanau"
+    },
+    {
+        "City": "piestany/csr"
+    },
+    {
+        "HouseNumber": "40",
+        "StreetName": "pszeszow/polen lwowska"
+    },
+    {
+        "City": "oehringen"
+    },
+    {
+        "StreetName": "steinbach am glan"
+    },
+    {
+        "City": "budapest/ungarn"
+    },
+    {
+        "City": "neu\u00df"
+    },
+    {
+        "City": "m\u00fcnchen",
+        "Country": "odeonsplatz",
+        "PostalCode": "1/3"
+    },
+    {
+        "City": "wiesbaden"
+    },
+    {
+        "StreetName": "buenos",
+        "City": "aires/argentinien"
+    },
+    {
+        "StreetName": "bremen"
+    },
+    {
+        "City": "birkenau/hessen"
+    },
+    {
+        "StreetName": "lemberg",
+        "City": "polen"
+    },
+    {
+        "HouseNumber": "284",
+        "StreetName": "e 2nd.str. new york",
+        "City": "city n.y.",
+        "Country": "usa"
+    },
+    {
+        "City": "burghausen"
+    },
+    {
+        "City": "m\u00fcnchen"
+    },
+    {
+        "City": "chitomir/russland"
+    },
+    {
+        "City": "g\u00f6pfersgr\u00fcn"
+    },
+    {
+        "HouseNumber": "3",
+        "StreetName": "audincourt/doubs/frankreich -",
+        "City": "rue de la yvotte"
+    },
+    {
+        "HouseNumber": "121",
+        "StreetName": "tappan avenue belleville",
+        "Unit": "9",
+        "City": "n.y./kreis",
+        "Country": "usa"
+    },
+    {
+        "HouseNumber": "19",
+        "StreetName": "bous kirchstr."
+    },
+    {
+        "HouseNumber": "56",
+        "StreetName": "coesfeld bahnhofstr."
+    },
+    {
+        "HouseNumber": "102",
+        "StreetName": "vicente lopes prov. buenos-aires/argent. 25 de mayo"
+    },
+    {
+        "HouseNumber": "39",
+        "StreetName": "hannover g\u00f6ttinger chaussee"
+    },
+    {
+        "City": "sarajevo (jug.)"
+    },
+    {
+        "City": "berlin"
+    },
+    {
+        "HouseNumber": "1",
+        "StreetName": "r\u00f6thenbach/pegnitz bierweg"
+    },
+    {
+        "City": "charlottenburg"
+    },
+    {
+        "City": "uffenheim"
+    },
+    {
+        "StreetName": "bat yam israel"
+    },
+    {
+        "City": "madiorban-hedersch/ung."
+    },
+    {
+        "StreetName": "hofheim t. h\u00f6lderlin-str.4",
+        "City": "kreis main-taunus"
+    },
+    {
+        "City": "bielefeld"
+    },
+    {
+        "StreetName": "bevensen (uelzen)"
+    },
+    {
+        "City": "dudweiler"
+    },
+    {
+        "StreetName": "jerusalem mekor chaim 2/83"
+    },
+    {
+        "City": "sosnowice/polen"
+    },
+    {
+        "City": "belgrad"
+    },
+    {
+        "City": "aachen"
+    },
+    {
+        "City": "richen"
+    },
+    {
+        "StreetName": "targu neamtz",
+        "City": "rum\u00e4nien"
+    },
+    {
+        "City": "wereshchaky-ukraine"
+    },
+    {
+        "City": "ranana"
+    },
+    {
+        "City": "coesfeld"
+    },
+    {
+        "City": "braunschweig"
+    },
+    {
+        "HouseNumber": "8",
+        "StreetName": "n\u00fcrnberg nibelungenstrasse"
+    },
+    {
+        "HouseNumber": "oejendorferweg 14",
+        "StreetName": "hamburg jenfeld"
+    },
+    {
+        "City": "cronenberg"
+    },
+    {
+        "StreetName": "rawitsch/krs.",
+        "City": "breslau"
+    },
+    {
+        "City": "trespol/polen"
+    },
+    {
+        "City": "wehlau i/ostpr."
+    },
+    {
+        "StreetName": "gronau",
+        "City": "krs.neisse"
+    },
+    {
+        "City": "focsani/rum\u00e4nien"
+    },
+    {
+        "StreetName": "rava russka",
+        "City": "(russland)"
+    },
+    {
+        "StreetName": "rzyki",
+        "City": "polen"
+    }
+]

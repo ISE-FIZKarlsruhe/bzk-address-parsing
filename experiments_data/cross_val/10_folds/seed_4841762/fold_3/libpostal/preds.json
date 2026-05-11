@@ -1,0 +1,406 @@
+[
+    {
+        "StreetName": "toulouse hte. garonne___cit\u00e9 madrid",
+        "HouseNumber": "140"
+    },
+    {
+        "house": "deportation"
+    },
+    {
+        "house": "pilzen / csr"
+    },
+    {
+        "house": "ingelheim/krs. bingen",
+        "StreetName": "ob. b\u00f6hlstr.",
+        "HouseNumber": "4"
+    },
+    {
+        "City": "auschwitz"
+    },
+    {
+        "City": "coethen/anhalt"
+    },
+    {
+        "City": "breslau"
+    },
+    {
+        "City": "hettenleidelheim"
+    },
+    {
+        "HouseNumber": "241___25",
+        "StreetName": "west 108th street new york"
+    },
+    {
+        "Country": "tulcea/rum\u00e4nien"
+    },
+    {
+        "house": "dinkelsb\u00fchl/mfr."
+    },
+    {
+        "City": "kielce/polen"
+    },
+    {
+        "City": "lodz/polen"
+    },
+    {
+        "City": "remscheid"
+    },
+    {
+        "house": "dupnitza"
+    },
+    {
+        "City": "odessa",
+        "Country": "russland"
+    },
+    {
+        "house": "schnellroda kr.merseburg"
+    },
+    {
+        "City": "darmstadt"
+    },
+    {
+        "house": "jaffo chivat",
+        "StreetName": "alya str. 233",
+        "HouseNumber": "nr. 1"
+    },
+    {
+        "HouseNumber": "2680___63",
+        "StreetName": "heath ave.___bronx___ny/",
+        "unit": "apt. 2",
+        "Country": "usa"
+    },
+    {
+        "City": "krzemieniec/polen"
+    },
+    {
+        "house": "handorf st. anna heim reg.bez.",
+        "City": "m\u00fcnster"
+    },
+    {
+        "house": "tagu-mures/rum."
+    },
+    {
+        "house": "czenstochau/polen"
+    },
+    {
+        "HouseNumber": "1700",
+        "StreetName": "harrison ave.",
+        "city_district": "bronx.",
+        "State": "n.y."
+    },
+    {
+        "StreetName": "osterhofen georgiplatz",
+        "HouseNumber": "247",
+        "City": "vilshofen"
+    },
+    {
+        "City": "bevensen",
+        "state_district": "uelzen"
+    },
+    {
+        "house": "halmei-szatmar/rum\u00e4nien"
+    },
+    {
+        "house": "friedrichsrode/th\u00fcringen"
+    },
+    {
+        "City": "wilno"
+    },
+    {
+        "HouseNumber": "45",
+        "StreetName": "ruppin str.",
+        "City": "tel-aviv",
+        "Country": "israel"
+    },
+    {
+        "house": "bergedorf",
+        "StreetName": "brinkmannstr.",
+        "HouseNumber": "16"
+    },
+    {
+        "City": "remscheid"
+    },
+    {
+        "City": "plaidt"
+    },
+    {
+        "house": "kibarty b/eydkunen"
+    },
+    {
+        "City": "erlangen"
+    },
+    {
+        "category": "michelstadt",
+        "near": "im",
+        "StreetName": "odw."
+    },
+    {
+        "City": "rzochow/polen"
+    },
+    {
+        "house": "bendzin / polen"
+    },
+    {
+        "house": "thorn westpreussen"
+    },
+    {
+        "City": "warschau/polen"
+    },
+    {
+        "City": "bous"
+    },
+    {
+        "City": "saloniki"
+    },
+    {
+        "StreetName": "tel aviv/israel. javnestr",
+        "HouseNumber": "16"
+    },
+    {
+        "house": "xxxxxx",
+        "StreetName": "farenland",
+        "HouseNumber": "5"
+    },
+    {
+        "Country": "k.z.",
+        "City": "mauthausen"
+    },
+    {
+        "HouseNumber": "20___9",
+        "StreetName": "orchideenstieg"
+    },
+    {
+        "house": "<unk> ffm.-h\u00f6chst",
+        "StreetName": "gartenstrasse",
+        "HouseNumber": "7"
+    },
+    {
+        "City": "lodz/polen"
+    },
+    {
+        "house": "bad mergentheim",
+        "StreetName": "untere mauergasse",
+        "HouseNumber": "23"
+    },
+    {
+        "house": "klingenberg/m.",
+        "City": "michelstadt"
+    },
+    {
+        "City": "auschwitz"
+    },
+    {
+        "house": "trier",
+        "StreetName": "im froschepfuhl",
+        "HouseNumber": "129"
+    },
+    {
+        "house": "aachen",
+        "StreetName": "w\u00fcllnerstr.",
+        "HouseNumber": "2a"
+    },
+    {
+        "City": "m\u00fcnchen"
+    },
+    {
+        "house": "wehr/baden",
+        "StreetName": "enkendorfstr.",
+        "HouseNumber": "15"
+    },
+    {
+        "house": "audincourt/doubs/france",
+        "HouseNumber": "3",
+        "StreetName": "rue de la yvotte"
+    },
+    {
+        "Country": "k.z.",
+        "City": "mauthausen"
+    },
+    {
+        "City": "aachen"
+    },
+    {
+        "City": "wiesbaden"
+    },
+    {
+        "house": "szynawa/polen"
+    },
+    {
+        "house": "rostoko/bukowina"
+    },
+    {
+        "house": "wuppertal-e.",
+        "StreetName": "flensburgerstr.___reg. bez.",
+        "HouseNumber": "56",
+        "City": "d\u00fcsseldorf"
+    },
+    {
+        "house": "stuttgart-bad cannstatt"
+    },
+    {
+        "City": "wilna/polen"
+    },
+    {
+        "StreetName": "feldafing obb. dp-camp. block iv a z.30"
+    },
+    {
+        "City": "wangen",
+        "house": "i.a.",
+        "StreetName": "finkenweg",
+        "HouseNumber": "5"
+    },
+    {
+        "city_district": "richen"
+    },
+    {
+        "City": "zamosc/polen"
+    },
+    {
+        "City": "ostwock/polen"
+    },
+    {
+        "house": "landsberg a.lech dp.-lag.b1.8/33"
+    },
+    {
+        "house": "d. deportation"
+    },
+    {
+        "City": "stanislawow/polen"
+    },
+    {
+        "City": "olkusz",
+        "Country": "i.d."
+    },
+    {
+        "house": "hannover",
+        "StreetName": "im moore",
+        "HouseNumber": "35"
+    },
+    {
+        "City": "pungesti",
+        "State": "vaslui"
+    },
+    {
+        "StreetName": "ruskowa"
+    },
+    {
+        "City": "rokitno/polen"
+    },
+    {
+        "City": "frankfurt/main sellerstr.30/frankfurt/main",
+        "State": "hessen"
+    },
+    {
+        "City": "rum."
+    },
+    {
+        "house": "ber schewa isr. ruben halperin schikun amidar nr. 176"
+    },
+    {
+        "house": "starnberg",
+        "StreetName": "riederweg",
+        "HouseNumber": "40a"
+    },
+    {
+        "StreetName": "in der deportation"
+    },
+    {
+        "house": "kolmar/posen"
+    },
+    {
+        "StreetName": "frankenthal/pf. willestr.",
+        "HouseNumber": "2"
+    },
+    {
+        "City": "offenbach / main.",
+        "State": "hessen"
+    },
+    {
+        "City": "magdeburg"
+    },
+    {
+        "City": "sudberg"
+    },
+    {
+        "level": "ittlingen krs.",
+        "City": "sinsheim"
+    },
+    {
+        "house": "caracas urb. los caobos",
+        "StreetName": "avda bogota qta. milagros"
+    },
+    {
+        "StreetName": "hamburg___isestr.",
+        "HouseNumber": "20___36"
+    },
+    {
+        "City": "osnabr\u00fcck"
+    },
+    {
+        "City": "bonn"
+    },
+    {
+        "house": "n\u00fcrnberg",
+        "StreetName": "pfeiffergasse",
+        "HouseNumber": "6"
+    },
+    {
+        "City": "goldberg"
+    },
+    {
+        "HouseNumber": "350___36",
+        "StreetName": "no. fuller ave los angeles",
+        "State": "calif.",
+        "Country": "usa"
+    },
+    {
+        "City": "new",
+        "house": "york n.y. usa",
+        "HouseNumber": "210",
+        "StreetName": "west 70 str.",
+        "unit": "apt. 301"
+    },
+    {
+        "house": "buchdorf/schwb."
+    },
+    {
+        "City": "buenos",
+        "house": "aires",
+        "StreetName": "ayacucho___5p dep. i",
+        "HouseNumber": "23",
+        "Country": "argentinien"
+    },
+    {
+        "Country": "polen"
+    },
+    {
+        "City": "iwitz"
+    },
+    {
+        "HouseNumber": "heilbronn/n"
+    },
+    {
+        "house": "tirschenreuth",
+        "StreetName": "maximiliansplatz",
+        "HouseNumber": "1/kreis",
+        "state_district": "oberpfalz"
+    },
+    {
+        "HouseNumber": "451",
+        "StreetName": "orange street se",
+        "City": "washington",
+        "State": "dc"
+    },
+    {
+        "City": "krzemieniec/polen"
+    },
+    {
+        "house": "diepholz barackenlager baracke 4"
+    },
+    {
+        "City": "mannheim"
+    },
+    {
+        "City": "schweinfurt"
+    }
+]
