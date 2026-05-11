@@ -22,6 +22,7 @@ import spacy
 from spacy.training import Example
 from spacy.util import minibatch, compounding
 from tqdm.auto import tqdm
+from modules.utils import ParsedAddressResultBuilder
 import re
 
 # ── Config ───────────────────────────────────────────────────────────────────
@@ -234,6 +235,23 @@ def train(
     print(f"\nBest val F1: {best_f1:.4f} — model saved to {output_dir}")
     return history
 
+class SpaCyAddressParser:
+    """
+    Utility class to parse addresses conforming to the other address parsers.
+    """
+    def __init__(self, model_dir: Path):
+        self.nlp = spacy.load(model_dir)
+
+    def parse_addresses(self, addresses: list[str]) -> list[dict[str, str]]:
+        results = []
+        for address in addresses:
+            doc = self.nlp(address)
+            parsed_address_builder = ParsedAddressResultBuilder(address)
+            for ent in doc.ents:
+                if ent.label_ in ENTITIES:
+                    parsed_address_builder.add_part(ent.label_, ent.text)
+            results.append(parsed_address_builder.build())
+        return results
 
 # ── Evaluation ────────────────────────────────────────────────────────────────
 
