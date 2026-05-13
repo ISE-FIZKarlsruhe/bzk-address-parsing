@@ -8,7 +8,7 @@ from tqdm.contrib.logging import tqdm_logging_redirect as tqdm
 import traceback
 import dataclasses
 import logging
-
+from collections import OrderedDict
 
 PLACE_COLS = ['ApplicantBirthPlace', 'ApplicantCurrentAddress', 'VictimBirthPlace', 'VictimDeathPlace', 'VictimCurrentAddress']
 PLACE_COLS_PREFIX = {
@@ -20,11 +20,125 @@ PLACE_COLS_PREFIX = {
 }
 REGEX = re.compile(r"^(?P<City>\w+)(\s*/\s*(?P<Country>\w+))?$")
 
-@dataclasses.dataclass
+
 class Stats:
-    addresses : int = 0
-    parsed : int = 0
-    corrected : int = 0
+    """
+    Track statistics for address parsing and matching across all location fields and entity types.
+    Maintains a DataFrame with counts for each (field_prefix, entity_type) combination.
+    """
+    def __init__(self):
+        # Create MultiIndex with all combinations of (prefix, entity_type)
+        prefixes = list(PLACE_COLS_PREFIX.values())
+        entity_types = ['City', 'Country']
+        index = pd.MultiIndex.from_product([prefixes, entity_types], names=['field', 'entity_type'])
+        
+        # Initialize DataFrame with columns for each status and summary columns
+        self.statuses = [
+            'EXACT_MATCH', 'EXACT_MATCH_CORRECTED', 'ABBREVIATION_MATCH_CORRECTED',
+            'AMBIGUOUS', 'UNRESOLVED', 'REGEX_NO_MATCH', 'POST_PROCESSING_ERROR'
+        ]
+        columns = ['input_rows', 'input_fields_with_address', 'final_count'] + self.statuses
+        self.df = pd.DataFrame(0, index=index, columns=columns)
+    
+    def update(self, prefix: str, entity_type: str, result_series: pd.Series, 
+               raw_addresses: pd.Series, final_series: pd.Series):
+        """
+        Update statistics for a specific field and entity type.
+        
+        Args:
+            prefix: Field prefix (e.g., 'abp', 'aca')
+            entity_type: 'City' or 'Country'
+            result_series: Series with status values for this entity type
+            raw_addresses: Series with raw address values
+            final_series: Series with final corrected values
+        """
+        # Count status values
+        status_counts = result_series.value_counts()
+        for status in status_counts.index:
+            self.df.at[(prefix, entity_type), status] = status_counts[status]
+        
+        # Count input rows (total rows processed)
+        self.df.at[(prefix, entity_type), 'input_rows'] = len(raw_addresses)
+        
+        # Count input fields with an address present (non-empty)
+        self.df.at[(prefix, entity_type), 'input_fields_with_address'] = (raw_addresses.astype(str).str.len() > 0).sum()
+        
+        # Count rows with a final value (non-null)
+        self.df.at[(prefix, entity_type), 'final_count'] = final_series.notna().sum()
+    
+    def __str__(self):
+        """
+        Format the statistics DataFrame with both absolute counts and percentages.
+        Percentages are calculated relative to input_rows for status columns,
+        and relative to input_fields_with_address for final_count.
+        """
+        # Create a new DataFrame with multi-level columns (value, percentage)
+        result_rows = []
+        totals_df = self.df.copy()
+        totals_df.loc[("TOTAL", "City"), :] = 0
+        totals_df.loc[("TOTAL", "Country"), :] = 0
+        totals_df.loc[("TOTAL", "TOTAL"), :] = 0
+
+        for prefix in self.df.index.get_level_values('field').unique():
+            totals_df.loc[(prefix, "TOTAL"), :] = 0
+            for entity_type in self.df.index.get_level_values('entity_type').unique():
+                totals_df.loc[(prefix, "TOTAL"), :] += self.df.loc[(prefix, entity_type), :]
+                totals_df.loc[("TOTAL", entity_type), :] += self.df.loc[(prefix, entity_type), :]
+                totals_df.loc[("TOTAL", "TOTAL"), :] += self.df.loc[(prefix, entity_type), :]
+            
+        for (field, entity_type), row in totals_df.iterrows():
+            result_row = OrderedDict()
+            input_rows = row['input_rows']
+            input_fields_with_address = row['input_fields_with_address']
+            
+            # Process each status column - calculate percentage of input_rows
+            for status in self.df.columns[3:]:  # Exclude summary columns
+                count = row[status]
+                status_upper_bound = input_rows if status == "NO_ADDRESS" else input_fields_with_address
+                if status_upper_bound > 0:
+                    pct = (count / status_upper_bound)
+                    result_row[('Status Counts', status, 'Count')] = f"{count:.0f}"
+                    result_row[('Status Counts', status, '%')] = f"{pct:.1%}"
+                else:
+                    result_row[('Status Counts', status, 'Count')] = f"{count:.0f}"
+                    result_row[('Status Counts', status, '%')] = "N/A"
+            
+            # Process summary columns
+            # input_rows - no percentage needed
+            result_row[('Summary', 'input_rows', 'Count')] = f"{input_rows:.0f}"
+            result_row[('Summary', 'input_rows', '%')] = "—"
+            
+            # input_fields_with_address - percentage of input_rows
+            count = row['input_fields_with_address']
+            if input_rows > 0:
+                pct = (count / input_rows)
+                result_row[('Summary', 'input_fields_with_address', 'Count')] = f"{count:.0f}"
+                result_row[('Summary', 'input_fields_with_address', '%')] = f"{pct:.1%}"
+            else:
+                result_row[('Summary', 'input_fields_with_address', 'Count')] = f"{count:.0f}"
+                result_row[('Summary', 'input_fields_with_address', '%')] = "N/A"
+            
+            # final_count - percentage of input_fields_with_address (where it makes sense)
+            count = row['final_count']
+            if input_fields_with_address > 0:
+                pct = (count / input_fields_with_address)
+                result_row[('Summary', 'final_count', 'Count')] = f"{count:.0f}"
+                result_row[('Summary', 'final_count', '%')] = f"{pct:.1%}"
+            else:
+                result_row[('Summary', 'final_count', 'Count')] = f"{count:.0f}"
+                result_row[('Summary', 'final_count', '%')] = "N/A"
+            
+            result_rows.append(((field, entity_type), result_row))
+        
+        # Create output DataFrame with multi-level columns
+        display_df = pd.DataFrame([row for _, row in result_rows],
+                                columns=pd.MultiIndex.from_tuples(result_rows[0][1].keys(), names=['field', 'entity_type', '']),
+                                index=pd.MultiIndex.from_tuples([idx for idx, _ in result_rows],
+                                                                  names=['field', 'entity_type'])
+        )
+        display_df.sort_index(inplace=True)
+        return display_df.to_string()
+
 
 class BasicRegexAddressParser:
     def __init__(self, fallback_parser = None):
@@ -70,7 +184,6 @@ def parse_and_correct(
     
     for field_name, prefix in PLACE_COLS_PREFIX.items():
         raw_addresses = df[field_name].fillna("").astype(str)
-        stats.addresses += len(raw_addresses)
         
         # Parse addresses using regex/LLM
         parsed_list = address_parser.parse_addresses(raw_addresses)
@@ -114,8 +227,8 @@ def parse_and_correct(
                 else:
                     result_columns[f"{prefix}_country_match"].at[idx] = regex_country
                     if regex_country and regex_country != corrected_country:
-                        stats.corrected += 1
                         result_columns[f"{prefix}_country_corrected"].at[idx] = corrected_country
+                        result_columns[f"{prefix}_country_final"].at[idx] = corrected_country
                         if edit_distance == 0:
                             result_columns[f"{prefix}_country_status"].at[idx] = "EXACT_MATCH_CORRECTED"
                         elif is_abbrev:
@@ -124,12 +237,15 @@ def parse_and_correct(
                             result_columns[f"{prefix}_country_status"].at[idx] = f"FUZZY_{edit_distance}_CORRECTED"
                     else:
                         result_columns[f"{prefix}_country_status"].at[idx] = "EXACT_MATCH"
+                        result_columns[f"{prefix}_country_final"].at[idx] = regex_country
                 
                 result_columns[f"{prefix}_country_edit_distance"].at[idx] = edit_distance
                 result_columns[f"{prefix}_country_is_abbrev"].at[idx] = is_abbrev
                 country_hints[i] = match_row["country_code"]
             elif len(row_matches) > 1:
                 result_columns[f"{prefix}_country_status"].at[idx] = "AMBIGUOUS"
+            elif raw_addresses.at[idx] == "":
+                result_columns[f"{prefix}_city_status"].at[idx] = "NO_ADDRESS"
             elif pd.isna(parsed_df.at[idx, "Country"]):
                 result_columns[f"{prefix}_country_status"].at[idx] = "UNRESOLVED"
             else:
@@ -151,8 +267,8 @@ def parse_and_correct(
                 else:
                     result_columns[f"{prefix}_city_match"].at[idx] = regex_city
                     if regex_city and regex_city != corrected_city:
-                        stats.corrected += 1
                         result_columns[f"{prefix}_city_corrected"].at[idx] = corrected_city
+                        result_columns[f"{prefix}_city_final"].at[idx] = corrected_city
                         if edit_distance == 0:
                             result_columns[f"{prefix}_city_status"].at[idx] = "EXACT_MATCH_CORRECTED"
                         elif is_abbrev:
@@ -161,6 +277,7 @@ def parse_and_correct(
                             result_columns[f"{prefix}_city_status"].at[idx] = f"FUZZY_{edit_distance}_CORRECTED"
                     else:
                         result_columns[f"{prefix}_city_status"].at[idx] = "EXACT_MATCH"
+                        result_columns[f"{prefix}_city_final"].at[idx] = regex_city
                 
                 result_columns[f"{prefix}_city_edit_distance"].at[idx] = edit_distance
                 result_columns[f"{prefix}_city_is_abbrev"].at[idx] = is_abbrev
@@ -170,18 +287,21 @@ def parse_and_correct(
                     result_columns[f"{prefix}_city_in_same_country"].at[idx] = (match_row["country_code"] == country_hints[i])
             elif len(row_matches) > 1:
                 result_columns[f"{prefix}_city_status"].at[idx] = "AMBIGUOUS"
+            elif raw_addresses.at[idx] == "":
+                result_columns[f"{prefix}_city_status"].at[idx] = "NO_ADDRESS"
             elif pd.isna(parsed_df.at[idx, "City"]):
                 result_columns[f"{prefix}_city_status"].at[idx] = "UNRESOLVED"
             else:
                 result_columns[f"{prefix}_city_status"].at[idx] = "REGEX_NO_MATCH"
         
-        # Update stats
-        has_data = (result_columns[f"{prefix}_city_match"].notna() | 
-                   result_columns[f"{prefix}_country_match"].notna())
-        stats.parsed += has_data.sum()
-        
         # Create DataFrame for this field (include index to preserve row alignment)
         result_dfs[prefix] = pd.DataFrame(result_columns)
+        
+        # Update statistics for both entity types
+        stats.update(prefix, 'City', result_columns[f"{prefix}_city_status"], 
+                    raw_addresses, result_columns[f"{prefix}_city_final"])
+        stats.update(prefix, 'Country', result_columns[f"{prefix}_country_status"], 
+                    raw_addresses, result_columns[f"{prefix}_country_final"])
     
     return result_dfs
 
@@ -236,12 +356,16 @@ def main(argv=None):
                     # Write each field's results to its respective output file
                     for prefix, result_df in result_dfs.items():
                         result_df.to_json(output_files[prefix], orient="records", lines=True, mode="a")
-                logging.info(f"Finished processing {file}. Stats so far: {stats}")
+                logging.info(f"Finished processing {file}. Stats so far:\n{stats}")
             except Exception as e:
                 if str(e) == "Query interrupted": raise
                 logging.exception(f"Error processing {file}: {e}")
                 try: pbar.update(row_counts[i])
                 except: pass
+    
+    # Log final statistics
+    logging.info("Processing complete. Final statistics:")
+    logging.info("\n" + str(stats))
 
 if __name__ == "__main__":
     main()
