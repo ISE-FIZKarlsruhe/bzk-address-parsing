@@ -4,7 +4,7 @@ from modules.utils import ParsedAddressResultBuilder
 
 DEEPPARSE_LABEL_MAPPING = {
     "StreetNumber": "HouseNumber",
-    #"StreetName": "StreetName",
+    "StreetName": "StreetName",
     "Municipality": "City",
     #"Province": "State", # note: DeepParse does not distinguish between state, province, region or country
     "Province": "Country",
