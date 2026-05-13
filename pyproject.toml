@@ -50,7 +50,8 @@ dependencies = [
     "accelerate>=0.20.0",
     "optuna>=3.0.0",
     "scikit-learn>=1.0.0",
-    "plotly>=5.0.0"
+    "plotly>=5.0.0",
+    "duckdb>=1.0.0"
 ]
 
 [project.optional-dependencies]
