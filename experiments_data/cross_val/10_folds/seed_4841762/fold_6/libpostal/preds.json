@@ -1,5 +1,51 @@
 [
     {
+        "house": "berkovitza bulg."
+    },
+    {
+        "City": "warschau"
+    },
+    {
+        "house": "ffm."
+    },
+    {
+        "house": "ffm"
+    },
+    {
+        "StreetName": "pardes chana"
+    },
+    {
+        "HouseNumber": "2434",
+        "StreetName": "e ave.",
+        "City": "cedar rapids",
+        "State": "iowa/",
+        "Country": "usa"
+    },
+    {
+        "StreetName": "chascomus",
+        "City": "f.c.s.",
+        "Country": "argentinien"
+    },
+    {
+        "StreetName": "lod/israel chet str.",
+        "HouseNumber": "11"
+    },
+    {
+        "house": "kaiserslautern",
+        "StreetName": "ebertstr.",
+        "HouseNumber": "83 a"
+    },
+    {
+        "City": "lemberg"
+    },
+    {
+        "City": "wilna/polen"
+    },
+    {
+        "StreetName": "trier hospitalfeld",
+        "HouseNumber": "8"
+    },
+    {
         "house": "kempten/allg\u00e4u",
         "StreetName": "freudenberg",
         "HouseNumber": "1"
@@ -50,13 +96,21 @@
         "HouseNumber": "10"
     },
     {
-        "City": "trier"
+        "level": "weiler krs.",
+        "StreetName": "schw.",
+        "City": "gm\u00fcnd"
     },
     {
         "City": "homberg"
     },
     {
-        "City": "ittlingen"
+        "house": "tel aviv schech schapira re<unk> schiwat",
+        "StreetName": "zion",
+        "HouseNumber": "18"
+    },
+    {
+        "City": "goslar.",
+        "PostalCode": "jakobistr.36"
     },
     {
         "Country": "kz",
@@ -70,17 +124,25 @@
         "City": "wiedelah"
     },
     {
-        "City": "n\u00fcrnberg"
+        "City": "neu isenburg"
     },
     {
-        "house": "s\u00fclzbach/opf."
+        "City": "heppenheim"
     },
     {
-        "City": "eichstetten___emmendingen",
-        "Country": "kr."
+        "house": "berg.-gladbach",
+        "StreetName": "jakobstr.",
+        "HouseNumber": "117",
+        "City": "reg.bez.k\u00f6ln"
     },
     {
-        "City": "ittlingen"
+        "City": "krasnojarsk/",
+        "Country": "russland"
+    },
+    {
+        "City": "fuveau",
+        "state_district": "bouches du rhone",
+        "Country": "frankreich"
     },
     {
         "house": "emerting"
@@ -89,23 +151,19 @@
         "house": "peterkowka"
     },
     {
-        "City": "remscheid"
+        "StreetName": "weinsberg b. heilbronn stadtseestr.",
+        "HouseNumber": "25"
     },
     {
-        "house": "amberg___opf.",
-        "StreetName": "grabenstr.",
-        "HouseNumber": "15"
+        "house": "neybator"
     },
     {
-        "house": "coesfeld",
-        "StreetName": "bahnhofstr.",
-        "HouseNumber": "56"
+        "City": "radziwilow/polen"
     },
     {
-        "StreetName": "guldbrandsg.",
-        "HouseNumber": "34",
-        "City": "boras",
-        "Country": "schweden"
+        "house": "giwataim",
+        "StreetName": "schenkinstr.___israel",
+        "HouseNumber": "79"
     },
     {
         "house": "wuppertal",
@@ -136,8 +194,7 @@
         "City": "rokitno"
     },
     {
-        "StreetName": "tel-aviv/israel bartinorastr.",
-        "HouseNumber": "19"
+        "house": "giwataim"
     },
     {
         "StreetName": "dacha wojczynska",
@@ -164,18 +221,22 @@
         "City": "magdeburg"
     },
     {
-        "City": "coesfeld"
+        "house": "tiaveco/csr."
     },
     {
-        "level": "weiler krs.",
-        "StreetName": "schw.",
-        "City": "gm\u00fcnd"
+        "house": "stuttgart-stammheim",
+        "StreetName": "charlottenstr.",
+        "HouseNumber": "22"
     },
     {
         "City": "prleworsk/polen"
     },
     {
-        "City": "szczekociny"
+        "HouseNumber": "311",
+        "StreetName": "lincoln rd.",
+        "City": "miami beach",
+        "State": "florida/",
+        "Country": "usa"
     },
     {
         "house": "wuppertal",
@@ -194,7 +255,7 @@
         "HouseNumber": "nr. 9"
     },
     {
-        "house": "frankfurt a/m."
+        "house": "rawitsch/krs. breslau"
     },
     {
         "suburb": "radewell",
@@ -204,25 +265,26 @@
         "City": "mannheim"
     },
     {
-        "City": "kiustendil"
+        "house": "hausen/offenbach-main"
     },
     {
         "City": "sao paulo"
     },
     {
-        "house": "jaffo rh.",
-        "HouseNumber": "35/2"
+        "StreetName": "bockum-h\u00f6vel geinegge",
+        "HouseNumber": "35/l\u00fcdinghausen"
     },
     {
-        "City": "rowne/polen"
-    },
-    {
-        "HouseNumber": "31-77",
-        "StreetName": "32nd street",
-        "suburb": "long island city",
-        "City": "6",
-        "State": "n.y.",
+        "HouseNumber": "131",
+        "StreetName": "stockton str.",
+        "City": "brooklyn",
+        "State": "nj",
         "Country": "usa"
+    },
+    {
+        "house": "berg",
+        "StreetName": "ludwigstr.",
+        "HouseNumber": "27"
     },
     {
         "house": "peitschendorf reg.bez.",
@@ -235,12 +297,12 @@
         "house": "hbg-bergedorf"
     },
     {
-        "level": "obernau krs.",
-        "City": "t\u00fcbingen"
+        "City": "oehringen"
     },
     {
-        "house": "erskurt/damals",
-        "Country": "rumaenien"
+        "house": "n\u00fcrnberg",
+        "StreetName": "am maxfeld",
+        "HouseNumber": "144"
     },
     {
         "house": "stuttgart-bad cannstatt"
@@ -249,8 +311,11 @@
         "house": "weener/ostfr."
     },
     {
-        "StreetName": "hohenrode haus-nr.",
-        "HouseNumber": "29"
+        "HouseNumber": "1285___56",
+        "StreetName": "brook ave bronx___new york"
+    },
+    {
+        "City": "berlin"
     },
     {
         "house": "t\u00fcschendorf"
@@ -263,16 +328,19 @@
         "City": "kiel"
     },
     {
-        "City": "f\u00fcrstenfeldbruck"
+        "HouseNumber": "241___25",
+        "StreetName": "west 108th street new york"
     },
     {
-        "City": "f\u00fcrstenfeldbruck"
+        "house": "unna",
+        "StreetName": "dorotheenstr.",
+        "HouseNumber": "53 b/unna"
     },
     {
         "house": "stefanesti/rum\u00e4nien"
     },
     {
-        "City": "rum."
+        "house": "preuss.eylau/ ostpr."
     },
     {
         "City": "wetzlar"
@@ -297,6 +365,10 @@
         "house": "dinkelsb\u00fchl mfr."
     },
     {
+        "StreetName": "tel-aviv/israel bartinowa",
+        "HouseNumber": "19"
+    },
+    {
         "house": "neustadt o/s."
     },
     {
@@ -312,27 +384,28 @@
         "HouseNumber": "20"
     },
     {
-        "house": "neuwied/rh.",
-        "StreetName": "werftstr.",
-        "HouseNumber": "8"
+        "house": "wuppertal-e.",
+        "StreetName": "flensburgerstr.___reg. bez.",
+        "HouseNumber": "56",
+        "City": "d\u00fcsseldorf"
     },
     {
         "City": "debreczin/",
         "Country": "ungarn"
     },
     {
-        "City": "hannover"
+        "City": "auschwitz"
     },
     {
         "suburb": "m\u00fchlheim"
     },
     {
-        "house": "n\u00fcrschan bez.mies/b\u00f6hmen"
+        "City": "warschau",
+        "Country": "polen"
     },
     {
-        "house": "amberg___opf.",
-        "StreetName": "grabenstr.",
-        "HouseNumber": "15"
+        "HouseNumber": "3/51",
+        "StreetName": "roscoe street bondi sydney/austr."
     },
     {
         "house": "g\u00f6ttingen",
@@ -345,75 +418,9 @@
         "HouseNumber": "43"
     },
     {
-        "HouseNumber": "2937",
-        "StreetName": "west 25th str.",
-        "city_district": "brooklyn",
-        "State": "n.y."
+        "City": "berlin"
     },
     {
-        "StreetName": "caica postal",
-        "HouseNumber": "3579",
-        "City": "sao paulo",
-        "Country": "/brasilien"
-    },
-    {
-        "house": "holzkirchen",
-        "StreetName": "baumgartenstr.",
-        "HouseNumber": "16"
-    },
-    {
-        "City": "gelsenkirchen"
-    },
-    {
-        "City": "kaiserslautern"
-    },
-    {
-        "house": "hannover",
-        "StreetName": "wittekamp",
-        "HouseNumber": "nr. 45"
-    },
-    {
-        "StreetName": "worpswede",
-        "HouseNumber": "169",
-        "City": "krs.",
-        "state_district": "osterholz"
-    },
-    {
-        "StreetName": "leopoldshall / anhalt"
-    },
-    {
-        "level": "binningen krs.",
-        "City": "cochem"
-    },
-    {
-        "Country": "kz"
-    },
-    {
-        "City": "n\u00fcrnberg"
-    },
-    {
-        "house": "sao paulo/brasilien",
-        "StreetName": "rua santa efigenia"
-    },
-    {
-        "house": "bremen-burg",
-        "StreetName": "burger-dorfstr.",
-        "HouseNumber": "6",
-        "City": "bremen"
-    },
-    {
-        "City": "lodz/polen"
-    },
-    {
-        "house": "bad kreuznach",
-        "StreetName": "sch\u00f6ne aussicht",
-        "HouseNumber": "12"
-    },
-    {
-        "City": "san francisco",
-        "State": "calif.",
-        "Country": "usa",
-        "PostalCode": "3065",
-        "StreetName": "clay street"
+        "City": "san mateo"
     }
 ]

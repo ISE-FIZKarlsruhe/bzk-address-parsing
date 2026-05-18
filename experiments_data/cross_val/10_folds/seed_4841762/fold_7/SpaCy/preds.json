@@ -1,13 +1,70 @@
 [
     {
-        "City": "Losone",
-        "Country": "CSR"
+        "City": "Holzkirchen",
+        "StreetName": "Baumgartenstr.",
+        "HouseNumber": "16"
     },
     {
-        "City": "D\u00fcsseldorf",
-        "StreetName": "Stahlwerkstr.",
-        "HouseNumber": "1",
-        "District": "D\u00fcsseldorf"
+        "City": "Gelsenkirchen"
+    },
+    {
+        "City": "Kaiserslautern"
+    },
+    {
+        "City": "Hannover",
+        "StreetName": "Wittekamp Nr.",
+        "HouseNumber": "45"
+    },
+    {
+        "City": "Worpswede",
+        "HouseNumber": "169",
+        "District": "Osterholz"
+    },
+    {
+        "City": "Leopoldshall",
+        "District": "Anhalt"
+    },
+    {
+        "City": "Binningen",
+        "District": "Cochem"
+    },
+    {},
+    {
+        "City": "N\u00fcrnberg"
+    },
+    {
+        "City": "Sao Paulo",
+        "Country": "Brasilien",
+        "StreetName": "Rua Santa Efigenia"
+    },
+    {
+        "City": "Bremen-Burg",
+        "StreetName": "Burger-Dorfstr.",
+        "HouseNumber": "6",
+        "District": "Bremen"
+    },
+    {
+        "City": "Br\u00fchl",
+        "StreetName": "Kempishofstr.",
+        "HouseNumber": "6",
+        "District": "K\u00f6ln"
+    },
+    {
+        "City": "Bat Yam",
+        "Country": "Israel"
+    },
+    {
+        "City": "San Francisco",
+        "State": "Calif.",
+        "Country": "USA",
+        "HouseNumber": "3065",
+        "StreetName": "Clay Street"
+    },
+    {
+        "City": "Friedrichsrode"
+    },
+    {
+        "City": "Frankfurt"
     },
     {
         "City": "Hildesheim",
@@ -15,8 +72,10 @@
         "HouseNumber": "56"
     },
     {
-        "City": "Lemberg",
-        "Country": "Polen"
+        "Neighborhood": "Bnei Brack",
+        "Country": "Isr.",
+        "StreetName": "Raw Oto St.",
+        "HouseNumber": "16"
     },
     {
         "City": "D\u00fcsseldorf"
@@ -25,7 +84,11 @@
         "City": "Drohobycz"
     },
     {
-        "City": "Berlin-Zehlendorf"
+        "Neighborhood": "Schikun",
+        "District": "Nowe-Nejman",
+        "StreetName": "Doar Ramat aim",
+        "HouseNumber": "54",
+        "Country": "Israel"
     },
     {
         "City": "Asdod-Iam",
@@ -34,9 +97,7 @@
         "Country": "Israel"
     },
     {
-        "Neighborhood": "Meschek Ginossar",
-        "Country": "Israel",
-        "City": "Tiberias"
+        "City": "Theresienstadt"
     },
     {
         "City": "K\u00f6ln"
@@ -49,35 +110,36 @@
         "Country": "Polen"
     },
     {
-        "City": "Tel-Aviv Merkaz Mishari",
+        "City": "Br\u00e4tz"
+    },
+    {
+        "City": "Tel-Aviv",
+        "StreetName": "Merkaz Mishari",
         "HouseNumber": "93"
     },
     {
-        "City": "Hannover"
+        "City": "Kiustendil"
     },
     {
-        "City": "M\u00fcnchen",
-        "StreetName": "Odeonsplatz",
-        "HouseNumber": "1/3"
+        "City": "Chorz\u00f3w-Batory"
     },
     {
         "Neighborhood": "Bohnsdorf",
-        "District": "Berlin-Gr\u00fcnau"
+        "HouseNumber": "Berlin-Gr\u00fcnau"
     },
     {
-        "City": "K\u00f6ln-D\u00fcnnwald",
-        "StreetName": "Pr\u00e4monstratenserstr.",
-        "HouseNumber": "72",
-        "District": "K\u00f6ln"
+        "City": "St. Ryj",
+        "Country": "Ukrainien"
     },
     {
         "City": "Erfurt"
     },
     {
-        "Neighborhood": "KZ. Mauthausen"
+        "District": "Mauthausen"
     },
     {
-        "City": "Schweinfurt"
+        "City": "Petricken",
+        "District": "Labian"
     },
     {
         "City": "Welky Bicskiv"
@@ -86,18 +148,24 @@
         "City": "Aschbach"
     },
     {
-        "City": "Berschewa",
-        "Country": "Israel"
+        "City": "Hameln",
+        "StreetName": "Friedrichstr.",
+        "HouseNumber": "14"
+    },
+    {
+        "City": "Acco Tzafon",
+        "Country": "Israel",
+        "Neighborhood": "Str. Herzl",
+        "HouseNumber": "Block 1"
     },
     {
         "City": "Berlin"
     },
     {
-        "City": "Focsani",
-        "Country": "Rum\u00e4nien"
+        "City": "Becherbach"
     },
     {
-        "Neighborhood": "Kz. Jasenovac"
+        "District": "Jasenovac"
     },
     {
         "City": "Sarajevo"
@@ -114,31 +182,42 @@
         "District": "D\u00fcsseldorf"
     },
     {
-        "City": "M\u00fcnchen___Herzog"
+        "City": "M\u00fcnchen",
+        "StreetName": "Herzog Heinrichstr.30"
     },
     {
         "HouseNumber": "2",
-        "City": "Hamburg"
+        "District": "Hamburg"
     },
     {
-        "City": "Sprendlingen",
-        "StreetName": "Wingertstr.",
-        "HouseNumber": "22"
+        "City": "Amberg",
+        "StreetName": "Grabenstr.",
+        "HouseNumber": "15"
     },
     {
         "City": "Frankenthal"
     },
     {
-        "HouseNumber": "unbekannt"
+        "City": "unbekannt"
+    },
+    {
+        "City": "Dinkelsb\u00fchl"
     },
     {
         "City": "Freiburg",
         "StreetName": "G\u00fcnterstalstr.",
         "HouseNumber": "54."
     },
-    {},
     {
-        "City": "Michelstadt"
+        "City": "Eichstetten",
+        "District": "Emmendingen"
+    },
+    {
+        "City": "Kothau"
+    },
+    {
+        "City": "Odrin",
+        "District": "T\u00fcrkei"
     },
     {
         "City": "Danzig"
@@ -152,35 +231,31 @@
         "City": "Fulda"
     },
     {
-        "HouseNumber": "51",
-        "StreetName": "Roscoe Street",
-        "Neighborhood": "Bondi",
-        "City": "Sydney",
-        "Country": "Austr."
+        "City": "K\u00f6ln-D\u00fcnnwald"
     },
     {
         "City": "Brotdorf",
-        "State": "Saar"
+        "District": "Saar"
     },
     {
-        "City": "Jaffo",
-        "Country": "Israel",
-        "StreetName": "87 Str. Nr.",
-        "HouseNumber": "28"
+        "HouseNumber": "60",
+        "StreetName": "Thayer",
+        "City": "New York"
     },
     {
-        "HouseNumber": "1544",
-        "StreetName": "Union St.",
-        "City": "Brooklyn"
+        "City": "Niederlahnstein",
+        "StreetName": "Bahnhofsstr.",
+        "HouseNumber": "13a"
     },
     {
-        "City": "Ramat Rachel Jerusalem",
+        "Neighborhood": "Ramat Rachel",
+        "City": "Jerusalem",
         "Country": "Israel"
     },
     {
-        "City": "Handorf",
-        "StreetName": "St. Anna Heim",
-        "District": "M\u00fcnster"
+        "City": "Jaffo",
+        "StreetName": "Rh. 43 Nr.",
+        "HouseNumber": "14"
     },
     {
         "City": "Leeste",
@@ -194,15 +269,14 @@
         "City": "Wratza",
         "Country": "Bulg."
     },
+    {},
     {
-        "City": "Wereshchaky-Ukraine"
+        "City": "Galden",
+        "StreetName": "Wilhe\u00f6mstalerstr.",
+        "HouseNumber": "79"
     },
     {
-        "City": "Elberfeld"
-    },
-    {
-        "City": "Ittlingen",
-        "District": "Sinsheim"
+        "City": "Trier"
     },
     {
         "City": "Berg.-Gladbach",
@@ -221,6 +295,7 @@
         "Country": "Israel"
     },
     {
+        "City": "Berlin-Zehlendorf",
         "StreetName": "Fischerh\u00fcttenstr.",
         "HouseNumber": "57"
     },
@@ -231,13 +306,14 @@
         "Country": "Israel"
     },
     {
+        "City": "Jaffa",
         "Country": "Israel",
         "StreetName": "Reh___Nr.",
         "HouseNumber": "206"
     },
     {
-        "City": "KIROVOGRAD",
-        "District": "Elisabethgrad), Russia"
+        "City": "KIROVOGRAD___Russia",
+        "District": "Elisabethgrad)"
     },
     {
         "City": "Rehden"
@@ -245,7 +321,9 @@
     {
         "HouseNumber": "1594",
         "StreetName": "Eastern Parkway",
-        "City": "Brooklyn"
+        "City": "Brooklyn",
+        "State": "N.Y.",
+        "Country": "U.S.A."
     },
     {
         "City": "Friedrichsrode"
@@ -254,9 +332,16 @@
         "City": "Frankenthal"
     },
     {
+        "City": "Rowne",
+        "Country": "Polen"
+    },
+    {
         "City": "Lud",
         "StreetName": "Str. Kaf Nr.",
         "HouseNumber": "6"
+    },
+    {
+        "City": "Schleiz"
     },
     {
         "City": "Wu.-Elberfeld",
@@ -282,28 +367,22 @@
     {
         "City": "Sao Paulo",
         "StreetName": "Rua Teodoro Sampaio",
-        "HouseNumber": "1542 Apr."
+        "HouseNumber": "1542"
     },
     {
         "HouseNumber": "28___101",
         "StreetName": "Veddeler Reichsstr."
     },
     {
-        "City": "N\u00fcrnberg",
-        "StreetName": "Vestnertorgraben",
-        "HouseNumber": "13",
-        "District": "Mittelfranken"
+        "City": "Warnsdorf"
     },
     {
         "City": "Beuthen"
     },
     {
-        "HouseNumber": "1",
-        "StreetName": "Higholere Ave.",
-        "Neighborhood": "Rockdale",
-        "State": "NSW",
-        "City": "Sydney",
-        "Country": "Australien"
+        "City": "Sdeh Warburg",
+        "HouseNumber": "5",
+        "Neighborhood": "Kfar Saba"
     },
     {
         "City": "Hannover"
@@ -312,8 +391,7 @@
         "City": "Lom"
     },
     {
-        "City": "Hamburg",
-        "Neighborhood": "Eidelstedt",
+        "City": "Hamburg, Eidelstedt",
         "StreetName": "Lentf\u00f6hrdenerweg",
         "HouseNumber": "13I"
     },
@@ -322,8 +400,7 @@
         "State": "Hessen"
     },
     {
-        "City": "Berschewa",
-        "Country": "Israel"
+        "City": "Delmenhorst"
     },
     {
         "City": "Lodz",
@@ -360,87 +437,9 @@
         "Country": "Canada"
     },
     {
-        "City": "New York City",
+        "City": "New York City___N.Y.",
         "HouseNumber": "241",
         "StreetName": "West 208th street",
-        "Country": "USA"
-    },
-    {
-        "City": "Sao Paulo",
-        "Country": "Brasilien"
-    },
-    {
-        "City": "Zdunska Wola"
-    },
-    {
-        "City": "Nordheim",
-        "District": "Heilbronn",
-        "StreetName": "Kelterstr.",
-        "HouseNumber": "37."
-    },
-    {
-        "City": "Bremerhaven-M.",
-        "StreetName": "Langemarckstr.",
-        "HouseNumber": "28"
-    },
-    {
-        "StreetName": "La Lucila.",
-        "City": "San Lorenzo",
-        "HouseNumber": "734___Argenti-",
-        "State": "Prov.B' Aires",
-        "Country": "nien"
-    },
-    {
-        "City": "M\u00fcnchen",
-        "StreetName": "Ohlm\u00fcllerstr.",
-        "HouseNumber": "11"
-    },
-    {
-        "City": "M\u00fcnchen",
-        "District": "Todeserkl\u00e4rung"
-    },
-    {
-        "City": "Jerusalem",
-        "Neighborhood": "Mekor Chaim",
-        "HouseNumber": "2"
-    },
-    {
-        "Neighborhood": "Alba Julia",
-        "Country": "Rum\u00e4nien"
-    },
-    {
-        "City": "Sevlus",
-        "Country": "CSR"
-    },
-    {
-        "City": "Cicago. Jll.",
-        "HouseNumber": "7015",
-        "StreetName": "Jeffery Blvd."
-    },
-    {
-        "City": "Wiehlm\u00fcnden Reg.",
-        "District": "K\u00f6ln"
-    },
-    {
-        "City": "Bad Kreuznach"
-    },
-    {
-        "City": "Kusel"
-    },
-    {
-        "City": "Loiching",
-        "District": "Dingolfing"
-    },
-    {
-        "City": "Schweinfurt",
-        "StreetName": "Klingenh\u00f6he",
-        "HouseNumber": "14"
-    },
-    {
-        "Country": "Rum\u00e4nien"
-    },
-    {
-        "City": "Gymeskoezeplok",
-        "Country": "Ungarn"
+        "Country": "USA."
     }
 ]

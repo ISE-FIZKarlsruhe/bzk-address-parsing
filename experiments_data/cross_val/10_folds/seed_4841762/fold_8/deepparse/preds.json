@@ -1,24 +1,93 @@
 [
     {
-        "StreetName": "meschek ginossar/israel",
-        "City": "post tiberias"
+        "City": "sao",
+        "Country": "paulo/brasilien"
     },
     {
-        "City": "zarki/polen"
+        "StreetName": "zdunska",
+        "City": "wola"
+    },
+    {
+        "City": "tecs\u00f6/csr"
+    },
+    {
+        "City": "wehlau i/ostpr."
+    },
+    {
+        "StreetName": "la lucila. san lorenzo",
+        "City": "( prov.b' aires) argenti-",
+        "Country": "nien",
+        "PostalCode": "734"
+    },
+    {
+        "StreetName": "m\u00fcnchen",
+        "City": "ohlm\u00fcllerstr.",
+        "PostalCode": "11/111"
+    },
+    {
+        "StreetName": "m\u00fcnchen",
+        "City": "lt. todeserkl\u00e4rung"
+    },
+    {
+        "StreetName": "jerusalem mekor chaim 2/83"
+    },
+    {
+        "City": "alba julia rum\u00e4nien"
+    },
+    {
+        "City": "sevlus/csr"
+    },
+    {
+        "StreetName": "cicago. jll.",
+        "City": "jeffery blvd.",
+        "PostalCode": "7015"
+    },
+    {
+        "City": "wiehlm\u00fcnden reg. bez.",
+        "Country": "k\u00f6ln"
+    },
+    {
+        "PostalCode": "18.01.03"
+    },
+    {
+        "City": "kusel"
+    },
+    {
+        "StreetName": "loiching/naby.",
+        "City": "b. dingolfing"
+    },
+    {
+        "HouseNumber": "14",
+        "StreetName": "schweinfurt/m. klingenh\u00f6he"
+    },
+    {
+        "City": "rum\u00e4nien"
+    },
+    {
+        "City": "tagu-mures/rum."
+    },
+    {
+        "City": "worms"
+    },
+    {
+        "HouseNumber": "1482",
+        "StreetName": "buenos aires/argent. ciudad de la paz",
+        "City": "piso",
+        "PostalCode": "7"
     },
     {
         "City": "bochum"
     },
     {
-        "City": "krefeld"
+        "City": "lespezi rum\u00e4nien"
     },
     {
         "HouseNumber": "17",
         "StreetName": "saarbr\u00fccken weinbergweg"
     },
     {
-        "HouseNumber": "166",
-        "StreetName": "urfahr/linz \u00f6sterr. gr\u00fcndberg"
+        "StreetName": "nordheim/krs.",
+        "City": "heilbronn/n kelterstr. 37."
     },
     {
         "HouseNumber": "22",
@@ -30,9 +99,9 @@
         "City": "warsaw-polen"
     },
     {
-        "HouseNumber": "55",
-        "StreetName": "kinzenbach waldstr.",
-        "City": "b/wetzlar"
+        "HouseNumber": "usa 246",
+        "StreetName": "n. fulton ave",
+        "Unit": "baltimore 23 maryland"
     },
     {
         "StreetName": "toulouse (hte. garonne)",
@@ -42,6 +111,11 @@
     },
     {
         "City": "g\u00f6pfersgr\u00fcn"
+    },
+    {
+        "HouseNumber": "22",
+        "StreetName": "sprendlingen wingertstr.",
+        "City": "hinterhaus"
     },
     {
         "HouseNumber": "19",
@@ -60,7 +134,8 @@
         "City": "lodz/polen"
     },
     {
-        "City": "plovdiv bulg."
+        "HouseNumber": "2",
+        "StreetName": "amsterdam oranje nassaulaan"
     },
     {
         "City": "michelstadt/odenwald"
@@ -80,21 +155,17 @@
         "City": "bruttig"
     },
     {
-        "HouseNumber": "56",
-        "StreetName": "wuppertal-e. flensburgerstr.",
-        "City": "reg. bez.",
-        "Country": "d\u00fcsseldorf"
+        "City": "weimar"
     },
     {
-        "HouseNumber": "55",
-        "StreetName": "kinzenbach waldstr.",
-        "City": "b/wetzlar"
+        "StreetName": "petach tikwa nachlat zwi/israel"
     },
     {
         "City": "mannheim"
     },
     {
-        "City": "mannheim"
+        "HouseNumber": "32",
+        "StreetName": "opladen bielertstr."
     },
     {
         "HouseNumber": "40",
@@ -136,9 +207,8 @@
         "StreetName": "bremen am rosenberg"
     },
     {
-        "HouseNumber": "344 no.",
-        "StreetName": "jaffo str.",
-        "Unit": "6"
+        "StreetName": "hausen",
+        "City": "liebknechtstr. 23/offenbach/main"
     },
     {
         "HouseNumber": "8",
@@ -164,10 +234,8 @@
         "City": "rokitno"
     },
     {
-        "StreetName": "acco tzafon - israel -",
-        "City": "str. herzl",
-        "Country": "block",
-        "PostalCode": "1/4"
+        "StreetName": "arzberg schulgasse",
+        "City": "3/kreis wunsiedel/ofr."
     },
     {
         "HouseNumber": "31",
@@ -195,8 +263,7 @@
         "City": "j\u00f6hlingen/krs.durlach/baden."
     },
     {
-        "StreetName": "ittlingen krs.",
-        "City": "sinsheim"
+        "City": "koblenz"
     },
     {
         "HouseNumber": "193",
@@ -212,7 +279,10 @@
         "PostalCode": "1145"
     },
     {
-        "City": "hagen-haspe"
+        "HouseNumber": "300",
+        "StreetName": "riverside drive",
+        "Unit": "apt. 4d new york 24",
+        "City": "ny."
     },
     {
         "StreetName": "los angeles/usa"
@@ -230,7 +300,10 @@
         "StreetName": "bremen osterholzer landstr."
     },
     {
-        "City": "dortmund"
+        "StreetName": "n\u00fcrnberg voigtl\u00e4nderstr. 3 n\u00fcrnberg; ludw.",
+        "Unit": "feuerb.str.",
+        "City": "mfr",
+        "PostalCode": "19"
     },
     {
         "City": "m\u00fcnchen"
@@ -243,8 +316,9 @@
         "City": "teley/laun"
     },
     {
-        "StreetName": "eichstetten kr.",
-        "City": "emmendingen"
+        "HouseNumber": "11",
+        "StreetName": "genf/schweiz",
+        "City": "rue marignac"
     },
     {
         "StreetName": "bremen",
@@ -288,13 +362,14 @@
         "StreetName": "sosnowitz limanowskiego"
     },
     {
-        "City": "rowne/polen"
+        "StreetName": "rosvegovo",
+        "City": "csr"
     },
     {
         "City": "mannheim"
     },
     {
-        "City": "theresienstadt"
+        "City": "hoffenheim"
     },
     {
         "City": "obergimpern"
@@ -334,79 +409,11 @@
         "City": "dachau"
     },
     {
+        "HouseNumber": "70",
+        "StreetName": "compayne gardens",
+        "Unit": "london n.w. 6"
+    },
+    {
         "StreetName": "nevel (russland)"
-    },
-    {
-        "City": "serodzige",
-        "Country": "polen"
-    },
-    {
-        "HouseNumber": "83",
-        "StreetName": "ludwigshafen mandacherstr."
-    },
-    {
-        "StreetName": "tel-aviv schderoth",
-        "City": "nordau",
-        "Country": "22/israel"
-    },
-    {
-        "City": "thessaloniki/griechenld"
-    },
-    {
-        "HouseNumber": "r.d.5",
-        "StreetName": "tuckahoe road",
-        "City": "vineland/n.j.",
-        "Country": "usa"
-    },
-    {
-        "HouseNumber": "19",
-        "StreetName": "hamburg",
-        "City": "osterstr. 22."
-    },
-    {
-        "City": "mannheim"
-    },
-    {
-        "HouseNumber": "3",
-        "StreetName": "audincourt/doubs/france - rue de la yvotte"
-    },
-    {
-        "StreetName": "jerusalem beth",
-        "City": "russo igst kapaim israel"
-    },
-    {
-        "City": "odrin/t\u00fcrkei"
-    },
-    {
-        "HouseNumber": "329",
-        "StreetName": "glendale",
-        "City": "a mira loma"
-    },
-    {
-        "HouseNumber": "300",
-        "StreetName": "chascomus f.c.s. argentinien calle sarmiento"
-    },
-    {
-        "HouseNumber": "46",
-        "StreetName": "dortmund nordstr."
-    },
-    {
-        "HouseNumber": "21",
-        "StreetName": "ako rech. hei",
-        "City": "israel"
-    },
-    {
-        "City": "m\u00fcnchen"
-    },
-    {
-        "StreetName": "schladen kreis goslar"
-    },
-    {
-        "HouseNumber": "54",
-        "StreetName": "schikun nowe-nejman doar ramat aim",
-        "City": "israel"
-    },
-    {
-        "City": "kerprich-hemmersdorf"
     }
 ]

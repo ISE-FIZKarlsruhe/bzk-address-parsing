@@ -1,18 +1,101 @@
 [
     {
-        "Name": "Meschek Ginossar/Israel",
-        "OOV": "",
-        "City": "Post Tiberias"
+        "City": "Sao Paulo",
+        "Country": "Brasilien"
     },
     {
-        "City": "Zarki",
-        "Country": "Polen"
+        "City": "Zdunska Wola"
+    },
+    {
+        "Name": "Tecs\u00f6/CSR"
+    },
+    {
+        "City": "Wehlau i/Ostpr."
+    },
+    {
+        "Name": "La Lucila",
+        "StreetName": "San Lorenzo",
+        "HouseNumber": "734",
+        "State": "Prov",
+        "City": "B' Aires",
+        "Country": "Argenti- nien"
+    },
+    {
+        "City": "M\u00fcnchen",
+        "StreetName": "Ohlm\u00fcllerstr.",
+        "PostalCode": "11/111"
+    },
+    {
+        "City": "M\u00fcnchen",
+        "Name": "lt. Todeserkl\u00e4rung",
+        "OOV": ""
+    },
+    {
+        "StreetName": "Jerusalem",
+        "Name": "Mekor Chaim",
+        "HouseNumber": "2",
+        "OOV": "83"
+    },
+    {
+        "City": "Alba Julia",
+        "Country": "Rum\u00e4nien"
+    },
+    {
+        "Name": "Sevlus/CSR"
+    },
+    {
+        "Name": "Cicago. Jll",
+        "Unit": "",
+        "HouseNumber": "7015",
+        "StreetName": "Jeffery Blvd."
+    },
+    {
+        "StreetName": "Wiehlm\u00fcnden",
+        "Name": "Reg",
+        "OOV": "Bez.",
+        "City": "K\u00f6ln"
+    },
+    {
+        "OOV": "18",
+        "Name": "01.03"
+    },
+    {
+        "Name": "Kusel"
+    },
+    {
+        "Name": "Loiching/Naby.",
+        "City": "b. Dingolfing"
+    },
+    {
+        "City": "Schweinfurt",
+        "Name": "M.",
+        "StreetName": "Klingenh\u00f6he",
+        "HouseNumber": "14"
+    },
+    {
+        "Country": "Rum\u00e4nien"
+    },
+    {
+        "Name": "Tagu-Mures",
+        "City": "Rum."
+    },
+    {
+        "City": "Worms"
+    },
+    {
+        "Name": "Buenos Aires/Argent",
+        "StreetName": "",
+        "City": "Ciudad de la Paz",
+        "PostalCode": "1482",
+        "HouseNumber": "7",
+        "Unit": "piso"
     },
     {
         "City": "Bochum"
     },
     {
-        "City": "Krefeld"
+        "City": "Lespezi",
+        "Country": "Rum\u00e4nien"
     },
     {
         "City": "Saarbr\u00fccken",
@@ -20,10 +103,11 @@
         "HouseNumber": "17"
     },
     {
-        "Name": "Urfahr/Linz",
-        "StreetName": "\u00d6sterr.",
-        "City": "Gr\u00fcndberg",
-        "HouseNumber": "166"
+        "Name": "Nordheim/Krs.",
+        "City": "Heilbronn/N",
+        "Country": "",
+        "StreetName": "Kelterstr.",
+        "HouseNumber": "37."
     },
     {
         "Name": "Emden",
@@ -37,10 +121,12 @@
         "Country": "Polen"
     },
     {
-        "Name": "Kinzenbach",
-        "StreetName": "Waldstr.",
-        "HouseNumber": "55 b",
-        "City": "Wetzlar"
+        "City": "Baltimore",
+        "OOV": "23",
+        "State": "Maryland",
+        "Country": "USA",
+        "HouseNumber": "246",
+        "StreetName": "N. Fulton Ave"
     },
     {
         "StreetName": "Toulouse (Hte. Garonne",
@@ -49,6 +135,12 @@
     },
     {
         "City": "G\u00f6pfersgr\u00fcn"
+    },
+    {
+        "Name": "Sprendlingen",
+        "StreetName": "Wingertstr.",
+        "HouseNumber": "22",
+        "City": "Hinterhaus"
     },
     {
         "City": "M\u00fcnchen",
@@ -68,8 +160,9 @@
         "Country": "Polen"
     },
     {
-        "City": "Plovdiv",
-        "Country": "Bulg."
+        "City": "AMSTERDAM Oranje",
+        "StreetName": "Nassaulaan",
+        "HouseNumber": "2"
     },
     {
         "City": "Michelstadt/Odenwald"
@@ -91,24 +184,21 @@
         "Name": "Bruttig"
     },
     {
-        "Name": "Wuppertal-E.",
-        "StreetName": "Flensburgerstr.",
-        "HouseNumber": "56",
-        "OOV": "Reg",
-        "Unit": "Bez.",
-        "City": "D\u00fcsseldorf"
+        "City": "Weimar"
     },
     {
-        "Name": "Kinzenbach",
-        "StreetName": "Waldstr.",
-        "HouseNumber": "55 b",
-        "City": "Wetzlar"
+        "Name": "Petach Tikwa",
+        "City": "Nachlat Zwi",
+        "Country": "Israel"
     },
     {
         "City": "Mannheim"
     },
     {
-        "City": "Mannheim"
+        "City": "Opladen",
+        "HardSep": "",
+        "StreetName": "Bielertstr.",
+        "HouseNumber": "32"
     },
     {
         "Name": "Gschwendt",
@@ -161,10 +251,10 @@
         "HouseNumber": "15"
     },
     {
-        "Name": "Jaffo",
-        "StreetName": "Str. 344",
-        "Unit": "No.",
-        "HouseNumber": "6"
+        "Name": "Hausen",
+        "StreetName": "Liebknechtstr.",
+        "HouseNumber": "23",
+        "City": "Offenbach/Main"
     },
     {
         "City": "N\u00fcrnberg",
@@ -198,10 +288,11 @@
         "City": "Rokitno"
     },
     {
-        "Name": "Acco Tzafon",
-        "HardSep": "Israel",
-        "StreetName": "Str. Herzl Block",
-        "HouseNumber": "1/4"
+        "Name": "Arzberg",
+        "StreetName": "Schulgasse",
+        "HouseNumber": "3",
+        "City": "Kreis Wunsiedel",
+        "Country": "Ofr."
     },
     {
         "City": "Sao Paulo",
@@ -235,8 +326,7 @@
         "City": "J\u00f6hlingen/Krs.Durlach/Baden."
     },
     {
-        "Name": "Ittlingen Krs.",
-        "City": "Sinsheim"
+        "City": "Koblenz"
     },
     {
         "StreetName": "Niederklein",
@@ -252,7 +342,12 @@
         "HouseNumber": "1145"
     },
     {
-        "Name": "Hagen-Haspe"
+        "HouseNumber": "300",
+        "StreetName": "Riverside Drive",
+        "Unit": "Apt. 4D",
+        "City": "New York",
+        "OOV": "24",
+        "Country": "NY."
     },
     {
         "City": "Los Angeles",
@@ -276,7 +371,11 @@
         "HouseNumber": "94"
     },
     {
-        "City": "Dortmund"
+        "Name": "N\u00fcrnberg",
+        "StreetName": "Voigtl\u00e4nderstr.",
+        "HouseNumber": "3",
+        "City": "N\u00fcrnberg",
+        "Country": ";"
     },
     {
         "City": "M\u00fcnchen"
@@ -291,8 +390,11 @@
         "City": "Laun"
     },
     {
-        "Name": "Eichstetten Kr.",
-        "City": "Emmendingen"
+        "City": "Genf",
+        "OOV": "",
+        "Country": "Schweiz",
+        "HouseNumber": "11",
+        "StreetName": "Rue Marignac"
     },
     {
         "City": "Bremen",
@@ -345,14 +447,13 @@
         "HouseNumber": "14"
     },
     {
-        "City": "Rowne",
-        "Country": "Polen"
+        "Name": "Rosvegovo CSR"
     },
     {
         "City": "Mannheim"
     },
     {
-        "City": "Theresienstadt"
+        "City": "Hoffenheim"
     },
     {
         "City": "Obergimpern"
@@ -398,100 +499,14 @@
         "City": "Dachau"
     },
     {
+        "Name": "London",
+        "OOV": "N.W.",
+        "HouseNumber": "6 70",
+        "City": "Compayne Gardens"
+    },
+    {
         "Name": "Nevel",
         "Country": "Russland",
         "OOV": ""
-    },
-    {
-        "City": "SERODZIGE",
-        "Country": "Polen"
-    },
-    {
-        "City": "Ludwigshafen",
-        "StreetName": "Mandacherstr.",
-        "HouseNumber": "83"
-    },
-    {
-        "City": "Tel-Aviv",
-        "StreetName": "Schderoth Nordau",
-        "HouseNumber": "22",
-        "Country": "Israel"
-    },
-    {
-        "City": "Thessaloniki",
-        "Country": "Griechenld"
-    },
-    {
-        "Name": "R.D.",
-        "HouseNumber": "5",
-        "StreetName": "Tuckahoe Road",
-        "City": "Vineland",
-        "State": "N.J",
-        "Country": "USA"
-    },
-    {
-        "City": "Hamburg",
-        "OOV": "19",
-        "StreetName": "Osterstr.",
-        "HouseNumber": "22."
-    },
-    {
-        "City": "Mannheim"
-    },
-    {
-        "Name": "Audincourt/Doubs",
-        "Country": "France",
-        "HouseNumber": "3",
-        "StreetName": "Rue de la Yvotte"
-    },
-    {
-        "StreetName": "Jerusalem, Beth",
-        "Name": "Russo",
-        "City": "Igst Kapaim",
-        "Country": "Israel"
-    },
-    {
-        "Name": "Odrin/T\u00fcrkei"
-    },
-    {
-        "StreetName": "Glendale",
-        "HouseNumber": "329 A",
-        "City": "Mira Loma"
-    },
-    {
-        "Name": "Chascomus F.C.S.",
-        "OOV": "Argentinien",
-        "StreetName": "Calle Sarmiento",
-        "HouseNumber": "300"
-    },
-    {
-        "City": "Dortmund",
-        "OOV": "",
-        "StreetName": "Nordstr.",
-        "HouseNumber": "46"
-    },
-    {
-        "Name": "Ako",
-        "StreetName": "Rech.",
-        "City": "Hei",
-        "HouseNumber": "21",
-        "Country": "Israel"
-    },
-    {
-        "City": "M\u00fcnchen"
-    },
-    {
-        "StreetName": "Schladen",
-        "City": "Kreis Goslar"
-    },
-    {
-        "Name": "Schikun Nowe-Nejman",
-        "StreetName": "Doar Ramat aim",
-        "HouseNumber": "54",
-        "Country": "Israel"
-    },
-    {
-        "City": "Kerprich-Hemmersdorf",
-        "Name": ""
     }
 ]

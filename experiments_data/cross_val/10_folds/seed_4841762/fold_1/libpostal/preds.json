@@ -1,10 +1,13 @@
 [
     {
-        "City": "auschwitz"
+        "house": "trondheim/norwegen"
     },
     {
-        "StreetName": "jerusalem mekor chaim",
-        "HouseNumber": "2/83"
+        "City": "tel-aviv",
+        "Country": "israel"
+    },
+    {
+        "City": "recklinghausen"
     },
     {
         "HouseNumber": "241___25",
@@ -13,184 +16,118 @@
         "Country": "usa."
     },
     {
-        "City": "jaroslaw",
-        "Country": "polen"
-    },
-    {
-        "City": "bielefeld___detmold",
-        "StreetName": "schildescherstr.___reg. bez.",
-        "HouseNumber": "88"
-    },
-    {
-        "StreetName": "gumbinnen"
-    },
-    {
-        "house": "szellau/ungarn"
-    },
-    {
-        "City": "dortmund"
-    },
-    {
-        "house": "van nuys-los",
-        "City": "angeles___chandler",
-        "State": "calif.___bld.",
-        "PostalCode": "13929",
-        "Country": "usa"
-    },
-    {
-        "City": "m\u00fcnchen"
-    },
-    {
-        "house": "dp lager lechfeld / kreis",
-        "City": "schwabm\u00fcnchen"
-    },
-    {
-        "City": "dombrowica/polen"
-    },
-    {
-        "house": "k\u00f6ln-d\u00fcnnwald",
-        "StreetName": "pr\u00e4monstratenserstr.",
-        "HouseNumber": "72",
-        "City": "k\u00f6ln"
-    },
-    {
-        "house": "meckl"
-    },
-    {
-        "StreetName": "hamburg___sierichstr.",
-        "HouseNumber": "39___153"
-    },
-    {
-        "house": "ober-ramstadt",
-        "StreetName": "am am frankenh\u00e4user pfad",
-        "HouseNumber": "2",
-        "City": "darmstadt"
-    },
-    {
-        "City": "hamburg"
-    },
-    {
-        "house": "mering b. augsburg",
-        "StreetName": "kirchstr.",
-        "HouseNumber": "22"
-    },
-    {
-        "City": "schnaittenbach"
-    },
-    {
-        "HouseNumber": "311",
-        "StreetName": "lincoln rd.",
-        "City": "miami beach",
-        "State": "florida/",
-        "Country": "usa"
-    },
-    {
-        "City": "moinesti"
-    },
-    {
-        "house": "kassel wilhelmsh\u00f6he bremel",
-        "StreetName": "bachstr.",
-        "HouseNumber": "14",
-        "suburb": "kreis",
-        "City": "kassel"
-    },
-    {
-        "Country": "k.z.",
-        "City": "auschwitz/polen"
-    },
-    {
-        "house": "sao paulo/brasilien",
-        "StreetName": "rua santa efigenia",
-        "HouseNumber": "31"
-    },
-    {
-        "City": "sofia"
-    },
-    {
-        "house": "fulda",
-        "StreetName": "unterm hl.kreuz",
-        "HouseNumber": "7/fulda"
-    },
-    {
-        "house": "natania schikun",
-        "StreetName": "vatikim",
-        "HouseNumber": "nr. 132"
-    },
-    {
-        "suburb": "hamburg-altona"
-    },
-    {
-        "City": "baranow/polen"
-    },
-    {
-        "City": "jedwejow/polen"
-    },
-    {
-        "City": "zarki/polen"
-    },
-    {
-        "City": "?"
-    },
-    {
-        "City": "neu isenburg"
+        "StreetName": "tel aviv hebronstr.",
+        "HouseNumber": "5/israel"
     },
     {
         "StreetName": "tel-aviv israel kiriat schalom",
         "HouseNumber": "42"
     },
     {
-        "house": "chawazelet b. rechowoth/israel"
+        "state_district": "leer/ostfriesland"
     },
     {
-        "house": "glenbokie/polen"
+        "StreetName": "new york___n.y. 481 fort washington ave.",
+        "HouseNumber": "33"
     },
     {
-        "HouseNumber": "2252",
-        "StreetName": "w. logan blvd.",
-        "City": "chicago",
-        "State": "ill.",
-        "PostalCode": "60647"
+        "City": "hamburg"
     },
     {
-        "house": "stellingen",
-        "StreetName": "steenwisch",
-        "HouseNumber": "99"
+        "City": "rum."
     },
     {
-        "City": "stol/polen"
+        "house": "n\u00fcrnberg",
+        "StreetName": "mommsenstrasse",
+        "HouseNumber": "41"
     },
     {
-        "City": "jablonka/polen"
+        "house": "diepholz barackenlager baracke 4"
     },
     {
-        "house": "berlin-zehlendorf teichstr.9"
+        "StreetName": "hamburg___sierichstr.",
+        "HouseNumber": "39___153"
     },
     {
-        "City": "zborow",
+        "house": "bielsko ul.3-go maja 1a durch die poln.mil.mission berlin"
+    },
+    {
+        "City": "auschwitz"
+    },
+    {
+        "City": "berlin"
+    },
+    {
+        "City": "radom"
+    },
+    {
+        "City": "plaidt"
+    },
+    {
+        "City": "jena/th\u00fcringen"
+    },
+    {
+        "City": "izdebki",
         "Country": "polen"
     },
     {
-        "StreetName": "tel aviv hebronstr.",
-        "HouseNumber": "5/israel"
+        "house": "biberach",
+        "StreetName": "bachgasse",
+        "HouseNumber": "15"
     },
     {
-        "City": "bamberg"
+        "StreetName": "2114-79 st.",
+        "City": "jackson heights.",
+        "State": "n.y.",
+        "Country": "usa"
     },
     {
-        "City": "pungesti",
-        "State": "vaslui"
+        "house": "ghetto",
+        "City": "rokitno"
     },
     {
-        "house": "erskurt/damals",
-        "Country": "rumaenien"
+        "City": "schnaittenbach"
     },
     {
-        "city_district": "heidelsheim"
+        "City": "jaroslaw/polen"
     },
     {
-        "StreetName": "rava",
-        "City": "russka",
-        "Country": "russland"
+        "City": "baranow/polen"
+    },
+    {
+        "house": "witten a.d. ruhr"
+    },
+    {
+        "City": "hamburg"
+    },
+    {
+        "City": "kossow"
+    },
+    {
+        "StreetName": "tel aviv/israel. javnestr",
+        "HouseNumber": "16"
+    },
+    {
+        "City": "moinesti"
+    },
+    {
+        "house": "bous",
+        "StreetName": "friedrich-ebert-str.",
+        "HouseNumber": "41"
+    },
+    {
+        "StreetName": "hamburg___bachstr.",
+        "HouseNumber": "21___125i"
+    },
+    {
+        "house": "rt.l",
+        "po_box": "box 318",
+        "City": "cotati/",
+        "State": "california",
+        "Country": "usa"
+    },
+    {
+        "City": "iwitz"
     },
     {
         "StreetName": "jaffo strasse",
@@ -199,10 +136,113 @@
         "city_district": "israel"
     },
     {
-        "house": "prichsenstadt/unterfr."
+        "house": "d\u00fcsseldorf",
+        "StreetName": "stahlwerkstr.",
+        "HouseNumber": "1/d\u00fcsseldorf"
     },
     {
-        "City": "recklinghausen"
+        "house": "szellau/ungarn"
+    },
+    {
+        "City": "elberfeld"
+    },
+    {
+        "house": "handorf st. anna heim reg.bez.",
+        "City": "m\u00fcnster"
+    },
+    {
+        "house": "marstetten-aitrach",
+        "StreetName": "kr.",
+        "City": "wangen"
+    },
+    {
+        "City": "?"
+    },
+    {
+        "City": "aachen"
+    },
+    {
+        "house": "east-ormund",
+        "City": "melbourne",
+        "StreetName": "vic./australia___lancaster str.",
+        "HouseNumber": "53"
+    },
+    {
+        "City": "olkusz",
+        "Country": "i.d."
+    },
+    {
+        "City": "mannheim"
+    },
+    {
+        "City": "lodz/polen"
+    },
+    {
+        "StreetName": "jaffa avodat israel",
+        "HouseNumber": "4"
+    },
+    {
+        "City": "krasnojarsk/",
+        "Country": "russland"
+    },
+    {
+        "StreetName": "tel-aviv/israel bartinorastr.",
+        "HouseNumber": "19"
+    },
+    {
+        "City": "odessa/",
+        "Country": "russland"
+    },
+    {
+        "City": "schwelm___arnsberg",
+        "StreetName": "weilent\u00e4uschenstr.___reg. bez.",
+        "HouseNumber": "3"
+    },
+    {
+        "City": "jablonka/polen"
+    },
+    {
+        "house": "galizien"
+    },
+    {
+        "City": "ittlingen"
+    },
+    {
+        "City": "hamburg"
+    },
+    {
+        "StreetName": "schd. nordau",
+        "HouseNumber": "22",
+        "City": "tel aviv",
+        "Country": "israel"
+    },
+    {
+        "City": "bad kreuznach"
+    },
+    {
+        "level": "obernau krs.",
+        "City": "t\u00fcbingen",
+        "StreetName": "niedernauer str.",
+        "HouseNumber": "59"
+    },
+    {
+        "city_district": "heidelsheim"
+    },
+    {
+        "City": "th\u00fcngen"
+    },
+    {
+        "City": "frankfurt/main",
+        "StreetName": "voltastr.",
+        "HouseNumber": "51"
+    },
+    {
+        "StreetName": "hamburg___isestr.",
+        "HouseNumber": "20___36"
+    },
+    {
+        "City": "visaul de sus",
+        "Country": "romania."
     },
     {
         "house": "visek"
@@ -221,112 +261,24 @@
         "City": "jaworzno/polen"
     },
     {
-        "house": "wien 3",
-        "StreetName": "lagergasse",
-        "HouseNumber": "2"
+        "Country": "kz"
     },
     {
         "house": "pantin/seine"
     },
     {
-        "house": "verschollen"
+        "City": "berg"
     },
     {
-        "StreetName": "burgheim___kr.",
-        "HouseNumber": "nr. 14",
-        "City": "neuburg/donau",
-        "state_district": "schwaben"
+        "City": "heidenheim"
     },
     {
-        "City": "schleiz"
+        "City": "lodz"
     },
     {
-        "City": "?"
-    },
-    {
-        "StreetName": "sveav\u00e4gen",
-        "HouseNumber": "126",
-        "City": "stockholm/",
-        "Country": "schweden"
-    },
-    {
-        "house": "hoffenheim/baden"
-    },
-    {
-        "City": "odessa/",
-        "Country": "russland"
-    },
-    {
-        "City": "wilno",
-        "Country": "polen"
-    },
-    {
-        "City": "memmingen"
-    },
-    {
-        "house": "nordia b. nazhania pob 92/israel"
-    },
-    {
-        "City": "frankfurt/main",
-        "State": "hessen"
-    },
-    {
-        "Country": "kz"
-    },
-    {
-        "house": "montreal/que. canada",
-        "HouseNumber": "758",
-        "StreetName": "querbes avenue"
-    },
-    {
-        "house": "frankfurt/main-fechenheim"
-    },
-    {
-        "house": "hannover",
-        "StreetName": "im moore",
-        "HouseNumber": "35"
-    },
-    {
-        "house": "drancy/seine",
-        "HouseNumber": "22",
-        "StreetName": "rue d'harmonie",
-        "Country": "frankreich"
-    },
-    {
-        "house": "d\u00fcsseldorf",
-        "StreetName": "stahlwerkstr.",
-        "HouseNumber": "1/d\u00fcsseldorf"
-    },
-    {
-        "StreetName": "bronx___n.y. 2779 valentine avenue",
-        "HouseNumber": "58",
-        "unit": "apt. 7"
-    },
-    {
-        "house": "regensburg",
-        "StreetName": "k\u00f6nigstr.",
-        "HouseNumber": "2/i"
-    },
-    {
-        "City": "berlin"
-    },
-    {
-        "City": "rudajewka",
-        "Country": "russland"
-    },
-    {
-        "City": "m\u00fcnchen"
-    },
-    {
-        "house": "rawitsch/krs. breslau"
-    },
-    {
-        "house": "tel aviv/israel"
-    },
-    {
-        "house": "naharia kiriat",
-        "StreetName": "asor___israel",
-        "HouseNumber": "504/12"
+        "house": "ingelheim-mitte",
+        "StreetName": "zuckerberg",
+        "HouseNumber": "23"
     },
     {
         "house": "berlin-zehlendorf",
@@ -334,103 +286,142 @@
         "HouseNumber": "57"
     },
     {
-        "StreetName": "cholon/israel tamtaw",
-        "HouseNumber": "17"
+        "house": "hoffenheim/baden"
     },
     {
-        "HouseNumber": "1001",
-        "StreetName": "sherman street",
-        "City": "alameda/",
-        "State": "calif.",
-        "Country": "usa"
+        "house": "jungingen krs. hechingen/hohenz."
     },
     {
-        "house": "velbert",
-        "StreetName": "dammstr.",
-        "HouseNumber": "45"
+        "house": "losone csr"
     },
     {
-        "house": "bous",
-        "StreetName": "friedrich-ebert-str.",
-        "HouseNumber": "41"
+        "house": "wahrscheinlich auschwitz"
     },
     {
-        "house": "audincourt/doubs/france",
-        "HouseNumber": "3",
-        "StreetName": "rue de la yvotte"
+        "house": "glenbokie/polen"
     },
     {
-        "HouseNumber": "309",
-        "StreetName": "north maple drive",
-        "City": "beverly hills",
-        "State": "calif.",
-        "PostalCode": "90210",
-        "Country": "usa."
+        "City": "frankfurt/main",
+        "State": "hessen"
     },
     {
-        "City": "m\u00fcnchen"
+        "house": "czernowitz/rum."
     },
     {
-        "City": "izbica-kujawska"
+        "house": "bad lauterberg/h.",
+        "StreetName": "drahth\u00fcttenweg",
+        "HouseNumber": "50"
     },
     {
-        "level": "obernau krs.",
-        "City": "t\u00fcbingen",
-        "StreetName": "niedernauer str.",
-        "HouseNumber": "59"
+        "house": "xxxxxx",
+        "StreetName": "farenland",
+        "HouseNumber": "5"
     },
     {
-        "house": "berlin-lichterfelde-ost berlinerstr.48a altersheim"
+        "house": "frankfurt/main-fechenheim"
     },
     {
-        "City": "dortmund"
+        "City": "mainz-weisenau"
     },
     {
-        "house": "altona/elbe"
+        "HouseNumber": "3103",
+        "StreetName": "milanstr.",
+        "City": "new orleans",
+        "State": "la",
+        "Country": "u.s.a."
     },
     {
-        "StreetName": "hamburg___bachstr.",
-        "HouseNumber": "21___125i"
+        "StreetName": "osterhofen georgiplatz",
+        "HouseNumber": "247",
+        "City": "vilshofen"
     },
     {
-        "house": "schwarzau/westpr."
+        "StreetName": "bronx___n.y. 2779 valentine avenue",
+        "HouseNumber": "58",
+        "unit": "apt. 7"
     },
     {
-        "house": "berlin-marienfelde alt marienfelde 4"
+        "StreetName": "caica postal",
+        "HouseNumber": "3579",
+        "City": "sao paulo",
+        "Country": "/brasilien"
     },
     {
-        "City": "theresienstadt"
+        "City": "berlin"
     },
     {
-        "City": "bielefeld___detmold",
-        "StreetName": "schildescherstr.___reg. bez.",
-        "HouseNumber": "88"
+        "City": "lichtenfels"
     },
     {
-        "City": "stralsund"
+        "City": "siedlice/polen"
     },
     {
-        "StreetName": "herten branderheide",
-        "HouseNumber": "16",
-        "City": "recklinghausen"
+        "HouseNumber": "831",
+        "StreetName": "alameda",
+        "City": "san mateo",
+        "State": "calif."
     },
     {
-        "house": "iwitz /westpr."
+        "HouseNumber": "220",
+        "StreetName": "east 18 street",
+        "city_district": "brooklyn",
+        "State": "n.y."
     },
     {
-        "house": "weener/ostfr."
+        "house": "kfar tabor doar",
+        "StreetName": "na hagalil hatachton"
     },
     {
-        "StreetName": "lod/israel chet str.",
-        "HouseNumber": "11"
+        "City": "ramat gan",
+        "StreetName": "nordaustr.___c/o weiss",
+        "HouseNumber": "15",
+        "house": "bajith chadash"
     },
     {
-        "StreetName": "plovdiv bulg."
+        "StreetName": "frankenthal/pf. willestr.",
+        "HouseNumber": "2"
+    },
+    {
+        "house": "hertza/rum. jetzt ssru"
+    },
+    {
+        "house": "tel aviv/israel"
+    },
+    {
+        "house": "saarbr\u00fccken graf",
+        "StreetName": "johannstr.",
+        "HouseNumber": "28"
+    },
+    {
+        "City": "bochum"
+    },
+    {
+        "house": "fulda",
+        "StreetName": "unterm hl.kreuz",
+        "HouseNumber": "7/fulda"
     },
     {
         "City": "bielefeld"
     },
     {
-        "house": "berlin-marienfelde alt marienfelde 4"
+        "house": "m\u00fcnchen-gladbach krs.",
+        "City": "d\u00fcsseldorf"
+    },
+    {
+        "house": "k\u00f6ln-d\u00fcnnwald",
+        "StreetName": "pr\u00e4monstratenserstr.",
+        "HouseNumber": "72",
+        "City": "k\u00f6ln"
+    },
+    {
+        "HouseNumber": "10",
+        "StreetName": "fulton st. east-st. kilda melbourne vict.",
+        "Country": "australia"
+    },
+    {
+        "house": "altenau/unterfr."
+    },
+    {
+        "City": "wiesbaden"
     }
 ]

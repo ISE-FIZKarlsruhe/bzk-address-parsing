@@ -1,5 +1,99 @@
 [
     {
+        "City": "SERODZIGE",
+        "Country": "Polen"
+    },
+    {
+        "City": "Ludwigshafen",
+        "StreetName": "Mandacherstr.",
+        "HouseNumber": "83"
+    },
+    {
+        "City": "Tel-Aviv",
+        "StreetName": "Schderoth Nordau",
+        "HouseNumber": "22",
+        "Country": "Israel"
+    },
+    {
+        "City": "Thessaloniki",
+        "Country": "Griechenld"
+    },
+    {
+        "Name": "R.D.",
+        "HouseNumber": "5",
+        "StreetName": "Tuckahoe Road",
+        "City": "Vineland",
+        "State": "N.J",
+        "Country": "USA"
+    },
+    {
+        "City": "Hamburg",
+        "OOV": "19",
+        "StreetName": "Osterstr.",
+        "HouseNumber": "22."
+    },
+    {
+        "City": "Mannheim"
+    },
+    {
+        "Name": "Jaffa, Schdret",
+        "City": "Jeruschlaim/Ole Hadasch"
+    },
+    {
+        "Name": "Audincourt/Doubs",
+        "Country": "France",
+        "HouseNumber": "3",
+        "StreetName": "Rue de la Yvotte"
+    },
+    {
+        "StreetName": "Jerusalem, Beth",
+        "Name": "Russo",
+        "City": "Igst Kapaim",
+        "Country": "Israel"
+    },
+    {
+        "City": "Bamberg"
+    },
+    {
+        "StreetName": "Glendale",
+        "HouseNumber": "329 A",
+        "City": "Mira Loma"
+    },
+    {
+        "Name": "Chascomus F.C.S.",
+        "OOV": "Argentinien",
+        "StreetName": "Calle Sarmiento",
+        "HouseNumber": "300"
+    },
+    {
+        "City": "Dortmund",
+        "OOV": "",
+        "StreetName": "Nordstr.",
+        "HouseNumber": "46"
+    },
+    {
+        "Name": "Ako",
+        "StreetName": "Rech.",
+        "City": "Hei",
+        "HouseNumber": "21",
+        "Country": "Israel"
+    },
+    {
+        "City": "M\u00fcnchen"
+    },
+    {
+        "StreetName": "Schladen",
+        "City": "Kreis Goslar"
+    },
+    {
+        "City": "K\u00f6nigstadtl",
+        "Country": "B\u00f6hmen"
+    },
+    {
+        "City": "Kerprich-Hemmersdorf",
+        "Name": ""
+    },
+    {
         "Name": "Danzig"
     },
     {
@@ -54,16 +148,19 @@
         "City": "Bukarest"
     },
     {
-        "Name": "Nordheim/Krs.",
-        "City": "Heilbronn/N."
+        "Name": "Yonkers",
+        "City": "",
+        "State": "New",
+        "OOV": "",
+        "HouseNumber": "81",
+        "StreetName": "Bruce Avenue",
+        "Country": "U.S.A."
     },
     {
-        "Name": "Tagu-Mures",
-        "City": "Rum."
+        "City": "Warschau/Ghetto"
     },
     {
-        "Name": "DP Lager",
-        "City": "Lechfeld / Kreis Schwabm\u00fcnchen"
+        "Name": "Arzberg/Ofr."
     },
     {
         "Name": "Petach Tikwa",
@@ -72,13 +169,14 @@
         "PostalCode": "112"
     },
     {
-        "Name": "Caica",
-        "OOV": "Postal 3579",
-        "City": "Sao Paulo",
-        "Country": "Brasilien"
+        "Name": "Hoof/Krs.",
+        "City": "Kassel"
     },
     {
-        "City": "Berlin"
+        "Name": "Lippstadt",
+        "StreetName": "Wiedenbr\u00fcckerstr.",
+        "HouseNumber": "8",
+        "City": "Lippstadt"
     },
     {
         "City": "Dresden"
@@ -101,10 +199,6 @@
         "City": "Dupnitza"
     },
     {
-        "Name": "Pitest",
-        "City": "Rum"
-    },
-    {
         "City": "Dortmund-L\u00fctgendortmund"
     },
     {
@@ -122,50 +216,8 @@
         "Country": "Polen"
     },
     {
-        "Name": "Wuppertal-E.",
-        "StreetName": "Schleswigerstr.",
-        "HouseNumber": "62"
-    },
-    {
-        "Name": "Sdeh Warburg Erif",
-        "HouseNumber": "5",
-        "StreetName": "b.",
-        "City": "Kfar Saba"
-    },
-    {
-        "HouseNumber": "69",
-        "StreetName": "Red Ave.",
-        "City": "Brooklyn",
-        "State": "N",
-        "Country": "USA."
-    },
-    {
-        "Name": "Tel-Aviv",
-        "City": "",
-        "Country": "Israel",
-        "HardSep": "",
-        "StreetName": "Bartinowa",
-        "HouseNumber": "19"
-    },
-    {
-        "City": "Bochum",
-        "StreetName": "Hattinger Str.",
-        "HouseNumber": "211"
-    },
-    {
-        "Name": "Nordheim/Krs.",
-        "City": "Heilbronn/N",
-        "Country": "",
-        "StreetName": "Kelterstr.",
-        "HouseNumber": "37."
-    },
-    {
         "Name": "Temesvar",
         "City": "Banat"
-    },
-    {
-        "City": "Radziwilow",
-        "Country": "Polen"
     },
     {
         "City": "Berlin"
@@ -176,29 +228,13 @@
         "City": "Washington DC"
     },
     {
-        "City": "Berlin"
-    },
-    {
-        "City": "Pabianice",
-        "Country": "Polen"
-    },
-    {
-        "City": "Frankfurt/Main",
+        "City": "Hildesheim",
         "OOV": "",
-        "StreetName": "Voltastr.",
-        "HouseNumber": "51"
-    },
-    {
-        "Name": "Obernau, Krs.",
-        "City": "T\u00fcbingen",
-        "StreetName": "Niedernauer Str.",
-        "HouseNumber": "59"
+        "StreetName": "Ladem\u00fchle",
+        "HouseNumber": "56"
     },
     {
         "City": "Weiskirchen/Offenbach"
-    },
-    {
-        "Name": "Ffm."
     },
     {
         "City": "Kassel",
@@ -207,32 +243,14 @@
         "HouseNumber": "36 1/2"
     },
     {
-        "Name": "Petricken. Kr.",
-        "City": "Labian"
-    },
-    {
-        "Name": "Forbach",
-        "OOV": "Frankreich",
-        "HouseNumber": "189 a",
-        "StreetName": "Rue National"
-    },
-    {
         "HouseNumber": "33",
         "StreetName": "Sophienstr.",
         "Unit": "Parz. 105",
         "City": "Hellbrook"
     },
     {
-        "City": "Debreczin",
-        "Country": "Ungarn"
-    },
-    {
         "City": "Sarajevo",
         "Country": "Jugoslavien"
-    },
-    {
-        "OOV": "18",
-        "Name": "01.03"
     },
     {
         "City": "Biedenkopf",
@@ -252,9 +270,6 @@
         "Name": "pszeszow/Polen",
         "StreetName": "Lwowska",
         "HouseNumber": "40"
-    },
-    {
-        "City": "Oehringen"
     },
     {
         "City": "Steinbach am Glan"
@@ -350,7 +365,8 @@
         "City": "Sarajevo (Jug."
     },
     {
-        "City": "Berlin"
+        "Name": "Dab",
+        "Country": "Polen"
     },
     {
         "Name": "R\u00f6thenbach/Pegnitz",
@@ -361,11 +377,11 @@
         "City": "Charlottenburg"
     },
     {
-        "City": "Uffenheim"
+        "Name": "Cedera/Israel",
+        "City": "Altersheim, Beth Meir von Malben"
     },
     {
-        "Name": "Bat Yam",
-        "Country": "Israel"
+        "City": "New York"
     },
     {
         "Name": "Madiorban-Hedersch/Ung",
@@ -379,7 +395,11 @@
         "State": ""
     },
     {
-        "City": "Bielefeld"
+        "HouseNumber": "22",
+        "StreetName": "A Thomas Drive",
+        "City": "Monroe Park, Wilmington 6",
+        "State": "Delaware",
+        "Country": "USA"
     },
     {
         "Name": "Bevensen",
@@ -395,8 +415,11 @@
         "OOV": "83"
     },
     {
-        "City": "Sosnowice",
-        "Country": "Polen"
+        "Name": "Buenos Aires",
+        "StreetName": "",
+        "City": "Chivilcoy",
+        "PostalCode": "4491",
+        "Country": "Argentinien"
     },
     {
         "City": "Belgrad"
@@ -426,10 +449,7 @@
         "City": "Braunschweig"
     },
     {
-        "City": "N\u00fcrnberg",
-        "OOV": "",
-        "StreetName": "Nibelungenstrasse",
-        "HouseNumber": "8"
+        "City": "Altensch\u00f6nbach"
     },
     {
         "City": "Hamburg",
@@ -441,29 +461,25 @@
         "City": "Cronenberg"
     },
     {
-        "Name": "Rawitsch/Krs.",
-        "City": "Breslau"
+        "Name": "Naugard/Pom."
     },
     {
         "City": "Trespol",
         "Country": "Polen"
     },
     {
-        "City": "Wehlau i/Ostpr."
+        "City": "Cannstatt"
     },
     {
         "Name": "Gronau Krs",
         "City": "Neisse"
     },
     {
-        "City": "Focsani",
-        "Country": "Rum\u00e4nien"
+        "Name": "K.Z."
     },
     {
-        "Name": "Rava",
-        "City": "Russka",
-        "Country": "Russland",
-        "OOV": ""
+        "City": "San Mateo",
+        "Country": "Calif."
     },
     {
         "City": "RZYKI",

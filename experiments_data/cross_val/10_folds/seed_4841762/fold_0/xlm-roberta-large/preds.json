@@ -1,41 +1,21 @@
 [
     {
-        "Name": "Stolberg",
-        "StreetName": "Eichsfeldstr",
-        "HouseNumber": "98",
-        "City": "Aachen-Land"
+        "City": "Aachen"
     },
     {
-        "City": "Hamburg",
-        "HouseNumber": "36",
-        "OOV": "2 III"
+        "Name": "Sofia"
     },
     {
-        "City": "Kolmar/Posen",
-        "Name": ""
+        "Name": "K",
+        "Country": "KZ"
     },
     {
-        "City": "Aachen",
-        "OOV": "",
-        "StreetName": "Dammstr.",
-        "HouseNumber": "5"
+        "Name": "Stellingen",
+        "City": "Steenwisch",
+        "OOV": "99"
     },
     {
-        "Name": "DP-Lager",
-        "StreetName": "Gabersee",
-        "City": "bei Wasservurg/Inn"
-    },
-    {
-        "Name": "M\u00fcnchen-Gladbach Krs.",
-        "City": "D\u00fcsseldorf"
-    },
-    {
-        "Name": "Kiriat Chaim",
-        "City": "Bet Halzot"
-    },
-    {
-        "Name": "Marstetten-Aitrach",
-        "City": "Kr. Wangen"
+        "City": "Belgrad"
     },
     {
         "Name": "Kfar Saba Machano",
@@ -43,318 +23,40 @@
         "Country": "Israel"
     },
     {
-        "City": "Wandsbek"
+        "Name": "Kinzenbach Krs.",
+        "City": "Wetzlar",
+        "StreetName": "Waldstr.",
+        "HouseNumber": "55b"
     },
     {
-        "City": "Radziwilow"
+        "City": "Lorup"
     },
     {
-        "HouseNumber": "62-98",
-        "StreetName": "Saunders Street",
-        "City": "Rego Park",
-        "State": "L",
-        "Country": "USA"
-    },
-    {
-        "City": "Tel-Aviv",
-        "StreetName": "Schderoth Nordau",
-        "HouseNumber": "22",
-        "Country": "Israel"
-    },
-    {
-        "Name": "Jaroslaw",
+        "City": "Lodz",
         "Country": "Polen"
     },
     {
-        "City": "Bad Kreuznach"
+        "Name": "Detroit",
+        "StreetName": "",
+        "HouseNumber": "96 <",
+        "State": "Michigan",
+        "Country": "US"
     },
     {
-        "City": "Elberfeld"
+        "City": "Offenbach / Main.",
+        "Country": "Hessen"
     },
     {
-        "City": "N\u00fcrnberg",
-        "OOV": "",
-        "StreetName": "Mommsenstrasse",
-        "HouseNumber": "41"
-    },
-    {
-        "HouseNumber": "544",
-        "StreetName": "West 157 Street",
-        "City": "New-York",
-        "OOV": "32 N.Y.",
-        "Country": "U.S.A."
-    },
-    {
-        "City": "Krakau"
-    },
-    {
-        "StreetName": "Viktoriastr.",
-        "HouseNumber": "33",
-        "City": "Neu\u00df"
-    },
-    {
-        "Name": "Polish DP-Camp",
-        "City": "B\u00f6blingen"
-    },
-    {
-        "Name": "Ramat Gan",
-        "StreetName": "Nordaustr.",
-        "HouseNumber": "15",
-        "City": "Bajith Chadash",
-        "OOV": "c/o Weiss"
-    },
-    {
-        "Name": "Jaffo/Israel",
-        "StreetName": "87 Str. Nr",
-        "Unit": "28"
-    },
-    {
-        "Name": "Lodz"
-    },
-    {
-        "City": "Leer",
-        "State": "Ostfriesland"
-    },
-    {
-        "Name": "Nordheim/Krs.",
-        "City": "Heilbronn/N."
-    },
-    {
-        "Name": "Hartuf/Israel",
-        "StreetName": "Maabara",
-        "City": "Beit Schemesch",
-        "HouseNumber": "69"
-    },
-    {
-        "Name": "Auschwitz umgekommen"
-    },
-    {
-        "City": "Bremen-St. Magnus",
-        "OOV": "",
-        "StreetName": "Zum Fichtenhof",
-        "HouseNumber": "25"
+        "Name": "Seubersdorf",
+        "StreetName": "Bundesstr.",
+        "HouseNumber": "77",
+        "City": "Kreis Parsberg-Opf."
     },
     {
         "City": "Hildesheim, Ladem\u00fchle"
     },
     {
-        "City": "J\u00f6hlingen/Krs.Durlach/Baden."
-    },
-    {
-        "City": "Frankfurt/Main"
-    },
-    {
-        "City": "M\u00fclheim"
-    },
-    {
-        "City": "Altenau/Unterfr."
-    },
-    {
-        "Name": "Sdeh Warburg Erif",
-        "HouseNumber": "5",
-        "StreetName": "b.",
-        "City": "Kfar Saba"
-    },
-    {
-        "City": "Wei\u00dfenburg",
-        "State": "",
-        "Country": "Bayern",
-        "StreetName": "S\u00fcdring",
-        "HouseNumber": "10"
-    },
-    {
-        "City": "Cluj/Rum."
-    },
-    {
-        "Name": "Wuppertal-E.",
-        "StreetName": "Schleswigerstr.",
-        "HouseNumber": "62"
-    },
-    {
-        "Name": "Regensuburg",
-        "StreetName": "Von der Tannstr.",
-        "HouseNumber": "14"
-    },
-    {
-        "City": "Belgrad"
-    },
-    {
-        "City": "Aachen"
-    },
-    {
-        "City": "Mannheim",
-        "OOV": ""
-    },
-    {
-        "City": "Wehlau i/Ostpr."
-    },
-    {
-        "StreetName": "Schd. Nordau",
-        "HouseNumber": "22",
-        "City": "TEL AVIV",
-        "Country": "Israel"
-    },
-    {
-        "Name": "K",
-        "City": "KZ Auschwitz"
-    },
-    {
-        "City": "Lichtenfels"
-    },
-    {
-        "City": "Miami",
-        "Country": "Florida",
-        "OOV": "",
-        "HouseNumber": "231",
-        "StreetName": "N.W. 3rd. Str."
-    },
-    {
-        "Name": "Richen Krs.",
-        "City": "Sinsheim"
-    },
-    {
-        "Name": "Loiching/Naby.",
-        "City": "b. Dingolfing"
-    },
-    {
-        "City": "Bremen"
-    },
-    {
-        "City": "Berlin"
-    },
-    {
-        "Name": "Mindelheim",
-        "StreetName": "Bahnhofstr.",
-        "HouseNumber": "14",
-        "City": "Krs. Schwaben",
-        "Country": ""
-    },
-    {
-        "City": "Niederklein"
-    },
-    {
-        "Name": "New York",
-        "OOV": "33, N.Y.",
-        "HouseNumber": "481",
-        "City": "Fort Washington",
-        "StreetName": "Ave."
-    },
-    {
-        "City": "Aachen"
-    },
-    {
-        "HouseNumber": "62-98",
-        "StreetName": "Saunders Street",
-        "City": "Rego Park",
-        "State": "L",
-        "Country": "USA"
-    },
-    {
-        "HouseNumber": "36",
-        "StreetName": "Pilatuspool",
-        "OOV": "7 II"
-    },
-    {
-        "City": "Rostoki/Bukowina"
-    },
-    {
-        "Name": "Beuthen O/S."
-    },
-    {
-        "HouseNumber": "2114",
-        "StreetName": "79 St. Jackson",
-        "City": "Heights.",
-        "State": "N.Y",
-        "Country": "USA"
-    },
-    {
-        "Name": "Leonberg",
-        "City": "Stuttgart"
-    },
-    {
-        "StreetName": "Rt.l",
-        "OOV": "",
-        "City": "Cotati",
-        "State": "California",
-        "Country": "USA"
-    },
-    {
-        "City": "S\u00fclzbach/Opf."
-    },
-    {
-        "City": "Giessen"
-    },
-    {
-        "HouseNumber": "220",
-        "StreetName": "East 18 Street",
-        "City": "Brooklyn",
-        "Country": "N",
-        "State": "Y"
-    },
-    {
-        "City": "Gymeskoezeplok",
-        "Country": "Ungarn"
-    },
-    {
-        "HouseNumber": "22",
-        "StreetName": "Thomas Drive",
-        "City": "Wilmington, Delaware",
-        "State": "",
-        "Country": "USA."
-    },
-    {
-        "City": "Berlin-Hermsdorf",
-        "Country": "",
-        "StreetName": "Junostr.",
-        "HouseNumber": "7"
-    },
-    {
-        "City": "New York",
-        "Country": "USA",
-        "HouseNumber": "220",
-        "StreetName": "West 98th Str."
-    },
-    {
-        "Name": "Schwelm",
-        "StreetName": "Weilent\u00e4uschenstr.",
-        "HouseNumber": "3",
-        "City": "Reg",
-        "OOV": "Bez."
-    },
-    {
-        "City": "Hamburg"
-    },
-    {
-        "City": "Berlin"
-    },
-    {
-        "Name": "Jungingen Krs.",
-        "City": "Hechingen/Hohenz."
-    },
-    {
-        "HouseNumber": "808",
-        "StreetName": "Westend Avenue",
-        "City": "New York",
-        "OOV": "25",
-        "Country": "N.Y."
-    },
-    {
-        "Name": "der",
-        "City": "Deportation"
-    },
-    {
-        "Name": "London",
-        "StreetName": "N.W.",
-        "HouseNumber": "6, 72",
-        "City": "Canfield Gardena"
-    },
-    {
-        "Name": "20",
-        "StreetName": "Orchideenstieg",
-        "HouseNumber": "9."
-    },
-    {
-        "City": "Hamburg"
+        "City": "Ansbach"
     },
     {
         "Name": "Cholon",
@@ -364,13 +66,11 @@
         "HouseNumber": "13"
     },
     {
-        "City": "Neu Isenburg"
-    },
-    {
-        "City": "G\u00f6ttingen Land Hannover"
-    },
-    {
-        "City": "Mainz-Weisenau"
+        "HouseNumber": "1001",
+        "StreetName": "Sherman Street",
+        "City": "Alameda",
+        "State": "Calif",
+        "Country": "USA"
     },
     {
         "Name": "Parie",
@@ -380,7 +80,375 @@
         "StreetName": "rue de Moscau"
     },
     {
-        "City": "Schwarau/B\u00f6hmen"
+        "City": "Tel",
+        "Name": "Aviv",
+        "StreetName": "Hasan",
+        "HouseNumber": "14"
+    },
+    {
+        "Name": "Izbica",
+        "City": "Kujawska"
+    },
+    {
+        "City": "Wei\u00dfenburg",
+        "State": "",
+        "Country": "Bayern",
+        "StreetName": "S\u00fcdring",
+        "HouseNumber": "10"
+    },
+    {
+        "City": "Krzemieniec",
+        "Country": "Polen"
+    },
+    {
+        "Name": "Leonberg",
+        "City": "Stuttgart"
+    },
+    {
+        "Name": "T",
+        "City": "TEL",
+        "StreetName": "Arlosoroffstr.",
+        "HouseNumber": "31"
+    },
+    {
+        "Name": "Auschwitz umgekommen"
+    },
+    {
+        "City": "Stol",
+        "Country": "Polen"
+    },
+    {
+        "Country": "USA"
+    },
+    {
+        "City": "Minsk"
+    },
+    {
+        "City": "Bochum",
+        "OOV": "",
+        "StreetName": "Hattingerstr.",
+        "HouseNumber": "211"
+    },
+    {
+        "StreetName": "Viktoriastr.",
+        "HouseNumber": "33",
+        "City": "Neu\u00df"
+    },
+    {
+        "Name": "Hamburg-1",
+        "StreetName": "Schopenstehl",
+        "HouseNumber": "24",
+        "PostalCode": "IV"
+    },
+    {
+        "Name": "Herten",
+        "StreetName": "Branderheide",
+        "HouseNumber": "16",
+        "City": "Recklinghausen"
+    },
+    {
+        "City": "Kolmar/Posen",
+        "Name": ""
+    },
+    {
+        "Name": "BER SZEWA",
+        "City": "Szykun",
+        "OOV": "D2a",
+        "Country": "Israel"
+    },
+    {
+        "Name": "der",
+        "City": "Deportation"
+    },
+    {
+        "Name": "Deu-Somes",
+        "Country": "Ungarn"
+    },
+    {
+        "City": "Altona/Elbe"
+    },
+    {
+        "Name": "Bad Homburg v.d.H.",
+        "StreetName": "R\u00f6merstr.",
+        "HouseNumber": "2"
+    },
+    {
+        "City": "Aachen"
+    },
+    {
+        "Name": "Ingelheim/Krs.",
+        "City": "Bingen",
+        "OOV": "",
+        "StreetName": "Ob. B\u00f6hlstr.",
+        "HouseNumber": "4"
+    },
+    {
+        "HouseNumber": "544",
+        "StreetName": "West 157 Street",
+        "City": "New-York",
+        "OOV": "32 N.Y.",
+        "Country": "U.S.A."
+    },
+    {
+        "City": "Stuttgart"
+    },
+    {
+        "Name": "Lemgo",
+        "City": "Lippe"
+    },
+    {
+        "City": "der",
+        "Name": "Emigration"
+    },
+    {
+        "City": "Darmstadt"
+    },
+    {
+        "Name": "Hofkirchen",
+        "City": "b/Vilshofen"
+    },
+    {
+        "City": "Stralsund"
+    },
+    {
+        "City": "Sao Paulo",
+        "Country": "Brasilien",
+        "HardSep": "",
+        "StreetName": "Rua Santa Efigenia",
+        "HouseNumber": "31"
+    },
+    {
+        "City": "Wilno",
+        "Country": "Polen"
+    },
+    {
+        "HouseNumber": "46",
+        "StreetName": "Highstoen Mansions",
+        "City": "Camden Town",
+        "State": "London",
+        "Country": "N",
+        "OOV": "1"
+    },
+    {
+        "City": "Warschau",
+        "Country": "Polen"
+    },
+    {
+        "City": "Meckesheim/Baden"
+    },
+    {
+        "Name": "K",
+        "City": "KZ Auschwitz"
+    },
+    {
+        "City": "Lodz",
+        "Country": "Polen"
+    },
+    {
+        "City": "Zarki",
+        "Country": "Polen"
+    },
+    {
+        "Name": "Klingenberg/M. ;",
+        "City": "Michelstadt"
+    },
+    {
+        "Name": "Hoffenheim Kr.",
+        "City": "Sinsheim"
+    },
+    {
+        "City": "Kassel Kreis Kassel (Hessen"
+    },
+    {
+        "City": "Ichenhausen",
+        "Country": "Schw."
+    },
+    {
+        "StreetName": "DENVER Colo",
+        "OOV": "",
+        "Country": "USA",
+        "PostalCode": "1338",
+        "City": "Bannock"
+    },
+    {
+        "Name": "K.Z.",
+        "City": "Mauthausen"
+    },
+    {
+        "Name": "London",
+        "HouseNumber": "38",
+        "StreetName": "Mapesburg Court",
+        "City": "Shoot up Hill"
+    },
+    {
+        "Name": "Geismar"
+    },
+    {
+        "City": "Krakau"
+    },
+    {
+        "HouseNumber": "75",
+        "StreetName": "Fort Washington Ave.",
+        "City": "New York",
+        "OOV": "32",
+        "Country": "USA"
+    },
+    {
+        "Name": "Chawazelet b.",
+        "City": "Rechowoth",
+        "Country": "Israel"
+    },
+    {
+        "Name": "Drancy/Seine",
+        "HouseNumber": "22.",
+        "StreetName": "rue d'Harmonie",
+        "Country": "Frankreich"
+    },
+    {
+        "City": "Sosnowice",
+        "Country": "Polen"
+    },
+    {
+        "HouseNumber": "46",
+        "StreetName": "Highstoen Mansions",
+        "City": "Camden Town",
+        "State": "London",
+        "Country": "N",
+        "OOV": "1"
+    },
+    {
+        "City": "Frankfurt/Main"
+    },
+    {
+        "StreetName": "Burgheim",
+        "HouseNumber": "Nr. 14",
+        "City": "Donau Schwaben"
+    },
+    {
+        "StreetName": "Halmei",
+        "City": "Szatmar",
+        "Country": "Rum\u00e4nien"
+    },
+    {
+        "City": "Prichsenstadt/Unterfr."
+    },
+    {
+        "City": "Jerusalem",
+        "StreetName": "",
+        "Name": "Mekor Chaim",
+        "HouseNumber": "2/83"
+    },
+    {
+        "Name": "Hagen"
+    },
+    {
+        "City": "Monaco",
+        "Country": "Mo"
+    },
+    {
+        "Name": "K.Z.",
+        "City": "Auschwitz",
+        "Country": "Polen"
+    },
+    {
+        "City": "Hamburg"
+    },
+    {
+        "Name": "Im Moore",
+        "HouseNumber": "35"
+    },
+    {
+        "City": "Memmingen"
+    },
+    {
+        "HouseNumber": "31-77",
+        "StreetName": "32nd Street",
+        "City": "Long Island City",
+        "OOV": "6",
+        "State": "N.Y",
+        "Country": "USA"
+    },
+    {
+        "City": "Bremen"
+    },
+    {
+        "Name": "Nyitra, CSR"
+    },
+    {
+        "City": "Neuwied",
+        "Name": "Rh.",
+        "StreetName": "Werftstr.",
+        "HouseNumber": "8"
+    },
+    {
+        "City": "Remscheid"
+    },
+    {
+        "HouseNumber": "808",
+        "StreetName": "Westend Avenue",
+        "City": "New York",
+        "OOV": "25",
+        "Country": "N.Y."
+    },
+    {
+        "HouseNumber": "69",
+        "StreetName": "Red Ave.",
+        "City": "Brooklyn",
+        "State": "N",
+        "Country": "USA."
+    },
+    {
+        "Name": "Schikun Hastadruthi",
+        "HouseNumber": "14/3",
+        "StreetName": "bei Givath",
+        "City": "Rambam",
+        "Country": "Israel"
+    },
+    {
+        "City": "Dudenhofen"
+    },
+    {
+        "Name": "Beuthen O/S."
+    },
+    {
+        "Name": "Rego Park",
+        "OOV": "74",
+        "HouseNumber": "",
+        "Country": "USA",
+        "PostalCode": "6282",
+        "City": "Saunders Street"
+    },
+    {
+        "Name": "Hartuf/Israel",
+        "StreetName": "Maabara",
+        "City": "Beit Schemesch",
+        "HouseNumber": "69"
+    },
+    {
+        "City": "Aachen",
+        "HardSep": "",
+        "StreetName": "W\u00fcllnerstr.",
+        "HouseNumber": "2a"
+    },
+    {
+        "City": "Hannover"
+    },
+    {
+        "StreetName": "Jerusalem",
+        "Name": "Baka",
+        "HouseNumber": "13/16"
+    },
+    {
+        "City": "G\u00f6ttingen Land Hannover"
+    },
+    {
+        "City": "Lodz",
+        "Country": "Polen"
+    },
+    {
+        "Name": "Dudweiler",
+        "StreetName": "Im Allement",
+        "HouseNumber": "5"
     },
     {
         "City": "Braunschweig",
@@ -395,94 +463,18 @@
         "StreetName": "Jan van Ryswyklaan"
     },
     {
-        "City": "M\u00fclheim",
-        "Name": "Ruhr",
-        "OOV": "",
-        "HouseNumber": "75"
+        "City": "Dortmund"
     },
     {
-        "Name": "Deu-Somes",
-        "Country": "Ungarn"
+        "City": "Wehr/Baden",
+        "Name": "",
+        "HardSep": "",
+        "StreetName": "Enkendorfstr.",
+        "HouseNumber": "15."
     },
     {
-        "Name": "Kfar Harah, Ischivat",
-        "City": "Bnei Avodah"
-    },
-    {
-        "Name": "Hertza/Rum.",
-        "Country": "jetzt",
-        "City": "SSRU"
-    },
-    {
-        "City": "Boryslaw",
-        "Country": "Polen"
-    },
-    {
-        "Name": "Jaffo",
-        "StreetName": "Str",
-        "City": "Schtei Achajot",
-        "PostalCode": "21"
-    },
-    {
-        "City": "Bad Kreuznach",
-        "StreetName": "Sch\u00f6ne Aussicht",
-        "HouseNumber": "12"
-    },
-    {
-        "Name": "Madiorban-Hedersch/Ung",
-        "City": ""
-    },
-    {
-        "City": "Jerusalem-Rehavia",
-        "Country": "Israel"
-    },
-    {
-        "City": "Trondheim",
-        "Country": "Norwegen"
-    },
-    {
-        "City": "Uffenheim"
-    },
-    {
-        "Name": "Mering"
-    },
-    {
-        "City": "Berlin"
-    },
-    {
-        "Name": "Bilgoraj",
-        "Country": "Polen"
-    },
-    {
-        "City": "Atlanta",
-        "State": "Georgia",
-        "Country": "USA",
-        "OOV": "",
-        "HouseNumber": "155",
-        "StreetName": "3rd Street"
-    },
-    {
-        "StreetName": "Jerusalem",
-        "Name": "Baka",
-        "HouseNumber": "13/16"
-    },
-    {
-        "City": "Siedlice",
-        "Country": "Polen"
-    },
-    {
-        "City": "Weiden",
-        "Name": "Opf",
-        "StreetName": "Von Steubenstr",
-        "HouseNumber": "11"
-    },
-    {
-        "HouseNumber": "8",
-        "StreetName": "Burlington Road",
-        "City": "Manchester",
-        "OOV": "20",
-        "PostalCode": "",
-        "Country": "England."
+        "City": "Plovdiv",
+        "Country": "Bulg."
     },
     {
         "HouseNumber": "848",
@@ -491,13 +483,39 @@
         "OOV": "46"
     },
     {
-        "City": "Lodz",
-        "Country": "Polen"
+        "City": "Debreczin",
+        "Country": "Ungarn"
     },
     {
-        "Name": "Giwataim",
-        "StreetName": "Schenkinstr.",
-        "HouseNumber": "79",
+        "City": "Paris",
+        "OOV": "",
+        "HouseNumber": "12",
+        "StreetName": "passage de Clichy"
+    },
+    {
+        "Name": "Stolberg",
+        "StreetName": "Eichsfeldstr",
+        "HouseNumber": "98",
+        "City": "Aachen-Land"
+    },
+    {
+        "Name": "Mannheim verl.",
+        "StreetName": "Schlachthofstr.",
+        "HouseNumber": "1"
+    },
+    {
+        "HouseNumber": "704",
+        "StreetName": "w, 180 str.",
+        "City": "new york",
+        "State": "NY",
+        "Country": ""
+    },
+    {
+        "Name": "RIGA",
+        "Country": "LATVIA"
+    },
+    {
+        "City": "Jerusalem-Rehavia",
         "Country": "Israel"
     }
 ]

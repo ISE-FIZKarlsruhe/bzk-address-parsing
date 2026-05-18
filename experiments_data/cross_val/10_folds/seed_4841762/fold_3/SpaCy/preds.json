@@ -1,129 +1,216 @@
 [
     {
-        "City": "Toulouse",
-        "District": "Hte. Garonne",
-        "HouseNumber": "140",
-        "StreetName": "Cit\u00e9 Madrid"
+        "City": "Budapest",
+        "Country": "Ungarn"
     },
     {
-        "City": "Deportation"
+        "City": "Hohenrode"
     },
     {
-        "City": "Pilzen",
-        "Country": "CSR"
+        "City": "Pabianice",
+        "Country": "Polen"
     },
     {
-        "City": "Ingelheim",
-        "District": "Bingen",
-        "StreetName": "Ob. B\u00f6hlstr.",
-        "HouseNumber": "4"
+        "HouseNumber": "22",
+        "StreetName": "Thomas Drive",
+        "City": "Wilmington",
+        "State": "Delaware",
+        "Country": "USA."
     },
     {
-        "City": "Auschwitz"
+        "City": "Givataim",
+        "Country": "Israel",
+        "StreetName": "Katznelsohnstr.",
+        "HouseNumber": "20"
     },
     {
-        "City": "Coethen"
+        "City": "?"
+    },
+    {
+        "City": "Lippstadt"
+    },
+    {
+        "City": "Erskurt",
+        "Country": "Rumaenien"
+    },
+    {
+        "City": "Warschau"
+    },
+    {
+        "City": "Olgut"
+    },
+    {
+        "City": "Chrubieszow",
+        "Country": "Polen"
+    },
+    {
+        "Neighborhood": "Berlin-Zehlendorf"
+    },
+    {
+        "City": "Worms"
+    },
+    {
+        "City": "Bischofsburg"
+    },
+    {
+        "City": "Kassel"
     },
     {
         "City": "Breslau"
     },
     {
-        "City": "Hettenleidelheim"
+        "City": "Berschewa",
+        "Country": "Israel"
     },
     {
-        "HouseNumber": "241",
-        "StreetName": "West 108th Street",
-        "City": "New York"
+        "City": "Jedwejow",
+        "Country": "Polen"
+    },
+    {
+        "City": "Berlin"
+    },
+    {
+        "City": "Offenbach",
+        "StreetName": "Seligenst\u00e4dterstr.18",
+        "HouseNumber": "1"
+    },
+    {
+        "City": "Forbach",
+        "Country": "Frankreich",
+        "HouseNumber": "189",
+        "StreetName": "Rue National"
+    },
+    {
+        "City": "Chicago",
+        "State": "Ill."
+    },
+    {
+        "HouseNumber": "20"
+    },
+    {
+        "City": "R\u00fcsselsheim",
+        "Neighborhood": "Wilk.-R\u00f6ntgen-Str.23"
+    },
+    {
+        "City": "Auschwitz"
+    },
+    {
+        "City": "Urfahr",
+        "StreetName": "\u00d6sterr. Gr\u00fcndberg",
+        "HouseNumber": "166"
+    },
+    {
+        "City": "Breslau"
+    },
+    {
+        "City": "Radziwilow"
+    },
+    {
+        "City": "Ffm."
     },
     {
         "City": "Tulcea",
         "Country": "Rum\u00e4nien"
     },
     {
-        "City": "Dinkelsb\u00fchl"
+        "City": "Hettenleidelheim"
     },
     {
         "City": "Kielce",
         "Country": "Polen"
     },
     {
-        "City": "Lodz",
-        "Country": "Polen"
+        "City": "Kolmar"
     },
     {
-        "City": "Remscheid"
+        "HouseNumber": "Berlin-Marienfelde___4",
+        "StreetName": "Alt Marienfelde"
     },
     {
-        "City": "Dupnitza"
+        "City": "Hamburg"
     },
     {
-        "City": "ODESSA",
+        "State": "Ffm.-H\u00f6chst",
+        "StreetName": "Gartenstrasse",
+        "HouseNumber": "7"
+    },
+    {
+        "HouseNumber": "Satu-Mare"
+    },
+    {
+        "City": "SAMARA",
         "Country": "RUSSLAND"
     },
     {
-        "City": "Schnellroda",
-        "District": "Merseburg"
-    },
-    {
-        "City": "Darmstadt"
+        "City": "Hannover",
+        "StreetName": "Kochstr.",
+        "HouseNumber": "17"
     },
     {
         "City": "Jaffo",
-        "StreetName": "Chivat Alya Str.",
-        "HouseNumber": "233___1"
+        "StreetName": "Chivat Alya Str.___Nr.",
+        "HouseNumber": "233"
     },
     {
         "HouseNumber": "2680",
-        "StreetName": "Heath Ave.",
-        "Neighborhood": "Bronx",
+        "StreetName": "Heath Ave.___Bronx",
+        "State": "NY",
         "Country": "USA"
-    },
-    {
-        "City": "Krzemieniec",
-        "Country": "Polen"
-    },
-    {
-        "City": "Handorf",
-        "StreetName": "St. Anna Heim"
-    },
-    {
-        "City": "Tagu-Mures",
-        "Country": "Rum."
-    },
-    {
-        "City": "Czenstochau",
-        "Country": "Polen"
     },
     {
         "HouseNumber": "1700",
         "StreetName": "Harrison Ave.",
-        "Neighborhood": "Bronx."
+        "State": "Bronx."
     },
     {
-        "City": "Osterhofen___Vilshofen",
-        "StreetName": "Georgiplatz",
-        "HouseNumber": "247"
+        "City": "Lechfeld",
+        "District": "Schwabm\u00fcnchen"
     },
     {
-        "City": "Bevensen",
-        "District": "Uelzen"
+        "City": "Schnellroda"
     },
     {
-        "City": "Halmei-Szatmar",
+        "City": "Hamburg",
+        "HouseNumber": "21"
+    },
+    {
+        "City": "Ulm",
+        "StreetName": "Strassburgerstr.",
+        "HouseNumber": "14."
+    },
+    {
+        "City": "Tel-Aviv",
+        "StreetName": "Schderoth Nordau",
+        "HouseNumber": "22",
+        "Country": "Israel"
+    },
+    {
+        "City": "Cluj",
+        "Country": "Rum."
+    },
+    {
+        "City": "Swiba",
+        "Neighborhood": "Luisenhof"
+    },
+    {
+        "City": "Focsani",
         "Country": "Rum\u00e4nien"
     },
     {
+        "City": "Hettenleidelheim",
+        "StreetName": "Peter Schwalbstr.",
+        "HouseNumber": "3"
+    },
+    {
         "City": "Friedrichsrode",
-        "District": "Th\u00fcringen"
+        "State": "Th\u00fcringen"
     },
     {
         "City": "Wilno"
     },
     {
-        "HouseNumber": "45",
-        "StreetName": "Ruppin Str.",
-        "State": "Tel-Aviv",
-        "Country": "Israel"
+        "City": "Zamosc",
+        "Country": "Polen"
     },
     {
         "City": "Bergedorf",
@@ -131,32 +218,42 @@
         "HouseNumber": "16"
     },
     {
-        "City": "Remscheid"
+        "City": "Rava Russka",
+        "Country": "Russland"
     },
     {
-        "City": "Plaidt"
+        "City": "Berlin-Hermsdorf",
+        "StreetName": "Junostr.",
+        "HouseNumber": "7"
+    },
+    {
+        "City": "Bremerhaven-M.",
+        "StreetName": "Langemarckstr.",
+        "HouseNumber": "28"
+    },
+    {
+        "City": "Erlangen"
+    },
+    {
+        "City": "Gr\u00e4felfing"
     },
     {
         "City": "Kibarty",
         "District": "Eydkunen"
     },
     {
-        "City": "Erlangen"
-    },
-    {
-        "City": "Michelstadt im Odw."
-    },
-    {
-        "City": "Rzochow",
+        "City": "Bystra",
         "Country": "Polen"
     },
     {
-        "City": "Bendzin",
-        "Country": "Polen"
+        "City": "Magdeburg"
+    },
+    {
+        "City": "M\u00fcnchen"
     },
     {
         "District": "Thorn",
-        "State": "Westpreussen"
+        "City": "Westpreussen"
     },
     {
         "City": "Warschau",
@@ -169,30 +266,36 @@
         "City": "Saloniki"
     },
     {
-        "City": "Tel Aviv",
-        "Country": "Israel",
-        "StreetName": "Javnestr:",
-        "HouseNumber": "16."
+        "City": "Montreal",
+        "State": "Que.",
+        "Country": "Canada",
+        "HouseNumber": "758",
+        "StreetName": "Querbes Avenue"
     },
     {
-        "City": "XXXXXX",
-        "StreetName": "Farenland",
-        "HouseNumber": "5"
+        "City": "Berne"
     },
     {
-        "Neighborhood": "K.Z. Mauthausen"
+        "City": "Jaffo",
+        "StreetName": "Rh.",
+        "HouseNumber": "35"
     },
     {
-        "StreetName": "Orchideenstieg",
-        "HouseNumber": "9."
+        "City": "Hannover",
+        "StreetName": "G\u00f6ttinger Chaussee",
+        "HouseNumber": "39."
     },
     {
-        "StreetName": "Gartenstrasse",
-        "HouseNumber": "7"
+        "City": "Forrest",
+        "Country": "Australien",
+        "StreetName": "Arthur Circle",
+        "HouseNumber": "22"
     },
     {
-        "City": "Lodz",
-        "Country": "Polen"
+        "City": "Helfta"
+    },
+    {
+        "City": "Mindelheim"
     },
     {
         "City": "Bad Mergentheim",
@@ -200,44 +303,43 @@
         "HouseNumber": "23"
     },
     {
-        "City": "Klingenberg/M. ; Michelstadt"
+        "City": "Unna"
     },
     {
         "City": "Auschwitz"
     },
     {
-        "City": "Trier",
-        "StreetName": "Im Froschepfuhl",
-        "HouseNumber": "129"
+        "Country": "Chorz\u00f3w-Batory___Polen",
+        "StreetName": "ul. Odrowazow nr."
     },
     {
-        "City": "Aachen",
-        "StreetName": "W\u00fcllnerstr.",
-        "HouseNumber": "2a"
+        "Neighborhood": "Kiriat Schmone",
+        "Country": "Israel",
+        "StreetName": "Schikun Waf",
+        "HouseNumber": "421"
     },
     {
-        "City": "M\u00fcnchen"
+        "City": "Gorna"
     },
     {
-        "City": "Wehr",
-        "StreetName": "Enkendorfstr.",
-        "HouseNumber": "15."
+        "HouseNumber": "300",
+        "StreetName": "Riverside Drive",
+        "City": "New York"
     },
     {
-        "City": "Audincourt",
-        "District": "Doubs",
-        "Country": "France",
-        "HouseNumber": "3",
-        "StreetName": "Rue de la Yvotte"
+        "City": "Kiriath Ono. Boulev",
+        "StreetName": "Keren Kajemeth",
+        "HouseNumber": "29",
+        "Country": "Isr."
     },
     {
-        "Neighborhood": "K.Z. Mauthausen"
+        "City": "Insterburg"
     },
     {
-        "City": "Aachen"
+        "City": "Neuwied"
     },
     {
-        "City": "Wiesbaden"
+        "City": "Nisiniec"
     },
     {
         "City": "Szynawa",
@@ -247,31 +349,33 @@
         "City": "Rostoko"
     },
     {
+        "City": "Opladen"
+    },
+    {
+        "City": "Moshav",
+        "Country": "Zahal___Israel",
+        "StreetName": "Galil Maaravi"
+    },
+    {
+        "City": "Roman",
+        "Country": "Rum\u00e4nien"
+    },
+    {
+        "City": "Feldafing___Z.30",
+        "HouseNumber": "Block IV"
+    },
+    {
         "City": "Wuppertal-E.",
-        "StreetName": "Flensburgerstr.",
-        "HouseNumber": "56"
+        "StreetName": "Schleswigerstr.",
+        "HouseNumber": "62"
     },
     {
-        "City": "Stuttgart-Bad Cannstatt"
+        "City": "Nathania",
+        "StreetName": "Shikun Vatikim",
+        "HouseNumber": "136"
     },
     {
-        "City": "Wilna",
-        "Country": "Polen"
-    },
-    {
-        "City": "Feldafing",
-        "HouseNumber": "Block IV a Z.30"
-    },
-    {
-        "City": "Wangen",
-        "StreetName": "Finkenweg",
-        "HouseNumber": "5"
-    },
-    {
-        "City": "Richen"
-    },
-    {
-        "City": "Zamosc",
+        "City": "Zborow",
         "Country": "Polen"
     },
     {
@@ -279,31 +383,30 @@
         "Country": "Polen"
     },
     {
-        "City": "Landsberg___B1.8",
-        "Neighborhood": "Lech DP.-Lag.",
-        "HouseNumber": "33"
+        "City": "Meckl"
     },
     {
-        "City": "d. Deportation"
+        "StreetName": "d. Deportation"
     },
     {
-        "City": "Stanislawow",
+        "City": "Dombrowica",
         "Country": "Polen"
     },
     {
-        "City": "Olkusz"
+        "City": "Mering",
+        "StreetName": "Kirchstr.",
+        "HouseNumber": "22"
     },
     {
-        "City": "Hannover",
-        "StreetName": "Im Moore",
-        "HouseNumber": "35"
+        "City": "Mannheim"
     },
     {
-        "City": "Pungesti",
-        "District": "Vaslui"
+        "City": "Hamburg",
+        "StreetName": "Thielbek",
+        "HouseNumber": "2"
     },
     {
-        "City": "Ruskowa"
+        "Country": "Ruskowa"
     },
     {
         "City": "Rokitno",
@@ -311,15 +414,16 @@
     },
     {
         "City": "Frankfurt/Main",
-        "Neighborhood": "Sellerstr.30/Frankfurt/Main",
+        "District": "Sellerstr.30/Frankfurt/Main",
         "State": "Hessen"
     },
     {
-        "Country": "Rum."
+        "City": "Hannover"
     },
     {
-        "City": "Ber Schewa___Halperin___Amidar Nr.",
+        "City": "Ber Schewa___Amidar",
         "Country": "Isr.",
+        "StreetName": "Ruben Halperin Schikun",
         "HouseNumber": "176"
     },
     {
@@ -329,110 +433,5 @@
     },
     {
         "StreetName": "in der Deportation"
-    },
-    {
-        "City": "Kolmar"
-    },
-    {
-        "City": "Frankenthal",
-        "StreetName": "Willestr.",
-        "HouseNumber": "2"
-    },
-    {
-        "City": "Offenbach",
-        "State": "Hessen"
-    },
-    {
-        "City": "Magdeburg"
-    },
-    {
-        "City": "Sudberg"
-    },
-    {
-        "City": "Ittlingen",
-        "District": "Sinsheim"
-    },
-    {
-        "City": "Caracas___Los Caobos",
-        "Neighborhood": "Avda Bogota",
-        "District": "Milagros"
-    },
-    {
-        "City": "Hamburg",
-        "StreetName": "Isestr."
-    },
-    {
-        "City": "Osnabr\u00fcck"
-    },
-    {
-        "City": "Bonn"
-    },
-    {
-        "City": "N\u00fcrnberg",
-        "StreetName": "Pfeiffergasse",
-        "HouseNumber": "6"
-    },
-    {
-        "City": "Goldberg"
-    },
-    {
-        "HouseNumber": "350",
-        "StreetName": "No. Fuller Ave",
-        "City": "Los Angeles",
-        "State": "Calif.",
-        "Country": "USA"
-    },
-    {
-        "City": "New York",
-        "Country": "USA",
-        "HouseNumber": "210",
-        "StreetName": "West 70 Str."
-    },
-    {
-        "City": "Buchdorf"
-    },
-    {
-        "City": "Buenos Aires",
-        "StreetName": "Ayacucho",
-        "HouseNumber": "23",
-        "Neighborhood": "5p.",
-        "Country": "Argentinien"
-    },
-    {
-        "Country": "Polen"
-    },
-    {
-        "City": "Iwitz"
-    },
-    {
-        "City": "Heilbronn"
-    },
-    {
-        "City": "Tirschenreuth",
-        "StreetName": "Maximiliansplatz",
-        "HouseNumber": "1",
-        "District": "Oberpfalz"
-    },
-    {
-        "HouseNumber": "451",
-        "StreetName": "Orange Street",
-        "Neighborhood": "SE",
-        "City": "Washington DC"
-    },
-    {
-        "City": "Krzemieniec",
-        "Country": "Polen"
-    },
-    {
-        "City": "Diepholz",
-        "Neighborhood": "Barackenlager",
-        "StreetName": "Baracke",
-        "HouseNumber": "4"
-    },
-    {
-        "City": "Mannheim"
-    },
-    {
-        "City": "Schweinfurt"
     }
 ]

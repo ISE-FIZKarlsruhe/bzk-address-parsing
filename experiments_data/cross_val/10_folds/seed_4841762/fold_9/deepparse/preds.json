@@ -1,5 +1,80 @@
 [
     {
+        "City": "serodzige",
+        "Country": "polen"
+    },
+    {
+        "HouseNumber": "83",
+        "StreetName": "ludwigshafen mandacherstr."
+    },
+    {
+        "StreetName": "tel-aviv schderoth",
+        "City": "nordau",
+        "Country": "22/israel"
+    },
+    {
+        "City": "thessaloniki/griechenld"
+    },
+    {
+        "HouseNumber": "r.d.5",
+        "StreetName": "tuckahoe road",
+        "City": "vineland/n.j.",
+        "Country": "usa"
+    },
+    {
+        "HouseNumber": "19",
+        "StreetName": "hamburg",
+        "City": "osterstr. 22."
+    },
+    {
+        "City": "mannheim"
+    },
+    {
+        "StreetName": "jaffa schdret jeruschlaim/ole",
+        "City": "hadasch)"
+    },
+    {
+        "HouseNumber": "3",
+        "StreetName": "audincourt/doubs/france - rue de la yvotte"
+    },
+    {
+        "StreetName": "jerusalem beth",
+        "City": "russo igst kapaim israel"
+    },
+    {
+        "City": "bamberg"
+    },
+    {
+        "HouseNumber": "329",
+        "StreetName": "glendale",
+        "City": "a mira loma"
+    },
+    {
+        "HouseNumber": "300",
+        "StreetName": "chascomus f.c.s. argentinien calle sarmiento"
+    },
+    {
+        "HouseNumber": "46",
+        "StreetName": "dortmund nordstr."
+    },
+    {
+        "HouseNumber": "21",
+        "StreetName": "ako rech. hei",
+        "City": "israel"
+    },
+    {
+        "City": "m\u00fcnchen"
+    },
+    {
+        "StreetName": "schladen kreis goslar"
+    },
+    {
+        "City": "k\u00f6nigstadtl b\u00f6hmen"
+    },
+    {
+        "City": "kerprich-hemmersdorf"
+    },
+    {
         "City": "danzig"
     },
     {
@@ -46,28 +121,29 @@
         "City": "bukarest"
     },
     {
-        "StreetName": "nordheim/krs.",
-        "City": "heilbronn/n."
+        "HouseNumber": "81",
+        "StreetName": "yonkers new york",
+        "Unit": "bruce",
+        "City": "avenue u.s.a."
     },
     {
-        "City": "tagu-mures/rum."
+        "City": "warschau/ghetto/"
     },
     {
-        "StreetName": "dp lager lechfeld /",
-        "City": "kreis schwabm\u00fcnchen"
+        "City": "arzberg/ofr."
     },
     {
         "HouseNumber": "112",
         "StreetName": "petach tikwa maabra zrif"
     },
     {
-        "StreetName": "caica postal",
-        "City": "sao",
-        "Country": "paulo/brasilien",
-        "PostalCode": "3579"
+        "StreetName": "hoof/krs.",
+        "City": "kassel"
     },
     {
-        "City": "berlin"
+        "HouseNumber": "8",
+        "StreetName": "lippstadt wiedenbr\u00fcckerstr.",
+        "City": "lippstadt"
     },
     {
         "City": "dresden"
@@ -88,9 +164,6 @@
         "City": "dupnitza"
     },
     {
-        "City": "pitest/rum."
-    },
-    {
         "City": "dortmund-l\u00fctgendortmund"
     },
     {
@@ -102,36 +175,7 @@
         "StreetName": "terbetscha lemberg(oesterreich) polen"
     },
     {
-        "HouseNumber": "62",
-        "StreetName": "wuppertal-e. schleswigerstr."
-    },
-    {
-        "StreetName": "sdeh warburg erif",
-        "City": "b. kfar",
-        "Country": "saba",
-        "PostalCode": "5"
-    },
-    {
-        "HouseNumber": "69",
-        "StreetName": "red ave. brooklyn n.y. usa."
-    },
-    {
-        "HouseNumber": "19",
-        "StreetName": "tel-aviv/israel bartinowa"
-    },
-    {
-        "HouseNumber": "211",
-        "StreetName": "bochum hattinger str."
-    },
-    {
-        "StreetName": "nordheim/krs.",
-        "City": "heilbronn/n kelterstr. 37."
-    },
-    {
         "City": "temesvar/banat"
-    },
-    {
-        "City": "radziwilow/polen"
     },
     {
         "City": "berlin"
@@ -143,25 +187,11 @@
         "Country": "dc"
     },
     {
-        "City": "berlin"
-    },
-    {
-        "StreetName": "pabianice",
-        "City": "- polen"
-    },
-    {
-        "HouseNumber": "51",
-        "StreetName": "frankfurt/main voltastr."
-    },
-    {
-        "HouseNumber": "59",
-        "StreetName": "obernau krs. t\u00fcbingen niedernauer str."
+        "HouseNumber": "56",
+        "StreetName": "hildesheim ladem\u00fchle"
     },
     {
         "City": "weiskirchen/offenbach"
-    },
-    {
-        "City": "ffm."
     },
     {
         "HouseNumber": "36",
@@ -169,28 +199,13 @@
         "PostalCode": "1/2"
     },
     {
-        "StreetName": "petricken.",
-        "City": "kr. labian"
-    },
-    {
-        "HouseNumber": "189",
-        "StreetName": "forbach (frankreich)",
-        "Unit": "a rue national"
-    },
-    {
         "HouseNumber": "33 105",
         "StreetName": "sophienstr. parz.",
         "City": "kleingartenver. hellbrook"
     },
     {
-        "City": "debreczin/ungarn"
-    },
-    {
         "StreetName": "sarajevo",
         "City": "jugoslavien"
-    },
-    {
-        "PostalCode": "18.01.03"
     },
     {
         "HouseNumber": "43",
@@ -205,9 +220,6 @@
     {
         "HouseNumber": "40",
         "StreetName": "pszeszow/polen lwowska"
-    },
-    {
-        "City": "oehringen"
     },
     {
         "StreetName": "steinbach am glan"
@@ -290,7 +302,7 @@
         "City": "sarajevo (jug.)"
     },
     {
-        "City": "berlin"
+        "City": "dab/polen"
     },
     {
         "HouseNumber": "1",
@@ -300,10 +312,12 @@
         "City": "charlottenburg"
     },
     {
-        "City": "uffenheim"
+        "StreetName": "cedera/israel",
+        "City": "altersheim beth meir von malben"
     },
     {
-        "StreetName": "bat yam israel"
+        "City": "new",
+        "Country": "york"
     },
     {
         "City": "madiorban-hedersch/ung."
@@ -313,7 +327,11 @@
         "City": "kreis main-taunus"
     },
     {
-        "City": "bielefeld"
+        "HouseNumber": "22",
+        "StreetName": "a thomas drive monroe",
+        "Unit": "park wilmington 6",
+        "City": "delaware",
+        "Country": "usa"
     },
     {
         "StreetName": "bevensen (uelzen)"
@@ -325,7 +343,9 @@
         "StreetName": "jerusalem mekor chaim 2/83"
     },
     {
-        "City": "sosnowice/polen"
+        "StreetName": "buenos aires chivilcoy",
+        "City": "argentinien",
+        "PostalCode": "4491"
     },
     {
         "City": "belgrad"
@@ -353,8 +373,7 @@
         "City": "braunschweig"
     },
     {
-        "HouseNumber": "8",
-        "StreetName": "n\u00fcrnberg nibelungenstrasse"
+        "City": "altensch\u00f6nbach"
     },
     {
         "HouseNumber": "oejendorferweg 14",
@@ -364,25 +383,24 @@
         "City": "cronenberg"
     },
     {
-        "StreetName": "rawitsch/krs.",
-        "City": "breslau"
+        "City": "naugard/pom."
     },
     {
         "City": "trespol/polen"
     },
     {
-        "City": "wehlau i/ostpr."
+        "City": "cannstatt"
     },
     {
         "StreetName": "gronau",
         "City": "krs.neisse"
     },
     {
-        "City": "focsani/rum\u00e4nien"
+        "City": "k.z."
     },
     {
-        "StreetName": "rava russka",
-        "City": "(russland)"
+        "StreetName": "san mateo",
+        "City": "calif."
     },
     {
         "StreetName": "rzyki",

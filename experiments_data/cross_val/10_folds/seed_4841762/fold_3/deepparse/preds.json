@@ -1,66 +1,136 @@
 [
     {
-        "StreetName": "toulouse (hte. garonne)",
-        "City": "cit\u00e9",
-        "Country": "madrid",
-        "PostalCode": "140"
+        "City": "budapest/ungarn"
     },
     {
-        "City": "deportation"
+        "City": "hohenrode"
     },
     {
-        "StreetName": "pilzen /",
-        "City": "csr"
+        "StreetName": "pabianice",
+        "City": "- polen"
     },
     {
-        "HouseNumber": "4",
-        "StreetName": "ingelheim/krs. bingen ob. b\u00f6hlstr."
+        "HouseNumber": "22",
+        "StreetName": "thomas drive wilmington",
+        "City": "delaware/usa."
     },
     {
-        "City": "auschwitz"
+        "HouseNumber": "20",
+        "StreetName": "givataim/israel katznelsohnstr."
     },
     {
-        "City": "coethen/anhalt"
+        "City": "?"
+    },
+    {
+        "City": "lippstadt",
+        "Country": "i.w."
+    },
+    {
+        "City": "erskurt/damals",
+        "Country": "rumaenien"
+    },
+    {
+        "City": "warschau"
+    },
+    {
+        "City": "olgut"
+    },
+    {
+        "StreetName": "chrubieszow",
+        "City": "polen"
+    },
+    {
+        "StreetName": "berlin-zehlendorf teichstr.9"
+    },
+    {
+        "City": "worms"
+    },
+    {
+        "City": "bischofsburg/ostpr."
+    },
+    {
+        "City": "kassel"
     },
     {
         "City": "breslau"
     },
     {
-        "City": "hettenleidelheim"
+        "City": "berschewa/israel"
     },
     {
-        "HouseNumber": "241",
-        "StreetName": "west 108th",
-        "Unit": "street new 25",
-        "Country": "york"
+        "City": "jedwejow/polen"
+    },
+    {
+        "City": "berlin"
+    },
+    {
+        "StreetName": "offenbach/mainbieber seligenst\u00e4dterstr.18 1/10"
+    },
+    {
+        "HouseNumber": "189",
+        "StreetName": "forbach (frankreich)",
+        "Unit": "a rue national"
+    },
+    {
+        "City": "chicago/ill."
+    },
+    {
+        "City": "orchideenstieg 9.",
+        "PostalCode": "20"
+    },
+    {
+        "StreetName": "r\u00fcsselsheim wilk.-r\u00f6ntgen-str.23 krs.",
+        "City": "gro\u00df-gerau"
+    },
+    {
+        "City": "auschwitz"
+    },
+    {
+        "HouseNumber": "166",
+        "StreetName": "urfahr/linz \u00f6sterr. gr\u00fcndberg"
+    },
+    {
+        "City": "breslau"
+    },
+    {
+        "City": "radziwilow"
+    },
+    {
+        "City": "ffm."
     },
     {
         "City": "tulcea/rum\u00e4nien"
     },
     {
-        "City": "dinkelsb\u00fchl/mfr."
+        "City": "hettenleidelheim"
     },
     {
         "City": "kielce/polen"
     },
     {
-        "City": "lodz/polen"
+        "City": "kolmar/posen"
     },
     {
-        "City": "remscheid"
+        "HouseNumber": "4",
+        "StreetName": "berlin-marienfelde alt marienfelde"
     },
     {
-        "City": "dupnitza"
+        "City": "hamburg"
     },
     {
-        "StreetName": "odessa",
+        "HouseNumber": "7",
+        "StreetName": "<unk> ffm.-h\u00f6chst gartenstrasse"
+    },
+    {
+        "City": "satu-mare"
+    },
+    {
+        "StreetName": "samara",
         "City": "russland"
     },
     {
-        "City": "schnellroda kr.merseburg"
-    },
-    {
-        "City": "darmstadt"
+        "HouseNumber": "17",
+        "StreetName": "hannover kochstr."
     },
     {
         "HouseNumber": "233 nr. 1",
@@ -73,34 +143,43 @@
         "City": "ny/usa"
     },
     {
-        "City": "krzemieniec/polen"
-    },
-    {
-        "StreetName": "handorfst.",
-        "City": "anna heim reg.bez. m\u00fcnster"
-    },
-    {
-        "City": "tagu-mures/rum."
-    },
-    {
-        "City": "czenstochau/polen"
-    },
-    {
         "HouseNumber": "1700",
         "StreetName": "harrison ave.",
         "City": "bronx.",
         "Country": "n.y."
     },
     {
-        "HouseNumber": "247",
-        "StreetName": "osterhofen georgiplatz",
-        "City": "vilshofen"
+        "StreetName": "dp lager lechfeld /",
+        "City": "kreis schwabm\u00fcnchen"
     },
     {
-        "StreetName": "bevensen (uelzen)"
+        "City": "schnellroda kr.merseburg"
     },
     {
-        "City": "halmei-szatmar/rum\u00e4nien"
+        "HouseNumber": "anzengruberstra\u00dfe. 21",
+        "StreetName": "hamburg"
+    },
+    {
+        "StreetName": "ulm/donau",
+        "City": "strassburgerstr. 14."
+    },
+    {
+        "StreetName": "tel-aviv schderoth",
+        "City": "nordau",
+        "Country": "22/israel"
+    },
+    {
+        "City": "cluj/rum."
+    },
+    {
+        "StreetName": "swiba (luisenhof) posen"
+    },
+    {
+        "City": "focsani/rum\u00e4nien"
+    },
+    {
+        "HouseNumber": "3",
+        "StreetName": "hettenleidelheim peter schwalbstr."
     },
     {
         "City": "friedrichsrode/th\u00fcringen"
@@ -109,35 +188,43 @@
         "City": "wilno"
     },
     {
-        "HouseNumber": "45",
-        "StreetName": "ruppin str.",
-        "City": "tel-aviv (israel)"
+        "City": "zamosc/polen"
     },
     {
         "HouseNumber": "16",
         "StreetName": "bergedorf brinkmannstr."
     },
     {
-        "City": "remscheid"
+        "StreetName": "rava russka",
+        "City": "(russland)"
     },
     {
-        "City": "plaidt"
+        "HouseNumber": "7",
+        "StreetName": "berlin-hermsdorf junostr."
     },
     {
-        "City": "kibarty b/eydkunen"
+        "HouseNumber": "28",
+        "StreetName": "bremerhaven-m. langemarckstr."
     },
     {
         "City": "erlangen"
     },
     {
-        "City": "michelstadt im odw."
+        "StreetName": "gr\u00e4felfing",
+        "City": "b.m\u00fcnchen hartnagelstr.1/i"
     },
     {
-        "City": "rzochow/polen"
+        "City": "kibarty b/eydkunen"
     },
     {
-        "StreetName": "bendzin /",
+        "StreetName": "bystra",
         "City": "polen"
+    },
+    {
+        "City": "magdeburg"
+    },
+    {
+        "City": "m\u00fcnchen"
     },
     {
         "City": "thorn",
@@ -153,65 +240,75 @@
         "City": "saloniki"
     },
     {
-        "City": "tel aviv/israel. javnestr: 16."
+        "HouseNumber": "758",
+        "StreetName": "querbes avenue",
+        "Unit": "montreal/que. canada"
     },
     {
-        "HouseNumber": "xxxxxx",
-        "City": "farenland",
-        "PostalCode": "5"
+        "City": "berne"
     },
     {
-        "City": "k.z. mauthausen"
+        "StreetName": "jaffo rh. 35/2"
     },
     {
-        "City": "orchideenstieg 9.",
-        "PostalCode": "20"
+        "StreetName": "hannover",
+        "City": "g\u00f6ttinger chaussee 39."
     },
     {
-        "HouseNumber": "7",
-        "StreetName": "<unk> ffm.-h\u00f6chst gartenstrasse"
+        "HouseNumber": "22",
+        "StreetName": "forrest a.c.t. australien arthur circle"
     },
     {
-        "City": "lodz/polen"
+        "StreetName": "helfta",
+        "City": "b. eisleben"
+    },
+    {
+        "StreetName": "mindelheim bahnhofstr.14",
+        "City": "krs. schwaben."
     },
     {
         "HouseNumber": "23",
         "StreetName": "bad mergentheim untere mauergasse"
     },
     {
-        "StreetName": "klingenberg/m.",
-        "City": "; michelstadt"
+        "City": "unna"
     },
     {
         "City": "auschwitz"
     },
     {
-        "HouseNumber": "129",
-        "StreetName": "trier im froschepfuhl"
+        "HouseNumber": "34",
+        "StreetName": "chorz\u00f3w-batory ul. odrowazow nr.",
+        "City": "woj. stalinogr\u00f3d/polen"
     },
     {
-        "HouseNumber": "2a",
-        "StreetName": "aachen w\u00fcllnerstr."
+        "StreetName": "kiriat schmone",
+        "City": "israel schikun waf",
+        "PostalCode": "421/5"
     },
     {
-        "City": "m\u00fcnchen"
+        "City": "gorna"
     },
     {
-        "StreetName": "wehr/baden",
-        "City": "enkendorfstr. 15."
+        "HouseNumber": "300",
+        "StreetName": "riverside drive apt.",
+        "Unit": "4 d new york",
+        "City": "24",
+        "Country": "n.y."
     },
     {
-        "HouseNumber": "3",
-        "StreetName": "audincourt/doubs/france rue de la yvotte"
+        "HouseNumber": "29",
+        "StreetName": "kiriath ono. boulev keren kajemeth",
+        "City": "isr."
     },
     {
-        "City": "k.z. mauthausen"
+        "City": "insterburg/ostpreussen"
     },
     {
-        "City": "aachen"
+        "City": "neuwied"
     },
     {
-        "City": "wiesbaden"
+        "City": "nisiniec"
     },
     {
         "City": "szynawa/polen"
@@ -220,16 +317,14 @@
         "City": "rostoko/bukowina"
     },
     {
-        "HouseNumber": "56",
-        "StreetName": "wuppertal-e. flensburgerstr.",
-        "City": "reg. bez.",
-        "Country": "d\u00fcsseldorf"
+        "City": "opladen"
     },
     {
-        "City": "stuttgart-bad cannstatt"
+        "StreetName": "moshav zahal post",
+        "City": "na galil maaravi/israel"
     },
     {
-        "City": "wilna/polen"
+        "City": "roman/rum\u00e4nien"
     },
     {
         "StreetName": "feldafing obb.",
@@ -238,39 +333,41 @@
         "PostalCode": "z.30"
     },
     {
-        "HouseNumber": "5",
-        "StreetName": "wangen i.a.. finkenweg"
+        "HouseNumber": "62",
+        "StreetName": "wuppertal-e. schleswigerstr."
     },
     {
-        "City": "richen"
+        "HouseNumber": "136",
+        "StreetName": "nathania shikun vatikim"
     },
     {
-        "City": "zamosc/polen"
+        "StreetName": "zborow -",
+        "City": "polen"
     },
     {
         "City": "ostwock/polen"
     },
     {
-        "StreetName": "a.lech dp.-lag.b1.8/33",
-        "City": "landsberg"
+        "City": "meckl"
     },
     {
         "StreetName": "d. deportation"
     },
     {
-        "City": "stanislawow/polen"
+        "City": "dombrowica/polen"
     },
     {
-        "City": "olkusz",
-        "Country": "i.d."
+        "HouseNumber": "22",
+        "StreetName": "mering b. augsburg kirchstr."
     },
     {
-        "HouseNumber": "35",
-        "StreetName": "hannover im moore"
+        "City": "mannheim"
     },
     {
-        "StreetName": "pungesti",
-        "City": "vaslui"
+        "HouseNumber": "36",
+        "StreetName": "hamburg",
+        "Unit": "thielbek",
+        "City": "2 iii"
     },
     {
         "City": "ruskowa"
@@ -283,7 +380,7 @@
         "City": "(hessen)"
     },
     {
-        "City": "rum."
+        "StreetName": "hannover"
     },
     {
         "HouseNumber": "176",
@@ -295,101 +392,5 @@
     },
     {
         "City": "in der deportation"
-    },
-    {
-        "City": "kolmar/posen"
-    },
-    {
-        "HouseNumber": "2",
-        "StreetName": "frankenthal/pf. willestr."
-    },
-    {
-        "StreetName": "offenbach /",
-        "City": "main.",
-        "Country": "hessen"
-    },
-    {
-        "City": "magdeburg"
-    },
-    {
-        "City": "sudberg"
-    },
-    {
-        "StreetName": "ittlingen krs.",
-        "City": "sinsheim"
-    },
-    {
-        "StreetName": "caracas urb. los caobos avda bogota qta. milagros"
-    },
-    {
-        "HouseNumber": "20",
-        "StreetName": "hamburg",
-        "Unit": "isestr. 36"
-    },
-    {
-        "City": "osnabr\u00fcck"
-    },
-    {
-        "City": "bonn"
-    },
-    {
-        "HouseNumber": "6",
-        "StreetName": "n\u00fcrnberg pfeiffergasse"
-    },
-    {
-        "City": "goldberg"
-    },
-    {
-        "HouseNumber": "350",
-        "StreetName": "no. fuller ave los",
-        "Unit": "angeles 36",
-        "City": "calif.",
-        "Country": "usa"
-    },
-    {
-        "HouseNumber": "210",
-        "StreetName": "new york n.y. usa",
-        "Unit": "west 70 str. apt. 301"
-    },
-    {
-        "StreetName": "buchdorf/schwb."
-    },
-    {
-        "HouseNumber": "23 5p.",
-        "StreetName": "buenos aires ayacucho",
-        "City": "dep. i argentinien"
-    },
-    {
-        "City": "polen"
-    },
-    {
-        "City": "iwitz"
-    },
-    {
-        "City": "heilbronn/n"
-    },
-    {
-        "StreetName": "tirschenreuth maximiliansplatz",
-        "City": "1/kreis",
-        "Country": "oberpfalz"
-    },
-    {
-        "HouseNumber": "451",
-        "StreetName": "orange street se",
-        "City": "washington",
-        "Country": "dc"
-    },
-    {
-        "City": "krzemieniec/polen"
-    },
-    {
-        "HouseNumber": "4",
-        "StreetName": "diepholz barackenlager baracke"
-    },
-    {
-        "City": "mannheim"
-    },
-    {
-        "City": "schweinfurt"
     }
 ]
