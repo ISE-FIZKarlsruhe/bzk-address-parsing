@@ -10,7 +10,7 @@ Paper under review for [HIP 26](https://blog.sbb.berlin/hip2026/#cfp)
     - Statistics can be found in `dataset_statistics.ipynb`
 - **Section 4.1** Experiments with Optuna and results are located in the `optuna_llms.ipynb`. This includes all details about the search space
 - **Section 4.2** Cross val evaluation is found in `cross_val_evaluation.ipynb`
-    - **Error analysis** is based on prediction erros listed in `optuna_llms.ipynb`
+    - **Error analysis** is based on prediction errors listed in `optuna_llms.ipynb`
 - **LLM prompts** are found in the `prompts` directory
 - **Predictions** for the experiments reported in the paper are provided in `experiments_data` and will automatically be loaded when running the notebooks. **Replicating the experiments** requires deleting this directory first, and then runnning the notebooks
 - `compare.ipynb` and `error_analysis.ipynb` pertain to early experiments with manual prompt design, only vaguely described in the paper.
