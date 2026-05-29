@@ -53,6 +53,7 @@ dependencies = [
     "plotly>=5.0.0",
     "duckdb>=1.0.0",
     "jupysql>=0.1.0",
+    "itables>=2.8.0",
 ]
 
 [project.optional-dependencies]

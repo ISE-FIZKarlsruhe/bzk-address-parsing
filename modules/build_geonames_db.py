@@ -783,6 +783,20 @@ def open_or_init_duckdb(rebuild_views=False):
         conn.close()
     return duckdb.connect(DUCK_DB_PATH, read_only=True)
 
+def attach_or_init_duckdb(conn, rebuild_views=False):
+    """
+    Opens a connection to the DuckDB database if it exists, otherwise initializes a new database.
+    """
+    if not Path(DUCK_DB_PATH).exists():
+        print(f"DuckDB database not found at {DUCK_DB_PATH}. Initializing new database...")
+        init_duckdb()
+    elif rebuild_views:
+        conn = duckdb.connect(DUCK_DB_PATH) # with write permission
+        create_views(conn)
+        conn.close()
+    conn.execute(f"ATTACH '{DUCK_DB_PATH}' AS geonames (READ_ONLY);")
+    return conn
+
 def rebuild_tables(table_names):
     """
     Rebuilds the specified tables in the DuckDB database.

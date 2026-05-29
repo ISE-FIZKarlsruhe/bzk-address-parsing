@@ -11,3 +11,5 @@ models/
 .venv/
 geonames.duckdb
 geonames.duckdb.wal
+search_cache.duckdb
+search_cache.duckdb.wal

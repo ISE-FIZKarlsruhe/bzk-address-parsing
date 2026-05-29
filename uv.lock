@@ -533,6 +533,7 @@ dependencies = [
     { name = "ipython", version = "8.38.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "ipython", version = "9.10.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
     { name = "ipython", version = "9.11.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "itables" },
     { name = "jupysql" },
     { name = "matplotlib" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
@@ -574,6 +575,7 @@ requires-dist = [
     { name = "ipympl", specifier = ">=0.9.0" },
     { name = "ipython", specifier = ">=8.0.0" },
     { name = "ipywidgets", marker = "extra == 'dev'", specifier = ">=8.0.0" },
+    { name = "itables", specifier = ">=2.8.0" },
     { name = "jupysql", specifier = ">=0.1.0" },
     { name = "jupyterlab", marker = "extra == 'dev'", specifier = ">=4.0.0" },
     { name = "matplotlib", specifier = ">=3.0.0" },
@@ -2161,6 +2163,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/7c/1a/3c8edc664e06e6bd06cce40c6b22da5f1429aa4224d0c590f3be21c91ead/isoduration-20.11.0.tar.gz", hash = "sha256:ac2f9015137935279eac671f94f89eb00584f940f5dc49462a0c4ee692ba1bd9", size = 11649, upload-time = "2020-11-01T11:00:00.312Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/7b/55/e5326141505c5d5e34c5e0935d2908a74e4561eca44108fbfb9c13d2911a/isoduration-20.11.0-py3-none-any.whl", hash = "sha256:b2904c2a4228c3d44f409c8ae8e2370eb21a26f7ac2ec5446df141dde3452042", size = 11321, upload-time = "2020-11-01T10:59:58.02Z" },
+]
+
+[[package]]
+name = "itables"
+version = "2.8.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ca/ef/d4ad45b67f741a70293628aa49adc78ed5665976556dbd0f4d04850636a7/itables-2.8.0.tar.gz", hash = "sha256:b8325fbdbd061004f21ea62425944e5e71a64c2a64849964e0a4b000cde70362", size = 1465957, upload-time = "2026-05-17T09:44:25.457Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/49/bb/3c497ab4a60d921a25340e5e3f646c2e55145454a9312b515f093c16d534/itables-2.8.0-py3-none-any.whl", hash = "sha256:9965c2edc457490d2709d28bd5eabf8f4ac43b44b0e08693fc9bb466a7738926", size = 1489733, upload-time = "2026-05-17T09:44:22.849Z" },
 ]
 
 [[package]]

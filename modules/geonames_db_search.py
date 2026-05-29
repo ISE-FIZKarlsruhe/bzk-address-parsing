@@ -45,7 +45,7 @@ class EntityType(EntityTypeProperties, enum.Enum):
 # Used to materialize in memory a distilled version of the names table
 # TODO filter neighborhoods?
 CANDIDATE_NAMES_INIT_QUERY = """
-CREATE TEMP TABLE candidate_names AS
+CREATE TABLE IF NOT EXISTS candidate_names AS
 SELECT 
     nfc_normalize(alternateName) AS nfc_alt_name,
     regexp_replace(lower(strip_accents(nfc_alt_name)), '[^\\w\\s]', '', 'g') AS clean_alt_name,
@@ -86,9 +86,9 @@ SELECT
             feature_class = 'P'
         )
     } AS entity_type_map
-FROM allNames 
-    NATURAL JOIN simplifiedGeonames 
-    JOIN countryInfo ON (country_code = ISO)
+FROM geonames.allNames 
+    NATURAL JOIN geonames.simplifiedGeonames 
+    JOIN geonames.countryInfo ON (country_code = ISO)
 WHERE
     (
         allNames.isolanguage IS NULL OR 
@@ -100,9 +100,9 @@ WHERE
     alternateName != '' AND
     clean_alt_name != '';
 
-CREATE TEMP TABLE reduced_candidate_names AS
+CREATE TABLE IF NOT EXISTS reduced_candidate_names AS
 SELECT candidate_names.*
-FROM candidate_names JOIN countryInfo ON (country_code = ISO)
+FROM candidate_names JOIN geonames.countryInfo ON (country_code = ISO)
 WHERE 
     country_code IN ('US', 'IL', 'DE') OR 'DE' IN neighbours;
 
@@ -243,12 +243,13 @@ def falling_query_list(
 
 class GeonamesSearch(contextlib.AbstractContextManager):
     def __init__(
-            self, 
-            conn : Optional[duckdb.DuckDBPyConnection] = None,
+            self,
             topk : int = 5,
-            threshold : int | float = 3
+            threshold : int | float = 3,
+            search_cache_db : str | Literal[':memory:'] = "search_cache.duckdb"
         ):
-        self.connection = conn or build_geonames_db.open_or_init_duckdb()
+        self.connection = duckdb.connect(search_cache_db)
+        build_geonames_db.attach_or_init_duckdb(self.connection)
         self.connection.execute(CANDIDATE_NAMES_INIT_QUERY)
         self.topk = topk
         self.threshold = threshold
@@ -348,29 +349,63 @@ class GeonamesSearch(contextlib.AbstractContextManager):
         """
         Finds parent matches according to geographical hierarchy for the given match.
         """
-        # TODO continue later
-        raise NotImplementedError()
-        parents = []
-        addr_matches = addr_matches[addr_matches["entity_type"] != match["entity_type"]]
+        parents: list[pd.DataFrame] = []
+        if addr_matches is None or len(addr_matches) == 0:
+            return parents
+
+        # Exclude matches with the same entity type and the match itself
+        candidates = addr_matches[addr_matches["entity_type"] != match["entity_type"]].copy()
+        try:
+            candidates = candidates[candidates["geonameId"] != match["geonameId"]]
+        except Exception:
+            pass
+
+        # Admin code columns from country + admin1..admin5
         admin_cols = ["country_code"] + [f"admin{n}_code" for n in range(1, 6)]
-        #possible_admin_matches = addr_matches[admin ]
-        # Admin hierarchy
-        admin_cols = ["country_code"] + [f"admin{n}_code" for n in range(1, 6)]
-        admin_masks = [addr_matches["entity_type"] == "Country"] + [
-            (addr_matches["feature_code"].str.startswith(f"ADM{n}") & (addr_matches["entity_type"] != "Country")) for n in range(1, 6)
-        ]
-        for i, level_i_mask in enumerate(admin_masks):
-            code_cols = admin_cols[:i+1]
-            match_mask = (addr_matches["feature_class"] == "A") & level_i_mask & (addr_matches[code_cols] == match[code_cols]).all(axis=1)
-            parents.append(addr_matches[match_mask])
-        
-        parent_city_ids = match["parentCityIds"]
-        if pd.isna(parent_city_ids) is not True: # isna will output a bool array when given an array
-            parents.append(addr_matches[addr_matches["geonameId"].astype(str).isin(parent_city_ids)])
-        parent_region_ids = match["parentRegionIds"]
-        if pd.isna(parent_region_ids) is not True:
-            parents.append(addr_matches[addr_matches["geonameId"].astype(str).isin(parent_region_ids)])
-        return parents        
+
+        # Build masks for country and admin levels 1..5
+        admin_masks: list[pd.Series] = []
+        admin_masks.append(candidates["entity_type"] == "Country")
+        for n in range(1, 6):
+            mask = (
+                (candidates["feature_class"] == "A")
+                & candidates["feature_code"].str.startswith(f"ADM{n}", na=False)
+                & (candidates["entity_type"] != "Country")
+            )
+            admin_masks.append(mask)
+
+        # For each level, pick candidates whose admin codes match the match's codes up to that level
+        for i, level_mask in enumerate(admin_masks):
+            code_cols = admin_cols[: i + 1]
+            if len(code_cols) == 0:
+                continue
+            comp_mask = pd.Series(True, index=candidates.index)
+            for col in code_cols:
+                match_val = match.get(col, None)
+                match_str = "" if pd.isna(match_val) else str(match_val)
+                comp_mask &= candidates[col].fillna("").astype(str) == match_str
+            match_mask = level_mask & comp_mask
+            parents.append(candidates[match_mask])
+
+        # parentCityIds and parentRegionIds are expected to be native Python
+        # iterables (lists/tuples/sets) or absent. If present, match against them.
+        parent_city_ids = match.get("parentCityIds", None)
+        if parent_city_ids is not None and not (isinstance(parent_city_ids, float) and pd.isna(parent_city_ids)):
+            try:
+                ids = {str(x) for x in parent_city_ids}
+            except TypeError:
+                ids = {str(parent_city_ids)}
+            parents.append(candidates[candidates["geonameId"].astype(str).isin(ids)])
+
+        parent_region_ids = match.get("parentRegionIds", None)
+        if parent_region_ids is not None and not (isinstance(parent_region_ids, float) and pd.isna(parent_region_ids)):
+            try:
+                ids = {str(x) for x in parent_region_ids}
+            except TypeError:
+                ids = {str(parent_region_ids)}
+            parents.append(candidates[candidates["geonameId"].astype(str).isin(ids)])
+
+        return parents
 
     def group_hierarchical_matches(self, matches : pd.DataFrame) -> pd.DataFrame:
         return matches.groupby("input_row").apply(self.group_address_hierarchical_matches).reset_index(level=2, drop=True)
@@ -379,6 +414,7 @@ class GeonamesSearch(contextlib.AbstractContextManager):
         """
         Groups different matches of the same address for different entity types that are hierarchically dependent.
         """
+        # Method heavily refactored with GPT-5 mini
         orig_index_levels = addr_matches.index.names
         addr_matches = addr_matches.reset_index()
         ungrouped_entities = set(addr_matches["geonameId"])
