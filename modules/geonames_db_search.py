@@ -254,13 +254,16 @@ class GeonamesSearch(contextlib.AbstractContextManager):
         self.topk = topk
         self.threshold = threshold
     
-    def link_entities(
+    def search_entities(
             self,
         parts : list[str],
         entity_type : Optional[EntityType] = None,
         country_hints : Optional[list[list[str]]] = None,
         fall_to_all_entities : bool = False,
     ) -> list[pd.DataFrame]:
+        """
+        Match extracted address parts of a given type to place entities on external knowledge graphs.
+        """
         # convert in case it's a series
         if not isinstance(parts, list):
             parts = list(parts)
@@ -304,44 +307,54 @@ class GeonamesSearch(contextlib.AbstractContextManager):
             results.append(matches)
         return results
 
-    def link_parsed_addresses(self, addresses : pd.DataFrame | list[dict]) -> pd.DataFrame:
+    def search_parsed_addresses(self, addresses : pd.DataFrame | list[dict]) -> pd.DataFrame:
+        """
+        Match parsed addresses to place entities on external knowledge graphs.
+        """
         if not isinstance(addresses, pd.DataFrame):
             addresses = pd.DataFrame(addresses)
+        else:
+            addresses = addresses.reset_index(drop=True)
         addresses = addresses[[c for c in addresses.columns if c in EntityType.__members__]]
         matches = []
         country_hints = {}
         for entity_type in EntityType:
-            if entity_type.name in addresses.columns:
-                target_cols = [entity_type.name, "Country"] if entity_type != EntityType.Country else ["Country"]
-                targets = addresses[target_cols].reset_index(names="input_row").dropna(subset=[entity_type.name])
-                nodupes = targets.drop_duplicates(subset=target_cols)
-                nodupes['country_hints'] = pd.Series(country_hints.get(country) for country in nodupes["Country"])
-                print(f"Country hints set for {len(nodupes['country_hints'].dropna())} / {len(nodupes)} addresses for entity type {entity_type.name}")
-                nodupes = nodupes.fillna({"country_hints": None}).reset_index(drop=True)
-                print(f"Starting search for entity type {entity_type.name}")
-                start = time.monotonic()
-                entity_matches = self.link_entities(nodupes[entity_type.name], country_hints=nodupes["country_hints"], entity_type=entity_type)
-                end = time.monotonic()
-                print(f"Search for entity type {entity_type.name} took {utils.format_time(end - start)} and returned {sum(len(df) for df in entity_matches)} matches")
-                for idx, row in targets.iterrows():
-                    match_idx = nodupes[(nodupes[target_cols].fillna("") == row[target_cols].fillna("")).all(axis=1)].index
-                    if len(match_idx) != 1:
-                        warnings.warn(f"Expected exactly one match for {entity_type.name}='{row[entity_type.name]}' and Country='{row['Country']}', but got {len(match_idx)}. This should not happen.")
-                    else:
-                        entity_matches[match_idx[0]]["input_row"] = idx
-                assert all("input_row" in df.columns for df in entity_matches)
-                entity_matches = pd.concat(entity_matches)
-                entity_matches = entity_matches.drop(columns=["country_restriction"])
-                entity_matches["entity_type"] = entity_type.name
-                entity_matches.set_index(["input_row", "entity_type", "entity_rank", "geonameId"], inplace=True)
-                matches.append(entity_matches)
-                if entity_type == EntityType.Country:
-                    for idx, match in entity_matches.iterrows():
-                        if not pd.isna(match["country_code"]):
-                            country = addresses.loc[idx[0], "Country"]
-                            hints = country_hints.setdefault(country, [])
-                            hints.append(match["country_code"])
-                    print(f"Country hints set for {len(country_hints)} countries")
+            if entity_type.name not in addresses.columns:
+                continue
+            target_cols = [entity_type.name, "Country"] if entity_type != EntityType.Country else ["Country"]
+            targets = addresses[target_cols].reset_index(names="input_row").dropna(subset=[entity_type.name])
+            if len(targets) == 0:
+                continue
+            nodupes = targets.drop_duplicates(subset=target_cols)
+            nodupes['country_hints'] = pd.Series(country_hints.get(country) for country in nodupes["Country"])
+            print(f"Country hints set for {len(nodupes['country_hints'].dropna())} / {len(nodupes)} addresses for entity type {entity_type.name}")
+            nodupes = nodupes.fillna({"country_hints": None}).reset_index(drop=True)
+            print(f"Starting search for entity type {entity_type.name}")
+            start = time.monotonic()
+            entity_matches = self.search_entities(nodupes[entity_type.name], country_hints=nodupes["country_hints"], entity_type=entity_type)
+            end = time.monotonic()
+            print(f"Search for entity type {entity_type.name} took {utils.format_time(end - start)} and returned {sum(len(df) for df in entity_matches)} matches")
+            if entity_type == EntityType.Country:
+                for idx, match in enumerate(entity_matches):
+                    if len(match) > 0 and not match["country_code"].isna().all():
+                        country = addresses.loc[nodupes.iloc[idx]["input_row"], "Country"]
+                        hints = country_hints.setdefault(country, [])
+                        hints.extend(match["country_code"].dropna().unique())
+                print(f"Country hints set for {len(country_hints)} countries")
+            reduped_entity_matches = []
+            for _, row in targets.iterrows():
+                deduped_idx = nodupes[(nodupes[target_cols].fillna("") == row[target_cols].fillna("")).all(axis=1)].index
+                if len(deduped_idx) != 1:
+                    warnings.warn(f"Expected exactly one deduplicated index for {entity_type.name}='{row[entity_type.name]}' and Country='{row['Country']}', but got {len(deduped_idx)}. This should not happen.")
+                row_matches = entity_matches[deduped_idx[0]].copy()
+                row_matches["input_row"] = row["input_row"]
+                reduped_entity_matches.append(row_matches)
+            assert all("input_row" in df.columns for df in reduped_entity_matches)
+            reduped_entity_matches = pd.concat(reduped_entity_matches)
+            reduped_entity_matches = reduped_entity_matches.drop(columns=["country_restriction"])
+            reduped_entity_matches["entity_type"] = entity_type.name
+            reduped_entity_matches.set_index(["input_row", "entity_type", "entity_rank", "geonameId"], inplace=True)
+            matches.append(reduped_entity_matches)
         result = pd.concat(matches).sort_index()
         return result
 
@@ -349,6 +362,7 @@ class GeonamesSearch(contextlib.AbstractContextManager):
         """
         Finds parent matches according to geographical hierarchy for the given match.
         """
+        # Method heavily refactored with GPT-5 mini
         parents: list[pd.DataFrame] = []
         if addr_matches is None or len(addr_matches) == 0:
             return parents
@@ -414,7 +428,6 @@ class GeonamesSearch(contextlib.AbstractContextManager):
         """
         Groups different matches of the same address for different entity types that are hierarchically dependent.
         """
-        # Method heavily refactored with GPT-5 mini
         orig_index_levels = addr_matches.index.names
         addr_matches = addr_matches.reset_index()
         ungrouped_entities = set(addr_matches["geonameId"])

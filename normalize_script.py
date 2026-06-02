@@ -212,7 +212,7 @@ def parse_and_correct(
         
         # Search and correct countries first (to use as hints for city search)
         country_hints = [None] * len(parsed_df)
-        country_db_matches = search_db.link_entities(parsed_df["Country"])
+        country_db_matches = search_db.search_entities(parsed_df["Country"])
         
         for i, (idx, row_matches) in enumerate(zip(parsed_df.index, country_db_matches)):
             if len(row_matches) == 1:
@@ -252,7 +252,7 @@ def parse_and_correct(
                 result_columns[f"{prefix}_country_status"].at[idx] = "REGEX_NO_MATCH"
         
         # Search and correct cities using country hints
-        city_db_matches = search_db.link_entities(parsed_df["City"], country_hints=country_hints)
+        city_db_matches = search_db.search_entities(parsed_df["City"], country_hints=country_hints)
         
         for i, (idx, row_matches) in enumerate(zip(parsed_df.index, city_db_matches)):
             if len(row_matches) == 1:
