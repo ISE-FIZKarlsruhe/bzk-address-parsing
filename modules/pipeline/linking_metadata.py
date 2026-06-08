@@ -1,12 +1,13 @@
 from dataclasses import dataclass
 from modules.pipeline.linked_data import LinkedAddress
 from modules.pipeline.linking_steps import LinkingStepResult, Success
+from datetime import datetime
 
 @dataclass(frozen=True)
 class LinkingStepMetadata:
     step_name : str
     result : LinkingStepResult
-    start_epoch : float
+    start : datetime
     elapsed_time_seconds : float
     
     @property
@@ -17,6 +18,7 @@ class LinkingStepMetadata:
 class AddressLinkingMetadata:
     address : LinkedAddress
     applied_steps : list[LinkingStepMetadata]
+    finished : bool
 
     @property
     def total_elapsed_time_seconds(self) -> float:
@@ -33,5 +35,6 @@ class AddressLinkingMetadata:
         minimized_address = self.address.copy(update={"entities": minimized_entities})
         return AddressLinkingMetadata(
             address=minimized_address,
-            applied_steps=self.applied_steps
+            applied_steps=self.applied_steps,
+            finished=self.finished
         )

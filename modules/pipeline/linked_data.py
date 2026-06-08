@@ -45,7 +45,7 @@ class MatchedName:
             return 1 - self.cleaned_distance / max_dist
     
     def __dict_encode__(self, default_encoder) -> dict:
-        return default_encoder.encode(self).update({
+        return default_encoder(self).update({
             "raw_similarity": self.raw_similarity,
             "cleaned_similarity": self.cleaned_similarity
         })
@@ -72,6 +72,7 @@ class AddressSpan(NamedTuple):
 class LinkedEntity:
     raw_text: str
     span : Optional[AddressSpan]
+    nearby : bool # This entity is near the target address but the target may not be contained in it
     entity_type: GeographicalEntityType
     matches : Optional[list[MatchedName]]
     disambiguation_result : Optional[list[MatchedName]]
@@ -88,23 +89,14 @@ class LinkedEntity:
         return self.linked_to is not None
     
     def __dict_encode__(self, default_encoder) -> dict:
-        return default_encoder.default(self).update({
+        return default_encoder(self).update({
             "is_resolved": self.is_resolved
         })
-
-    def minimize(self) -> "LinkedEntity":
-        """
-        Reduce matches based on disambiguation result,
-        """
-        if self.disambiguation_result is not None:
-            return self.copy(update={"matches": self.disambiguation_result})
-        else:
-            return self
 
 
 @dataclass(frozen=True)
 class LinkedAddress:
-    id : Hashable
+    id : str
     full_address: str
     bzk_field_name: BZKFieldName
     entities: list[LinkedEntity]

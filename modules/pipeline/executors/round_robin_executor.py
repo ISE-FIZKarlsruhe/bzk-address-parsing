@@ -1,0 +1,25 @@
+from modules.pipeline.linked_data import LinkedAddress
+from modules.pipeline.linking_steps import LinkingStepResult
+from modules.pipeline.executors.step_executor import StepExecutor
+import time
+
+class RoundRobinExecutor(StepExecutor):
+    def __init__(self, executors : list[StepExecutor]):
+        self.executors = executors
+        self._next_executor_index = 0
+        self.rate = 0.0
+    
+    def get_pending_count(self):
+        return sum(executor.get_pending_count() for executor in self.executors)
+
+    def get_rate(self):
+        return self.rate
+    
+    async def apply(self, address : LinkedAddress) -> tuple[LinkedAddress, LinkingStepResult]:
+        executor = self.executors[self._next_executor_index]
+        self._next_executor_index = (self._next_executor_index + 1) % len(self.executors)
+        start = time.monotonic()
+        result = await executor.apply(address)
+        elapsed = time.monotonic() - start
+        self.rate = 1 / elapsed if elapsed > 0 else float("inf")
+        return result

@@ -9,6 +9,7 @@ import queue
 from modules.pipeline.executors.step_executor import StepExecutor
 from modules.pipeline.linking_steps import LinkingStepResult, BatchLinkingStep
 import asyncio
+import time
 
 @dataclass
 class Job:
@@ -21,7 +22,8 @@ class BatchGatheringThread:
     def __init__(self, step : BatchLinkingStep, loop : asyncio.AbstractEventLoop):
         self.step = step
         self.batch_size = step.batch_size
-        self.gather_timeout_seconds = step.estimated_processing_time or 10.0
+        self.batch_gathering_patience = step.batch_gathering_patience or 10.0
+        self.current_batch_size = 0
         self.queue : queue.Queue[Job] = queue.Queue(step.batch_size)        
         self.thread = threading.Thread(target=self._run_thread, args=(step, self.queue), daemon=True)
         self.asyncio_event_loop = loop
@@ -38,9 +40,10 @@ class BatchGatheringThread:
     def _gather_batch(self) -> tuple[list[Job], list[LinkedAddress]]:
         jobs = []
         batch = []
+        batch_gathering_deadline = time.monotonic() + self.batch_gathering_patience
         while len(batch) < self.batch_size:
             try:
-                job = self.queue.get(timeout=self.gather_timeout_seconds)
+                job = self.queue.get(timeout=max(batch_gathering_deadline-time.monotonic(), 0.1))
                 if self.queue_full.is_set():
                     self.asyncio_event_loop.call_soon_threadsafe(self.queue_full.clear)
                 if job is None:
@@ -48,6 +51,7 @@ class BatchGatheringThread:
                         raise queue.ShutDown()
                     else:
                         break
+                self.current_batch_size += 1
                 jobs.append(job)
                 batch.append(job.input_data)
             except queue.Empty:
@@ -73,6 +77,7 @@ class BatchGatheringThread:
                     job.result = result
                     self.asyncio_event_loop.call_soon(job.finished.set)
                     self.queue.task_done()
+                self.current_batch_size = 0
                 self.busy.clear()
         except queue.ShutDown:
             pass
@@ -117,49 +122,26 @@ class BatchStepExecutor(StepExecutor):
     def __init__(self, processing_step : BatchLinkingStep, context : ExecutorContext):
         super().__init__(processing_step, context)
         self.gathering_thread = BatchGatheringThread(processing_step, asyncio.get_event_loop())
+        self.rate = 0.0
     
     def initialize(self):
         self.gathering_thread.start()
 
+    def get_pending_count(self):
+        return self.gathering_thread.queue.qsize() + self.gathering_thread.current_batch_size
+    
+    def get_rate(self) -> float:
+        return self.rate
+
     async def apply(self, address : LinkedAddress) -> tuple[LinkedAddress, LinkingStepResult]:
         job = Job(input_data=address, finished=asyncio.Event())
+        start = time.monotonic()
         await self.gathering_thread.submit_job(job)
         await job.finished.wait()
+        elapsed = time.monotonic() - start
+        self.rate = 1 / elapsed if elapsed > 0 else float("inf")
         assert job.result is not None
         return job.result
     
     def finalize(self):
         self.gathering_thread.stop()
-
-
-class RoundRobinBatchStepExecutor(StepExecutor):
-    def __init__(self, child_executors : list[BatchStepExecutor], context : ExecutorContext):
-        super().__init__(context)
-        self.child_executors = child_executors
-        self.current_index = 0
-
-    def initialize(self):
-        for executor in self.child_executors:
-            executor.initialize()
-
-    async def apply(self, address : LinkedAddress) -> tuple[LinkedAddress, LinkingStepResult]:
-        # Round-robin distribution when child executors are busy
-        start_index = self.current_index
-        job = Job(input_data=address, finished=asyncio.Event())
-        while True:
-            executor = self.child_executors[self.current_index]
-            if executor.gathering_thread.try_submit_job(job):
-                break
-            else:
-                self.current_index = (self.current_index + 1) % len(self.child_executors)
-                if self.current_index == start_index:
-                    # All executors are busy, wait for the current one to finish
-                    await executor.gathering_thread.submit_job(job)
-                    break
-        await job.finished.wait()
-        assert job.result is not None
-        return job.result
-
-    def finalize(self):
-        for executor in self.child_executors:
-            executor.finalize()

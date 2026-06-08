@@ -7,8 +7,10 @@ from modules.pipeline.executors.multiprocessing_step_executor import Multiproces
 from modules.pipeline.executors.mutex_step_executor import MutexStepExecutor
 from modules.pipeline.linking_steps import LinkingStep, ParallelizationType
 from modules.pipeline.linking_metadata import AddressLinkingMetadata, LinkingStepMetadata
-from modules.pipeline.step_executors import StepExecutor
+from modules.pipeline.executors.step_executor import StepExecutor
+from modules.pipeline.storage.storage import Storage
 import time
+import datetime
 
 class _StepWrapper:
     def __init__(self, step : LinkingStep, step_executor : StepExecutor, address_linking_executor : 'AddressLinkingExecutor' = None):
@@ -17,7 +19,7 @@ class _StepWrapper:
         self.address_linking_executor = address_linking_executor
 
     async def apply(self, address_metadata : AddressLinkingMetadata) -> AddressLinkingMetadata:
-        start_epoch = time.time()
+        start = datetime.datetime.now().astimezone(datetime.UTC)
         start_monotonic = time.monotonic()
         result_address, step_result = self.step_executor.apply(address_metadata.address)
         elapsed_time_seconds = time.monotonic() - start_monotonic
@@ -25,7 +27,7 @@ class _StepWrapper:
         step_metadata = LinkingStepMetadata(
             step_name=self.step.name,
             result=step_result,
-            start_epoch=start_epoch,
+            start=start,
             elapsed_time_seconds=elapsed_time_seconds
         )
         result = AddressLinkingMetadata(
@@ -51,9 +53,10 @@ class AddressLinkingExecutor(ABC):
             *,
             executor_context : Optional[ExecutorContext] = None, 
             num_workers : int | Literal['auto'] = 'auto',
-            
+            storage : Storage
         ):
         self.executor_context = executor_context or ExecutorContext(num_workers=num_workers)
+        self.storage = storage
 
     def register_step(self, step : LinkingStep, executor : Optional[StepExecutor]) -> _StepWrapper:
         if executor is None:
@@ -66,7 +69,6 @@ class AddressLinkingExecutor(ABC):
         pass
 
     def on_step_complete(self, address_metadata : AddressLinkingMetadata, step_metadata : LinkingStepMetadata):
-
         pass
 
 

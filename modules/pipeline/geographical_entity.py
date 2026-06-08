@@ -50,73 +50,45 @@ class GeonamesClassification(NamedTuple):
     feature_class : Optional[str]
     feature_code : Optional[str]
 
+    @classmethod
+    def from_string(cls, classif : Optional[str]) -> "GeonamesClassification":
+        if classif is None:
+            return cls(feature_class=None, feature_code=None)
+        parts = classif.split(".")
+        if len(parts) != 2:
+            raise ValueError(f"Invalid geonames classification: {classif}")
+        return cls(feature_class=parts[0], feature_code=parts[1])
+
+@dataclass(frozen=True)
+class CountryData:
+    iso_country_code : str
+    country_name : str
+    iso_languages : list[str]
+    neighboring_countries_iso_codes : list[str]
+
+
 @dataclass(frozen=True)
 class GeographicalEntity:
     iri : str
     provider : GeographicalEntityProvider
     name : str
-    classification : Optional[str | GeonamesClassification]
+    asciiname : Optional[str]
+    classification : Optional[str]
     possible_entity_types : list[GeographicalEntityType]
     coordinates : Optional[Coordinates]
     population : Optional[int]
-    iso_country_code : Optional[str]
     closest_geonames_id : int
-    asciiname : Optional[str]
+    country : Optional[CountryData]
+    alternate_countries : list[CountryData]
     admin_codes : GeonamesAdminCodes
-    parent_city_ids : list[int]
-    parent_region_ids : list[int]
-    country_name : Optional[str]
+    other_parent_iris : list[str]
 
-    @classmethod
-    def from_db_row(cls, row : dict | 'pd.Series') -> "GeographicalEntity":
-        iri = row["iri"]
-        if iri.startswith(GeographicalEntityProvider.GEONAMES.value):
-            provider = GeographicalEntityProvider.GEONAMES
-        elif iri.startswith(GeographicalEntityProvider.WIKIDATA.value):
-            provider = GeographicalEntityProvider.WIKIDATA
+    @property
+    def get_all_countries(self):
+        if self.country is not None:
+            return [self.country] + self.alternate_countries
         else:
-            raise ValueError(f"Unknown provider in IRI: {iri}")
-        
-        coordinates = (row.get("latitude"), row.get("longitude"))
-        if pd.isna(coordinates[0]) or pd.isna(coordinates[1]):
-            coordinates = None
-
-        admin_codes = GeonamesAdminCodes(
-            admin1_code=row.get("admin1_code"),
-            admin2_code=row.get("admin2_code"),
-            admin3_code=row.get("admin3_code"),
-            admin4_code=row.get("admin4_code"),
-            admin5_code=row.get("admin5_code")
-        )
-
-        geonames_class = GeonamesClassification(
-            feature_class=row.get("feature_class"),
-            feature_code=row.get("feature_code")
-        )
-        if pd.isna(geonames_class.feature_class) or pd.isna(geonames_class.feature_code):
-            geonames_class = None
-        name : str = row["name"]
-        asciiname = row.get("asciiname")
-        if asciiname is None and name.isascii():
-            asciiname = name
-        return cls(
-            iri=iri,
-            provider=provider,
-            name=name,
-            classification=row.get("classification") or geonames_class,
-            possible_entity_types=[
-                GeographicalEntityType(et) for et, v in row["entity_type_map"].items() if v
-            ],
-            coordinates=coordinates,
-            population=row.get("population"),
-            iso_country_code=row.get("country_code"),
-            closest_geonames_id=row["closest_geonames_id"],
-            asciiname=asciiname,
-            admin_codes=admin_codes,
-            parent_city_ids=row.get("parent_city_ids", []),
-            parent_region_ids=row.get("parent_region_ids", []),
-            country_name=row.get("country_name")
-        )
+            return self.alternate_countries
 
 @dataclass(frozen=True)
 class GeographicalName:
