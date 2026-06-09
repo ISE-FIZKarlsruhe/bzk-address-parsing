@@ -49,20 +49,6 @@ class MatchedName:
             "raw_similarity": self.raw_similarity,
             "cleaned_similarity": self.cleaned_similarity
         })
-        
-    def from_db_row(cls, row: dict | pd.Series) -> "MatchedName":
-        return cls(
-            geographical_name=GeographicalName.from_db_row(row),
-            query=row["query"],
-            nfc_query=row["nfc_query"],
-            clean_query=row["clean_query"],
-            abbreviation_pattern=row.get("abbreviation_pattern"),
-            nfc_alt_name=row["nfc_alt_name"],
-            clean_alt_name=row["clean_alt_name"],
-            raw_distance=row["raw_distance"],
-            cleaned_distance=row["cleaned_distance"],
-            may_be_abbreviation=row["may_be_abbreviation"]
-        )
 
 class AddressSpan(NamedTuple):
     start: int

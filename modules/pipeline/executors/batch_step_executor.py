@@ -17,6 +17,8 @@ class Job:
     result : Optional[tuple[LinkedAddress, LinkingStepResult]] = None
     finished : asyncio.Event
 
+# TODO correct this whole logic to use asyncio properly
+
 
 class BatchGatheringThread:
     def __init__(self, step : BatchLinkingStep, loop : asyncio.AbstractEventLoop):
@@ -25,7 +27,11 @@ class BatchGatheringThread:
         self.batch_gathering_patience = step.batch_gathering_patience or 10.0
         self.current_batch_size = 0
         self.queue : queue.Queue[Job] = queue.Queue(step.batch_size)        
-        self.thread = threading.Thread(target=self._run_thread, args=(step, self.queue), daemon=True)
+        self.thread = threading.Thread(
+            name=f"BatchGatheringThread-{step.name}",
+            target=self._run_thread,
+            daemon=True
+        )
         self.asyncio_event_loop = loop
 
         # Set by queueing threads when the queue is full

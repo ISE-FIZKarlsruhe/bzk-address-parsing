@@ -97,18 +97,5 @@ class GeographicalName:
     is_preferred_name: bool
     is_short_name: Optional[bool]
     is_colloquial : Optional[bool]
-    name_provider : GeographicalEntityProvider
+    name_provider : Optional[GeographicalEntityProvider]
     isolanguage : Optional[str]
-
-    @classmethod
-    def from_db_row(cls, row : dict | 'pd.Series') -> "GeographicalName":
-        entity = GeographicalEntity.from_db_row(row)
-        return cls(
-            alternate_name=row["alternate_name"],
-            entity=entity,
-            is_preferred_name=row["is_preferred_name"],
-            is_short_name=row.get("is_short_name"),
-            is_colloquial=row.get("is_colloquial"),
-            name_provider=GeographicalEntityProvider(row["name_provider"]),
-            isolanguage=row.get("isolanguage")
-        )

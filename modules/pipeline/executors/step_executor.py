@@ -2,10 +2,11 @@ from abc import ABC, abstractmethod
 from modules.pipeline.executors.executor_context import ExecutorContext
 from modules.pipeline.linked_data import LinkedAddress
 from modules.pipeline.linking_steps import LinkingStepResult
+from typing import Optional
 
 class StepExecutor(ABC):
-    def __init__(self, context : ExecutorContext):
-        self.context = context
+    def __init__(self):
+        self.context : Optional[ExecutorContext] = None
 
     @abstractmethod
     def get_pending_count(self) -> int:
@@ -22,9 +23,8 @@ class StepExecutor(ABC):
         """
         pass
 
-    @abstractmethod
-    def initialize(self):
-        pass
+    def initialize(self, executor_context : ExecutorContext):
+        self.executor_context = executor_context
 
     @abstractmethod
     async def apply(self, address : LinkedAddress) -> tuple[LinkedAddress, LinkingStepResult]:

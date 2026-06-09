@@ -44,6 +44,88 @@ import time
 DUCK_DB_PATH = "geonames.duckdb"
 
 
+WIKIDATA_CLASSES = {
+    "wd:Q486972" : ["City", "Neighborhood"],
+    "wd:Q253019" : ["Neighborhood"],
+    "wd:Q262166" : ["City"],
+    "wd:Q82794" : ["Region"]
+}
+
+#TODO use
+WIKIDATA_SPARQL = """
+SELECT ?id ?parentGeoname ?labelEN ?labelDE ?coords WHERE {
+  ?parent wdt:P17 wd:Q183.
+  ?parent wdt:P1566 ?parentGeoname.
+  ?id wdt:P131 ?parent.
+  ?id wdt:P31 ?class FILTER (?class IN (wd:Q486972, wd:Q253019, wd:Q262166)).
+  OPTIONAL { ?id wdt:P1566 ?ownGeoname. }
+  FILTER(!BOUND(?ownGeoname))
+  OPTIONAL {?id rdfs:label ?labelEN FILTER (LANG(?labelEN) = "en")} 
+  OPTIONAL {?id rdfs:label ?labelDE FILTER (LANG(?labelDE) = "de")} 
+  OPTIONAL {?id wdt:P625 ?coords} 
+} 
+"""
+
+_INIT_GEO_ENTITIES_TABLES_SQL = """
+CREATE TABLE IF NOT EXISTS geographical_names (
+    iri TEXT,
+    alternate_name TEXT,
+    is_preferred_name BOOLEAN,
+    is_short_name BOOLEAN,
+    is_colloquial BOOLEAN,
+    name_provider TEXT,
+    isolanguage TEXT,
+    PRIMARY KEY (iri, alternate_name)
+);
+
+CREATE TABLE IF NOT EXISTS geographical_entities (
+    iri TEXT PRIMARY KEY,
+    name TEXT,
+    asciiname TEXT,
+    classification TEXT,
+    possible_entity_types TEXT[],
+    coordinates STRUCT(latitude REAL, longitude REAL),
+    population BIGINT,
+    closest_geonames_id INTEGER,
+    iso_country_code TEXT,
+    alternate_iso_country_codes TEXT[],
+    admin_codes STRUCT(
+        admin1_code TEXT, 
+        admin2_code TEXT, 
+        admin3_code TEXT, 
+        admin4_code TEXT, 
+        admin5_code TEXT
+    ),
+    other_parent_iris TEXT[]
+);
+
+CREATE TABLE IF NOT EXISTS country_data (
+    iso_code TEXT PRIMARY KEY,
+    country_name TEXT,
+    iso_languages TEXT[],
+    neighboring_countries_iso_codes TEXT[]
+);
+
+CREATE VIEW IF NOT EXISTS geographical_entities_with_countries AS
+SELECT 
+    geographical_entities.* EXCEPT (alternate_iso_country_codes, iso_country_code), 
+    alternate_countries.alternate_countries AS alternate_countries,
+    country_data as country 
+FROM geographical_entities 
+    JOIN country_data ON geographical_entities.iso_country_code = country_data.iso_code,
+    LATERAL (
+        SELECT LIST(alt_country) as alternate_countries FROM 
+            UNNEST(geographical_entities.alternate_iso_country_codes) AS code) AS alt_country_codes
+            JOIN country_data AS alt_country ON alt_country.iso_code = alt_country_codes.code
+    ) alternate_countries;
+
+CREATE VIEW IF NOT EXISTS geographical_names_with_entities AS
+SELECT geographical_names.* EXCEPT (iri), geographical_entities_with_countries AS entity FROM geographical_names 
+    JOIN geographical_entities_with_countries USING (iri)
+    )
+);
+"""
+
 # =================================================================================
 # Generic utility functions
 # =================================================================================
@@ -196,33 +278,7 @@ def init_geonames_table(con: duckdb.DuckDBPyConnection):
 
     This includes the admin5 code column which is only available in a separate dump file and 
     needs to be imported separately to the main table."""
-    print("Creating and populating main geonames table...")
-    con.execute(
-        """
-        CREATE TABLE geonames (
-            geonameId INTEGER PRIMARY KEY,
-            name TEXT,
-            asciiname TEXT,
-            alternatenames TEXT,
-            latitude REAL,
-            longitude REAL,
-            feature_class TEXT,
-            feature_code TEXT,
-            country_code TEXT,
-            cc2 TEXT,
-            admin1_code TEXT,
-            admin2_code TEXT,
-            admin3_code TEXT,
-            admin4_code TEXT,
-            admin5_code TEXT,
-            population BIGINT,
-            elevation INTEGER,
-            dem INTEGER,
-            timezone TEXT,
-            modification_date DATE
-        );
-    """
-    )
+    print("Populating main geonames table...")
     zipfile = Path("dumps/geonames/allCountries.zip")
     download_file(
         "https://download.geonames.org/export/dump/allCountries.zip",
@@ -232,7 +288,7 @@ def init_geonames_table(con: duckdb.DuckDBPyConnection):
     decompress_and_retrieve_relevant_geonames(zipfile, "allCountries.txt")
     with duckdbpbar(con, desc="Importing geonames main table"):
         con.execute(
-            """
+        """
         COPY geonames(
                 geonameId, name, asciiname, alternatenames, latitude, longitude, 
                 feature_class, feature_code, country_code, cc2, 
@@ -462,15 +518,15 @@ def fetch_names_from_gnd(gnd) -> Generator[tuple[str, str, bool, int], None, Non
     Fetches geonameIds and names from GND RDF graph, yielding tuples of (gndUri, name, isPreferred, geonameId).
     """
     qres = gnd.query(
-        """
-        SELECT ?gndUri ?nameType ?name ?geonameUri WHERE {
-                ?gndUri a gndo:TerritorialCorporateBodyOrAdministrativeUnit.
-                ?gndUri owl:sameAs ?geonameUri FILTER (STRSTARTS(STR(?geonameUri), "https://sws.geonames.org/")).
-                ?gndUri ?nameType ?name
-                FILTER (?nameType IN (
-                    gndo:preferredNameForThePlaceOrGeographicName, 
-                    gndo:variantNameForThePlaceOrGeographicName)).
-        }
+    """
+    SELECT ?gndUri ?nameType ?name ?geonameUri WHERE {
+            ?gndUri a gndo:TerritorialCorporateBodyOrAdministrativeUnit.
+            ?gndUri owl:sameAs ?geonameUri FILTER (STRSTARTS(STR(?geonameUri), "https://sws.geonames.org/")).
+            ?gndUri ?nameType ?name
+            FILTER (?nameType IN (
+                gndo:preferredNameForThePlaceOrGeographicName, 
+                gndo:variantNameForThePlaceOrGeographicName)).
+    }
     """
     )
     total_estimate = 150_000  # based on past runs with some margin for new entries

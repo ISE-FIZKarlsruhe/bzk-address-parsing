@@ -14,6 +14,12 @@ class RoundRobinExecutor(StepExecutor):
 
     def get_rate(self):
         return self.rate
+
+    def initialize(self, executor_context):
+        super().initialize(executor_context)
+        for executor in self.executors:
+            executor.initialize(executor_context)
+    
     
     async def apply(self, address : LinkedAddress) -> tuple[LinkedAddress, LinkingStepResult]:
         executor = self.executors[self._next_executor_index]
@@ -23,3 +29,9 @@ class RoundRobinExecutor(StepExecutor):
         elapsed = time.monotonic() - start
         self.rate = 1 / elapsed if elapsed > 0 else float("inf")
         return result
+
+    def finalize(self):
+        for executor in self.executors:
+            executor.finalize()
+
+    
