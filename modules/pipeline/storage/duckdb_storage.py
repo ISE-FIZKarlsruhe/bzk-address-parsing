@@ -1,12 +1,9 @@
 import duckdb
-from typing import Optional, TYPE_CHECKING
+from typing import Optional
 from modules.pipeline.storage.storage import SynchronousStorage
 from modules.pipeline.storage.encoding_util import encode_as_dict, decode_from_dict
 import json
 from modules.pipeline.linking_metadata import AddressLinkingMetadata
-from concurrent.futures import ThreadPoolExecutor
-import asyncio
-
 
 _INIT_DB_SQL = """
 LOAD JSON;
@@ -235,9 +232,6 @@ class DuckDBStorage(SynchronousStorage):
             "applied_steps": steps_data,
             "is_finished": linked_address.finished
         })
-
-
-
 
     def _expand_data_from_storage(self, data_to_exand: list[dict]):
         """

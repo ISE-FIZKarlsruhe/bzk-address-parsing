@@ -52,6 +52,6 @@ class ExecutorContext:
         resource_id = id(resource)
         self.registered_multiprocessing_steps[resource_id] = resource
 
-    def close(self):
+    def finalize(self):
         if self.multiprocessing_pool is not None:
             self.multiprocessing_pool.shutdown(wait=True)

@@ -4,6 +4,9 @@ from modules.pipeline.executors.step_executor import StepExecutor
 import time
 
 class RoundRobinExecutor(StepExecutor):
+    """
+    Utility executor that wraps multiple executors and distributes the load among them in a round-robin fashion.
+    """
     def __init__(self, executors : list[StepExecutor]):
         self.executors = executors
         self._next_executor_index = 0

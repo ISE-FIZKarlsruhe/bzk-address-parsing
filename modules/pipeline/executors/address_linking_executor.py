@@ -15,8 +15,8 @@ import time
 import datetime
 import logging
 import traceback
-from io import StringIO
 from tqdm.auto import tqdm
+from tqdm.contrib.logging import logging_redirect_tqdm
 
 class _SkipProcessingSignal(Exception):
     pass
@@ -37,12 +37,10 @@ class _StepWrapper:
             self.address_linking_executor.logger.exception(f"Error processing address {address_metadata.address.id}: {e}")
             exception_throw = e
             result_address = address_metadata.address
-            trace_buffer = StringIO()
-            traceback.print_exception(type(e), e, e.__traceback__, file=trace_buffer)
             step_result = Failed(
                 error_message=str(e),
                 exception_class=e.__class__.__name__,
-                traceback=trace_buffer.getvalue()
+                traceback="".join(traceback.format_exception(type(e), e, e.__traceback__))
             )
 
         elapsed_time_seconds = time.monotonic() - start_monotonic
@@ -62,6 +60,7 @@ class _StepWrapper:
             await self.address_linking_executor.on_step_complete(result, step_metadata)
         else:
             await self.address_linking_executor.on_step_failed(result, step_metadata)
+            raise _SkipProcessingSignal() from exception_throw
         return result
 
 def default_executor_for_step(step : LinkingStep) -> StepExecutor:
@@ -92,13 +91,19 @@ class AddressLinkingExecutor(ABC):
             monitor_log_interval = monitor_log_interval.total_seconds()
         self.monitor_log_interval = monitor_log_interval
         self.logger = logger or logging.getLogger(self.__class__.__name__)
+        self.total : Optional[int] = None
+        self.finished = 0
+        self.failed = 0
+        self._step_wrappers : dict[str, _StepWrapper] = dict()
 
     def register_step(self, step : LinkingStep, executor : Optional[StepExecutor] = None) -> _StepWrapper:
         if executor is None:
             executor = default_executor_for_step(step, self.executor_context)
         else:
             assert step.name == executor.step.name, "Step name must match between the step and the executor"
-        return _StepWrapper(step, executor, self)
+        wrapper = _StepWrapper(step, executor, self)
+        self._step_wrappers[step.name] = wrapper
+        return wrapper
     
     
     @abstractmethod
@@ -117,13 +122,8 @@ class AddressLinkingExecutor(ABC):
             address_metadata : AddressLinkingMetadata, 
             step_metadata : LinkingStepMetadata,
         ):
+        self.failed += 1
         await self.storage.upsert(address_metadata, preserve_linking_data=True)
-
-
-    async def monitor(self):
-        while True:
-            await asyncio.sleep(self.monitor_log_interval)
-            # TODO: Implement monitoring logic
 
     async def _dispatcher(self):
         while True:
@@ -132,27 +132,63 @@ class AddressLinkingExecutor(ABC):
                 # TODO set up drawing more addresses? 
                 # Current assumption is that storage contains all pending addresses already
                 break
+            preserve_linking_data = True
             try:
                 result = await self.apply(address_metadata)
             except _SkipProcessingSignal:
-                continue
+                pass
             except Exception as e:
+                # This point should never be reached, errors should be caught and handled in the step wrappers
                 self.logger.exception(f"Uncaught error processing address {address_metadata.address.id}: {e}")
-                
+                self.failed += 1
+                self.tqdm.update(1)
+                result = AddressLinkingMetadata(
+                    address=address_metadata.address,
+                    applied_steps=result.applied_steps + [
+                        LinkingStepMetadata(
+                            step_name="UNCAUGHT ERROR",
+                            result=Failed(
+                                error_message=str(e),
+                                exception_class=e.__class__.__name__,
+                                traceback="".join(traceback.format_exception(type(e), e, e.__traceback__))
+                            ),
+                        )],
+                    finished = True
+                )
             result.finished = True
-            await self.storage.upsert(result)
+            await self.storage.upsert(result, preserve_linking_data=preserve_linking_data)
+            self.finished += 1
+            self.tqdm.update(1)
 
-    
     async def run_async(self):
-        self.executor_context.initialize()
         self.register_steps()
-        for step_wrapper in self.executor_context.get_all_step_wrappers():
-            step_wrapper.step_executor.initialize()
+        for step_wrapper in self._step_wrappers.values():
+            step_wrapper.step_executor.initialize(self.executor_context)
+        self.executor_context.initialize()
+        self.storage.initialize()
+
+        n_pending = await self.storage.get_pending_count()
+        self.total = await self.storage.get_total_count()
+        self.finished = self.total - n_pending
         
-        with asyncio.TaskGroup() as tg:
-            for _ in range(self.executor_context.num_processes):
-                tg.create_task(self._dispatcher())
+        with logging_redirect_tqdm():
+            self.logger.info(f"Starting processing with {n_pending} pending addresses and {self.total} total addresses in storage")
+            self.tqdm = tqdm(total=n_pending)
+
+            async with asyncio.TaskGroup() as tg:
+                for i in range(self.executor_context.num_processes):
+                    tg.create_task(self._dispatcher(), name=f"{self.__class__.__name__}-Dispatcher-{i}")
         
+        for step_wrapper in self._step_wrappers.values():
+            step_wrapper.step_executor.finalize()
+        self.executor_context.finalize()
+        self.storage.finalize()
+
+    async def monitor(self):
+        while True:
+            await asyncio.sleep(self.monitor_log_interval)
+            self.logger.info(f"Progress: {self.finished}/{self.total} finished, {self.failed} failed")
+            # TODO expand; can include more info such as "rate" of each step
 
     @abstractmethod
     async def apply(self, address : AddressLinkingMetadata) -> AddressLinkingMetadata:
