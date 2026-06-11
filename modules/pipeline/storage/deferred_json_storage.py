@@ -47,10 +47,10 @@ class DeferredJsonStorage(Storage):
                     self._deferred_write_task.cancel()
                     self._deferred_write_task = None
                 self._write_time = None
-            else:
-                self._wait_time = now + self.defer_write_seconds
-                self._deferred_write_task = asyncio.create_task(
-                    self._wait_then_write(), name=f"{self.__class__.__name__}-DeferredWrite")
+        else:
+            self._write_time = now + self.defer_write_seconds
+            self._deferred_write_task = asyncio.create_task(
+                self._wait_then_write(), name=f"{self.__class__.__name__}-DeferredWrite")
 
     async def upsert(self, linked_address : AddressLinkingMetadata, preserve_linking_data : bool = False) -> None:
         """
@@ -63,7 +63,7 @@ class DeferredJsonStorage(Storage):
         self.memory[linked_address.address.id] = new_data
         if not linked_address.finished:
             self.pending.add(linked_address.address.id)
-        self._defer_write()
+        await self._defer_write()
 
     
     async def fetch_pending(self, n : int = 1) -> Optional[AddressLinkingMetadata] | list[AddressLinkingMetadata]:

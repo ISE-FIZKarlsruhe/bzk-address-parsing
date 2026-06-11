@@ -91,19 +91,19 @@ class SynchronousStorage(ABC, Storage):
             self._executor.shutdown(wait=True)
         return super().finalize()
 
-    def upsert(self, linked_address : 'AddressLinkingMetadata', preserve_linking_data : bool = False) -> None:
+    async def upsert(self, linked_address : 'AddressLinkingMetadata', preserve_linking_data : bool = False) -> None:
         loop = asyncio.get_running_loop()
-        return loop.run_in_executor(self._executor, self.upsert_sync, linked_address, preserve_linking_data)
+        return await loop.run_in_executor(self._executor, self.upsert_sync, linked_address, preserve_linking_data)
     
-    def fetch_pending(self, n : int = 1) -> Optional['AddressLinkingMetadata'] | list['AddressLinkingMetadata']:
+    async def fetch_pending(self, n : int = 1) -> Optional['AddressLinkingMetadata'] | list['AddressLinkingMetadata']:
         loop = asyncio.get_running_loop()
-        return loop.run_in_executor(self._executor, self.fetch_pending_sync, n)
+        return await loop.run_in_executor(self._executor, self.fetch_pending_sync, n)
 
-    def get_pending_count(self) -> int:
+    async def get_pending_count(self) -> int:
         loop = asyncio.get_running_loop()
-        return loop.run_in_executor(self._executor, self.get_pending_count_sync)
+        return await loop.run_in_executor(self._executor, self.get_pending_count_sync)
 
-    def get_total_count(self) -> int:
+    async def get_total_count(self) -> int:
         loop = asyncio.get_running_loop()
-        return loop.run_in_executor(self._executor, self.get_total_count_sync)
+        return await loop.run_in_executor(self._executor, self.get_total_count_sync)
     

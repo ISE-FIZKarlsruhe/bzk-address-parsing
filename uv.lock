@@ -552,6 +552,7 @@ dependencies = [
     { name = "sentence-transformers" },
     { name = "spacy" },
     { name = "spacy-lookups-data" },
+    { name = "sparqlwrapper" },
     { name = "torch" },
     { name = "tqdm" },
     { name = "transformers" },
@@ -592,6 +593,7 @@ requires-dist = [
     { name = "sentence-transformers", specifier = ">=2.0.0" },
     { name = "spacy", specifier = ">=3.8.11" },
     { name = "spacy-lookups-data", specifier = ">=1.0.5" },
+    { name = "sparqlwrapper", specifier = ">=2.0.0" },
     { name = "torch", specifier = ">=2.10.0" },
     { name = "tqdm", specifier = ">=4.0.0" },
     { name = "transformers", specifier = ">=4.0.0" },
@@ -5656,6 +5658,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/fd/42/b747618ec64be73023b84c9eed7a09f5a345f514f367369b863f6a1dbf4f/spacy_lookups_data-1.0.5.tar.gz", hash = "sha256:6f935c81f145bdcc84fc6115f648764285c7ff3e8ff246295046814e96dad63c", size = 98442761, upload-time = "2023-07-28T12:01:14.833Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/9f/9e/dae3acaacc7cbe8140acb181e09b9920f8b3ee81d2f1cd838d160c78f0c2/spacy_lookups_data-1.0.5-py2.py3-none-any.whl", hash = "sha256:466f21f087e4144bc93800679437ec5a17be7d0888734b1ba880b3ecb0978bc6", size = 98458367, upload-time = "2023-07-28T12:01:09.513Z" },
+]
+
+[[package]]
+name = "sparqlwrapper"
+version = "2.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "rdflib" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/4e/cc/453752fffa759ef41a3ceadb3f167e13dae1a74c1db057d9f6a7affa9240/SPARQLWrapper-2.0.0.tar.gz", hash = "sha256:3fed3ebcc77617a4a74d2644b86fd88e0f32e7f7003ac7b2b334c026201731f1", size = 98429, upload-time = "2022-03-13T23:14:00.671Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/31/89/176e3db96e31e795d7dfd91dd67749d3d1f0316bb30c6931a6140e1a0477/SPARQLWrapper-2.0.0-py3-none-any.whl", hash = "sha256:c99a7204fff676ee28e6acef327dc1ff8451c6f7217dcd8d49e8872f324a8a20", size = 28620, upload-time = "2022-03-13T23:13:58.969Z" },
 ]
 
 [[package]]

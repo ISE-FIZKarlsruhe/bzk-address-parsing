@@ -39,45 +39,15 @@ import threading
 from urllib.parse import urlparse
 from datetime import timedelta
 import time
+import warnings
+from SPARQLWrapper import SPARQLWrapper, JSON
+import sys
+import pprint
 
+DUCK_DB_PATH = "geo.duckdb"
 
-DUCK_DB_PATH = "geonames.duckdb"
-
-
-WIKIDATA_CLASSES = {
-    "wd:Q486972" : ["City", "Neighborhood"],
-    "wd:Q253019" : ["Neighborhood"],
-    "wd:Q262166" : ["City"],
-    "wd:Q82794" : ["Region"]
-}
-
-#TODO use
-WIKIDATA_SPARQL = """
-SELECT ?id ?parentGeoname ?labelEN ?labelDE ?coords WHERE {
-  ?parent wdt:P17 wd:Q183.
-  ?parent wdt:P1566 ?parentGeoname.
-  ?id wdt:P131 ?parent.
-  ?id wdt:P31 ?class FILTER (?class IN (wd:Q486972, wd:Q253019, wd:Q262166)).
-  OPTIONAL { ?id wdt:P1566 ?ownGeoname. }
-  FILTER(!BOUND(?ownGeoname))
-  OPTIONAL {?id rdfs:label ?labelEN FILTER (LANG(?labelEN) = "en")} 
-  OPTIONAL {?id rdfs:label ?labelDE FILTER (LANG(?labelDE) = "de")} 
-  OPTIONAL {?id wdt:P625 ?coords} 
-} 
-"""
 
 _INIT_GEO_ENTITIES_TABLES_SQL = """
-CREATE TABLE IF NOT EXISTS geographical_names (
-    iri TEXT,
-    alternate_name TEXT,
-    is_preferred_name BOOLEAN,
-    is_short_name BOOLEAN,
-    is_colloquial BOOLEAN,
-    name_provider TEXT,
-    isolanguage TEXT,
-    PRIMARY KEY (iri, alternate_name)
-);
-
 CREATE TABLE IF NOT EXISTS geographical_entities (
     iri TEXT PRIMARY KEY,
     name TEXT,
@@ -87,8 +57,9 @@ CREATE TABLE IF NOT EXISTS geographical_entities (
     coordinates STRUCT(latitude REAL, longitude REAL),
     population BIGINT,
     closest_geonames_id INTEGER,
+    geonames_id INTEGER, -- Semantically differs from closest_geonames_id because it is only set on geonames entities
     iso_country_code TEXT,
-    alternate_iso_country_codes TEXT[],
+    alternate_iso_country_codes TEXT[] NOT NULL,
     admin_codes STRUCT(
         admin1_code TEXT, 
         admin2_code TEXT, 
@@ -99,31 +70,43 @@ CREATE TABLE IF NOT EXISTS geographical_entities (
     other_parent_iris TEXT[]
 );
 
+CREATE TABLE IF NOT EXISTS geographical_names (
+    iri TEXT, -- REFERENCES geographical_entities(iri), -- Constraint has bug, see https://duckdb.org/docs/current/sql/indexes#over-eager-constraint-checking-in-foreign-keys
+    name TEXT,
+    is_preferred_name BOOLEAN,
+    is_short_name BOOLEAN,
+    is_colloquial BOOLEAN,
+    name_provider TEXT NOT NULL,
+    isolanguage TEXT,
+    PRIMARY KEY (iri, name, name_provider, isolanguage)
+);
+
 CREATE TABLE IF NOT EXISTS country_data (
     iso_code TEXT PRIMARY KEY,
     country_name TEXT,
+    continent TEXT,
+    geonames_id INTEGER,
     iso_languages TEXT[],
     neighboring_countries_iso_codes TEXT[]
 );
 
 CREATE VIEW IF NOT EXISTS geographical_entities_with_countries AS
 SELECT 
-    geographical_entities.* EXCEPT (alternate_iso_country_codes, iso_country_code), 
+    geographical_entities.* EXCLUDE (alternate_iso_country_codes, iso_country_code), 
     alternate_countries.alternate_countries AS alternate_countries,
     country_data as country 
 FROM geographical_entities 
     JOIN country_data ON geographical_entities.iso_country_code = country_data.iso_code,
     LATERAL (
         SELECT LIST(alt_country) as alternate_countries FROM 
-            UNNEST(geographical_entities.alternate_iso_country_codes) AS code) AS alt_country_codes
+            (SELECT UNNEST(geographical_entities.alternate_iso_country_codes) AS code) AS alt_country_codes
             JOIN country_data AS alt_country ON alt_country.iso_code = alt_country_codes.code
     ) alternate_countries;
 
 CREATE VIEW IF NOT EXISTS geographical_names_with_entities AS
-SELECT geographical_names.* EXCEPT (iri), geographical_entities_with_countries AS entity FROM geographical_names 
-    JOIN geographical_entities_with_countries USING (iri)
-    )
-);
+SELECT geographical_names.* EXCLUDE (iri), geographical_entities_with_countries AS entity 
+FROM geographical_names 
+    JOIN geographical_entities_with_countries USING (iri);
 """
 
 # =================================================================================
@@ -273,11 +256,15 @@ def fix_csv(filename):
                 f.write(line)
 
 
-def init_geonames_table(con: duckdb.DuckDBPyConnection):
-    """Imports the main table from the geonames dump into the DuckDB database.
+def populate_entities_from_geonames(con: duckdb.DuckDBPyConnection):
+    """Imports the entities from the main table in the geonames dump into the DuckDB database.
 
-    This includes the admin5 code column which is only available in a separate dump file and 
-    needs to be imported separately to the main table."""
+    This includes:
+    - the admin5 code column which is only available in a separate dump file and 
+      needs to be imported separately to the main table.
+    - informal hierarchy relations, in the form of a list column containing the IRIs of parent entities 
+      that are not part of the official administrative hierarchy (i.e. not derivable from the admin1-5 codes).
+    """
     print("Populating main geonames table...")
     zipfile = Path("dumps/geonames/allCountries.zip")
     download_file(
@@ -289,12 +276,97 @@ def init_geonames_table(con: duckdb.DuckDBPyConnection):
     with duckdbpbar(con, desc="Importing geonames main table"):
         con.execute(
         """
-        COPY geonames(
-                geonameId, name, asciiname, alternatenames, latitude, longitude, 
-                feature_class, feature_code, country_code, cc2, 
-                admin1_code, admin2_code, admin3_code, admin4_code, 
-                population, elevation, dem, timezone, modification_date)
-        FROM 'dumps/geonames/allCountries.txt' (FORMAT csv, SEP '\t', HEADER false);
+        INSERT OR REPLACE INTO geographical_entities
+        SELECT
+            'https://sws.geonames.org/' || geonameId AS iri,
+            name, asciiname, feature_class || '.' || feature_code AS classification,
+            list_filter(
+                [
+                    'Country',
+                    'State',
+                    'Region',
+                    'District',
+                    'City',
+                    'Neighborhood'
+                ],
+                label -> CASE label
+                    WHEN 'Country'      THEN (
+                        (feature_class = 'A' AND feature_code IN ('TERR','PCLI','PCL','PCLF','LTER','ZN','PCLD','PCLH','PCLS','PRSH','PCLIX'))
+                        OR (feature_class = 'A' AND feature_code = 'ADM1' AND country_code = 'GB')
+                    )
+                    WHEN 'State'        THEN (
+                        feature_class = 'A' AND feature_code IN ('ADM1','ADM1H','ADMDH','ADMD')
+                    )
+                    WHEN 'Region'       THEN (
+                        (feature_class = 'A' AND feature_code IN ('ADM1','ADM1H','ADMDH','ADMD','ADM2','ADM2H','ADM3H','ADM3','ADM4','ADM4H','ADM5'))
+                        OR (feature_class = 'L' AND feature_code IN ('RGN','RGNH'))
+                    )
+                    WHEN 'District'     THEN (
+                        feature_class = 'A' AND feature_code IN ('ADM1','ADM1H','ADMDH','ADMD','ADM2','ADM2H','ADM3H','ADM3','ADM4','ADM4H','ADM5')
+                    )
+                    WHEN 'City'         THEN (
+                        feature_class = 'P' AND feature_code != 'PPLX'
+                    )
+                    WHEN 'Neighborhood' THEN (
+                        feature_class = 'P'
+                    )
+                    ELSE false
+                END
+            ) AS possible_entity_types,
+            struct_pack(latitude := latitude, longitude := longitude) AS coordinates, population, 
+            geonameId AS closest_geonames_id, geonameId AS geonames_id,
+            country_code AS iso_country_code,
+            CASE 
+                WHEN cc2 = '' OR cc2 IS NULL THEN ARRAY[]::TEXT[]
+                ELSE string_split(cc2, ',') 
+            END AS alternate_iso_country_codes,
+            struct_pack(
+                admin1_code := admin1_code, admin2_code := admin2_code, 
+                admin3_code := admin3_code, admin4_code := admin4_code, 
+                admin5_code := NULL
+            ) AS admin_codes,
+            ARRAY[]::TEXT[] AS other_parent_iris
+        FROM read_csv_auto(
+            'dumps/geonames/allCountries.txt', 
+            delim='\t', 
+            header=False,
+            columns={
+                'geonameId': 'INTEGER', 'name': 'TEXT', 'asciiname': 'TEXT', 
+                'alternatenames': 'TEXT', 'latitude': 'FLOAT', 'longitude': 'FLOAT', 
+                'feature_class': 'TEXT', 'feature_code': 'TEXT', 'country_code': 'TEXT', 'cc2': 'TEXT', 
+                'admin1_code': 'TEXT', 'admin2_code': 'TEXT', 'admin3_code': 'TEXT', 'admin4_code': 'TEXT', 
+                'population': 'BIGINT', 'elevation': 'INTEGER', 'dem': 'INTEGER', 'timezone': 'TEXT', 
+                'modification_date': 'DATE'
+            }
+        )
+        """
+        )
+    with duckdbpbar(con, desc="Populating official names from main table"):
+        con.execute(
+        """
+        INSERT INTO geographical_names
+        SELECT 
+            'https://sws.geonames.org/' || geonameId AS iri,
+            name AS name,
+            TRUE AS is_preferred_name,
+            NULL AS is_short_name,
+            NULL AS is_colloquial,
+            'https://sws.geonames.org/' AS name_provider,
+            '' AS isolanguage
+        FROM read_csv_auto(
+            'dumps/geonames/allCountries.txt', 
+            delim='\t', 
+            header=False,
+            columns={
+                'geonameId': 'INTEGER', 'name': 'TEXT', 'asciiname': 'TEXT', 
+                'alternatenames': 'TEXT', 'latitude': 'FLOAT', 'longitude': 'FLOAT', 
+                'feature_class': 'TEXT', 'feature_code': 'TEXT', 'country_code': 'TEXT', 'cc2': 'TEXT', 
+                'admin1_code': 'TEXT', 'admin2_code': 'TEXT', 'admin3_code': 'TEXT', 'admin4_code': 'TEXT', 
+                'population': 'BIGINT', 'elevation': 'INTEGER', 'dem': 'INTEGER', 'timezone': 'TEXT', 
+                'modification_date': 'DATE'
+            }
+        )
+        ON CONFLICT (iri, name, name_provider, isolanguage) DO UPDATE SET is_preferred_name = TRUE
         """
         )
     download_file(
@@ -304,39 +376,47 @@ def init_geonames_table(con: duckdb.DuckDBPyConnection):
     with duckdbpbar(con, desc="Importing adminCode5"):
         con.execute(
             """
-        UPDATE geonames
-        SET admin5_code = admin5_table.admin5_code
+        UPDATE geographical_entities
+        SET admin_codes = struct_update(admin_codes, admin5_code := admin5_table.admin5_code)
         FROM read_csv_auto(
                 'dumps/geonames/adminCode5.txt', delim='\t', header=False, 
                 columns={'geonameId': 'INTEGER', 'admin5_code': 'TEXT'}
             ) AS admin5_table
-        WHERE geonames.geonameId = admin5_table.geonameId;
+        WHERE geographical_entities.geonames_id = admin5_table.geonameId;
+        """
+        )
+    download_file(
+        "https://download.geonames.org/export/dump/hierarchy.zip",
+        Path("dumps/geonames/hierarchy.txt"),
+    )
+    with duckdbpbar(con, desc="Populating informal hierarchy"):
+        con.execute(
+            """
+        UPDATE geographical_entities
+        SET other_parent_iris = ([
+                ('https://sws.geonames.org/' || parent_id) for parent_id in hierarchy_table.parent_ids
+            ]::TEXT[])
+        FROM (
+            SELECT LIST(parentId) AS parent_ids, childId
+            FROM read_csv_auto(
+                'dumps/geonames/hierarchy.txt', delim='\t', header=False, 
+                columns={'parentId': 'INTEGER', 'childId': 'INTEGER', 'type': 'TEXT'}
+            )
+            WHERE type != 'ADM'
+            GROUP BY childId
+        ) AS hierarchy_table
+        WHERE geographical_entities.geonames_id = hierarchy_table.childId;
         """
         )
 
 
-def init_geonames_alternate_names_table(con: duckdb.DuckDBPyConnection):
+def populate_names_from_geonames(con: duckdb.DuckDBPyConnection):
     """
-    Imports the alternate names table from the geonames dump into the DuckDB database.
+    Populates the alternate names table from the geonames dump into the DuckDB database.
 
     This table contains alternate names for geonames entities, which can be used for more flexible searching.
     """
-    print("Creating and populating geonames alternate names table...")
-    con.execute(
-        """
-    CREATE TABLE alternateNames (
-        alternateNameId INTEGER PRIMARY KEY,
-        geonameId INTEGER,
-        isolanguage TEXT,
-        alternateName TEXT,
-        isPreferredName BOOLEAN,
-        isShortName BOOLEAN,
-        isColloquial BOOLEAN,
-        isHistoric BOOLEAN,
-        FOREIGN KEY (geonameId) REFERENCES geonames(geonameId)
-    );
-    """
-    )
+    print("Populating geonames alternate names table...")
     download_file(
         "https://download.geonames.org/export/dump/alternateNames.zip",
         Path("dumps/geonames/alternateNames.txt"),
@@ -344,93 +424,87 @@ def init_geonames_alternate_names_table(con: duckdb.DuckDBPyConnection):
     with duckdbpbar(con, desc="Importing alternate names"):
         con.execute(
             """
-        COPY alternateNames
-        FROM 'dumps/geonames/alternateNames.txt' (FORMAT csv, SEP '\t', HEADER false);
+        INSERT OR REPLACE INTO geographical_names
+        SELECT 
+            'https://sws.geonames.org/' || geonameId AS iri,
+            alternateName AS name,
+            isPreferredName AS is_preferred_name,
+            isShortName AS is_short_name,
+            isColloquial AS is_colloquial,
+            'https://sws.geonames.org/' AS name_provider,
+            CASE 
+                WHEN isolanguage IS NULL THEN ''
+                ELSE isolanguage
+            END AS isolanguage
+        FROM read_csv_auto(
+            'dumps/geonames/alternateNames.txt', delim='\t', header=False,
+            columns = {
+                'alternateNameId': 'INTEGER', 'geonameId': 'INTEGER', 
+                'isolanguage': 'TEXT', 'alternateName': 'TEXT',
+                'isPreferredName': 'BOOLEAN', 'isShortName': 'BOOLEAN', 'isColloquial': 'BOOLEAN',
+                'isHistoric': 'BOOLEAN'
+            }
+        )
+        WHERE alternateName != '' AND alternateName IS NOT NULL
         """
         )
 
 
-def init_geonames_hierarchy_table(con):
-    """
-    Imports the hierarchy table from the geonames dump into the DuckDB database.
-    
-    This table contains parent-child relationships between geonames entities. 
-    This includes informal hierachy relationships such as neighborhoods of some cities. Examples:
-    - https://www.geonames.org/2873589/marienfelde.html as part of https://www.geonames.org/2950159/berlin.html
-    - https://www.geonames.org/5110302/brooklyn.html as part of https://www.geonames.org/5128581/new-york-city.html
-    
-    It also includes the official administrative hierarchy, 
-    but these relations can also be derived from the admin1-5 codes in the main table.
-    """
-    print("Creating and populating geonames hierarchy table...")
-    con.execute(
-        """
-        CREATE TABLE hierarchy (
-            parentId INTEGER,
-            childId INTEGER,
-            type TEXT,
-            FOREIGN KEY (parentId) REFERENCES geonames(geonameId),
-            FOREIGN KEY (childId) REFERENCES geonames(geonameId)
-        );
-    """
-    )
-    download_file(
-        "https://download.geonames.org/export/dump/hierarchy.zip",
-        Path("dumps/geonames/hierarchy.txt"),
-    )
-    with duckdbpbar(con, desc="Importing geonames hierarchy"):
-        con.execute(
-            """
-            COPY hierarchy
-            FROM 'dumps/geonames/hierarchy.txt' (FORMAT csv, SEP '\t', HEADER false);
-        """
-        )
-
-
-def init_country_info_table(con):
+def populate_country_data(con):
     """
     Imports the country info table from the geonames dump into the DuckDB database.
 
     While the countries are contained in the main geonames table, 
     this table contains additional information about countries such as 
-    postal code format, languages, neighbors, etc.
+    languages and neighbors.
     """
-    print("Creating and populating geonames country info table...")
-    con.execute(
-        """
-        CREATE TABLE countryInfo (
-            ISO TEXT PRIMARY KEY,
-            ISO3 TEXT,
-            ISO_Numeric INTEGER,
-            fips TEXT,
-            Country TEXT,
-            Capital TEXT,
-            Area REAL,
-            Population INTEGER,
-            Continent TEXT,
-            tld TEXT,
-            CurrencyCode TEXT,
-            CurrencyName TEXT,
-            Phone TEXT,
-            Postal_Code_Format TEXT,
-            Postal_Code_Regex TEXT,
-            Languages TEXT,
-            geonameid INTEGER,
-            neighbours TEXT,
-            EquivalentFipsCode TEXT
-        );
-    """
-    )
+    print("Populating geonames country info table...")
     download_file(
         "https://download.geonames.org/export/dump/countryInfo.txt",
         Path("dumps/geonames/countryInfo.txt"),
     )
     fix_csv("dumps/geonames/countryInfo.txt")
     with duckdbpbar(con, desc="Importing country info"):
+        # TODO Preserve more data?
         con.execute(
             """
-            COPY countryInfo
-            FROM 'dumps/geonames/countryInfo.txt' (FORMAT csv, SEP '\t', HEADER false);
+            INSERT OR REPLACE INTO country_data
+            SELECT
+                ISO AS iso_code,
+                Country AS country_name,
+                Continent AS continent,
+                geonameid AS geonames_id,
+                CASE 
+                    WHEN Languages = '' THEN NULL
+                    ELSE string_split(Languages, ',') 
+                END AS iso_languages,
+                CASE 
+                    WHEN neighbours = '' THEN NULL
+                    ELSE string_split(neighbours, ',') 
+                END AS neighboring_countries_iso_codes
+            FROM read_csv_auto('dumps/geonames/countryInfo.txt', delim='\t', header=False,
+                columns = {
+                    'ISO' : 'TEXT',
+                    'ISO3' : 'TEXT',
+                    'ISO_Numeric' : 'INTEGER',
+                    'fips' : 'TEXT',
+                    'Country' : 'TEXT',
+                    'Capital' : 'TEXT',
+                    'Area' : 'REAL',
+                    'Population' : 'BIGINT',
+                    'Continent' : 'TEXT',
+                    'tld' : 'TEXT',
+                    'CurrencyCode' : 'TEXT',
+                    'CurrencyName' : 'TEXT',
+                    'Phone' : 'TEXT',
+                    'Postal_Code_Format' : 'TEXT',
+                    'Postal_Code_Regex' : 'TEXT',
+                    'Languages' : 'TEXT',
+                    'geonameid' : 'INTEGER',
+                    'neighbours' : 'TEXT',
+                    'EquivalentFipsCode' : 'TEXT'
+                }
+            )
         """
         )
 
@@ -452,8 +526,7 @@ def rdf_gnd_graph():
 
 def repair_gnd_geoname_ids(
     con: duckdb.DuckDBPyConnection,
-    gnd_matches: list[tuple[str, int]],
-    gnd_names: list[tuple[str, str, bool]],
+    gnd_names: list[tuple[int, str, bool]],
 ):
     """
     Handle invalid geonameIds from GND by checking if they exist in the geonames table.
@@ -466,20 +539,21 @@ def repair_gnd_geoname_ids(
         """
         SELECT unnest(?) AS id
         EXCEPT
-        SELECT geonameId FROM geonames
+        SELECT geonames_id FROM geographical_entities WHERE geonames_id IS NOT NULL
     """,
-        parameters=[list(set(m[1] for m in gnd_matches))],
+        parameters=[list(set(m[0] for m in gnd_names))],
     ).fetchall()
-    _not_fixed = object()  # sentinel value to indicate geonameId has not be fixed
-    unavailable_geoname_ids = {k[0]: _not_fixed for k in unavailable_geoname_ids}
+    unavailable_geoname_ids = {k[0]: None for k in unavailable_geoname_ids}
     if not unavailable_geoname_ids:
-        return gnd_matches, gnd_names
+        return gnd_names
     for k in unavailable_geoname_ids.keys():
         tqdm.write(
             f"Warning: geonameId {k} from GND does not exist in geonames table; attempting to fix using geonames server..."
         )
         # make a request to geonames to check if the geonameId is valid and to trigger a potential http redirect
-        # TODO investigate what the invalid ids mean and why geonames redirects them. Have these geonames entities changed id? Is it just closest match that geonames redirects to?
+        # TODO investigate what the invalid ids mean and why geonames redirects them. 
+        # Have these geonames entities changed id?
+        # For the few I checked, this seems to be the most likely scenario
         response = requests.get(f"https://geonames.org/{k}/", allow_redirects=True)
         redirected_id = urlparse(response.url).path.split("/")[1]
         redirected_id = int(redirected_id) if redirected_id.isdigit() else redirected_id
@@ -500,17 +574,12 @@ def repair_gnd_geoname_ids(
                 f"\tgeonameId {k} from GND redirected to {response.url} (id = {redirected_id}); updating match"
             )
             unavailable_geoname_ids[k] = redirected_id
-    gnd_uris_to_ignore = set()
-    for i, (gndUri, geonameId) in enumerate(gnd_matches):
+    new_gnd_names = []
+    for i, (geonameId, name, is_preferred) in enumerate(gnd_names):
         fixed_id = unavailable_geoname_ids.get(geonameId)
-        if fixed_id is _not_fixed:
-            gnd_uris_to_ignore.add(gndUri)
-        elif fixed_id is not None:
-            gnd_matches[i] = (gndUri, fixed_id)
-    if gnd_uris_to_ignore:
-        gnd_matches = [m for m in gnd_matches if m[0] not in gnd_uris_to_ignore]
-        gnd_names = [n for n in gnd_names if n[0] not in gnd_uris_to_ignore]
-    return gnd_matches, gnd_names
+        if fixed_id is not None:
+            new_gnd_names.append((fixed_id, name, is_preferred))
+    return new_gnd_names
 
 
 def fetch_names_from_gnd(gnd) -> Generator[tuple[str, str, bool, int], None, None]:
@@ -521,7 +590,7 @@ def fetch_names_from_gnd(gnd) -> Generator[tuple[str, str, bool, int], None, Non
     """
     SELECT ?gndUri ?nameType ?name ?geonameUri WHERE {
             ?gndUri a gndo:TerritorialCorporateBodyOrAdministrativeUnit.
-            ?gndUri owl:sameAs ?geonameUri FILTER (STRSTARTS(STR(?geonameUri), "https://sws.geonames.org/")).
+            ?gndUri owl:sameAs ?geonameUri FILTER (STRSTARTS(STR(?geonameUri), 'https://sws.geonames.org/')).
             ?gndUri ?nameType ?name
             FILTER (?nameType IN (
                 gndo:preferredNameForThePlaceOrGeographicName, 
@@ -551,245 +620,229 @@ def fetch_names_from_gnd(gnd) -> Generator[tuple[str, str, bool, int], None, Non
             print(exception_info)
 
 
-def populate_gnd_tables(db_con: duckdb.DuckDBPyConnection):
+def populate_names_from_gnd(db_con: duckdb.DuckDBPyConnection):
     """
     Import relevant GND entities and their names into the gnd and gndNames tables in the DuckDB database.
     """
     chunk_size = 10_000
+    download_file(
+        "https://data.dnb.de/opendata/authorities-gnd-geografikum_lds.ttl.gz", 
+        Path("dumps/gnd/authorities-gnd-geografikum_lds.ttl")
+    )
     with rdf_gnd_graph() as gnd:
-        gnd_matches = []
         gnd_names = []
 
         def flush():
-            nonlocal gnd_matches, gnd_names
-            gnd_matches, gnd_names = repair_gnd_geoname_ids(
-                db_con, gnd_matches, gnd_names
-            )
-            with duckdbpbar(db_con, desc="Inserting GND matches", leave=False):
-                db_con.executemany(
-                    "INSERT OR IGNORE INTO gnd (gndUri, geonameId) VALUES (?, ?)",
-                    gnd_matches,
-                )
+            nonlocal gnd_names
+            gnd_names = repair_gnd_geoname_ids(db_con, gnd_names)
             with duckdbpbar(db_con, desc="Inserting GND names", leave=False):
                 db_con.executemany(
                     """
-                    INSERT INTO gndNames (gndUri, name, isPreferred) VALUES (?, ?, ?)
-                    ON CONFLICT (gndUri, name) 
-                    DO UPDATE SET isPreferred = EXCLUDED.isPreferred 
-                    WHERE NOT isPreferred AND EXCLUDED.isPreferred; 
+                    INSERT INTO geographical_names
+                    SELECT 
+                        'https://sws.geonames.org/' || ? as iri, 
+                        ? AS name,
+                        ? AS is_preferred_name,
+                        NULL AS is_short_name,
+                        NULL AS is_colloquial,
+                        'https://d-nb.info/gnd/' AS name_provider,
+                        '' AS isolanguage
+                    ON CONFLICT (iri, name, name_provider, isolanguage) 
+                    DO UPDATE SET is_preferred_name = is_preferred_name OR EXCLUDED.is_preferred_name; 
                     """,
                     gnd_names,
                 )
-            gnd_matches.clear()
             gnd_names.clear()
 
-        for gndUri, name, is_preferred, geonameId in fetch_names_from_gnd(gnd):
-            gnd_matches.append((gndUri, geonameId))
-            gnd_names.append((gndUri, name, is_preferred))
-            if len(gnd_matches) >= chunk_size:
+        for _gndUri, name, is_preferred, geonameId in fetch_names_from_gnd(gnd):
+            gnd_names.append((geonameId, name, is_preferred))
+            if len(gnd_names) >= chunk_size:
                 flush()
-        if gnd_matches:
+        if gnd_names:
             flush()
 
-def populate_wikidata_table(con):
+
+def fetch_wikidata_entities():
+    endpoint_url = "https://query.wikidata.org/sparql"
+    target_classes = {
+        "<http://www.wikidata.org/entity/Q486972>" : ["City", "Neighborhood"], # Populated place
+        "<http://www.wikidata.org/entity/Q253019>" : ["Neighborhood"], # Ortsteil
+        "<http://www.wikidata.org/entity/Q262166>" : ["City"], # Municipality in Germany
+        "<http://www.wikidata.org/entity/Q82794>" : ["Region"] # Region
+    }
+
+    # Grabs only entities whose direct parent is linked to geonames.
+    # This is not necessarily complete but it is unlikely
+    # to miss entities and it is efficient.
+    sparql_template = """
+    SELECT ?id ?parentGeoname ?labelEN ?labelDE ?lat ?lon WHERE {
+        ?parent wdt:P17 wd:Q183.
+        ?parent wdt:P1566 ?parentGeoname.
+        ?id wdt:P131 ?parent.
+        ?id wdt:P31 %(wikidata_class)s.
+        OPTIONAL { ?id wdt:P1566 ?ownGeoname. }
+        FILTER(!BOUND(?ownGeoname))
+        OPTIONAL {?id rdfs:label ?labelEN FILTER (LANG(?labelEN) = "en")} 
+        OPTIONAL {?id rdfs:label ?labelDE FILTER (LANG(?labelDE) = "de")} 
+        OPTIONAL {{
+            ?id wdt:P625 ?coords.
+            BIND(geof:latitude(?coords) AS ?lat)
+            BIND(geof:longitude(?coords) AS ?lon)
+        }}
+    }
+    LIMIT %(page_size)s
+    OFFSET %(offset)s
     """
-    Work in progress - There are 46k "Ortsteils" in wikidata
+    page_size = 500
+    sparql = SPARQLWrapper(endpoint_url)
+    sparql.addCustomHttpHeader(
+        "User-Agent",
+        "bzk-address-parsing - "
+        f"Python/{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro} "
+        "(mailto:rafael.patronilo@fiz-karlsruhe.de)"
+    )
+    sparql.setReturnFormat(JSON)
+    
+    for wikidata_class, entity_types in target_classes.items():
+        page_idx = 0
+        offset = 0
+        page = []
+        exhausted = False
+        while not exhausted:
+            query = sparql_template % dict(wikidata_class=wikidata_class, page_size=page_size, offset=offset)
+            sparql.setQuery(query)
+            request_timestamp = time.monotonic()
+            query_success = False
+            try:
+                response = sparql.query().convert()
+                request_timestamp = time.monotonic()
+                query_success = True
+            except Exception as e:
+                headers = getattr(e, "headers", {})
+                print(f"Query failed for page {page_idx} class {wikidata_class}: {e}")
+                print("Headers:")
+                pprint.pprint(headers)
+                print(f"Will retry respecting rate limit...")
+                retry_after = headers.get("Retry-After")
+                if retry_after and retry_after.isdigit():
+                    wait_time = int(retry_after)
+                    print(f"Rate limit exceeded. Waiting for {wait_time} seconds before retrying...")
+                    time.sleep(wait_time)
+                
+            if query_success:
+                bindings = response["results"]["bindings"]
+                print(f"{wikidata_class} page {page}: {len(bindings)} results")
+
+                for row in bindings:
+                    entity_id      = row["id"]["value"]            if "id"            in row else None
+                    parent_geoname = row["parentGeoname"]["value"] if "parentGeoname" in row else None
+                    label_en       = row["labelEN"]["value"]       if "labelEN"       in row else None
+                    label_de       = row["labelDE"]["value"]       if "labelDE"       in row else None
+                    lat            = row["lat"]["value"]   if "lat"   in row else None
+                    lon            = row["lon"]["value"]   if "lon"   in row else None
+
+                    page.append((
+                        entity_id,
+                        parent_geoname,
+                        label_en,
+                        label_de,
+                        lat,
+                        lon,
+                        entity_types,   # list of type strings, e.g. ["City", "Neighborhood"]
+                        wikidata_class, # source class QID
+                    ))
+                yield page
+                if len(bindings) < page_size:
+                    exhausted = True
+                page_idx += 1
+                offset += page_size
+            elapsed = time.monotonic() - request_timestamp
+            if elapsed < 60: # respect rate limit of 1 request per minute
+                time.sleep(60 - elapsed)
+            
+            
+
+def populate_wikidata_entities(con):
+    """ TODO change comment
+    Work in progress - There are 58k "Ortsteils" in wikidata
     that do not link to a geonames of gnd entity.
     This includes at least one place mentioned in BZK corpus 
     (Sudberg, https://www.wikidata.org/wiki/Q2362997)
     We should probaly include and link these entities as well.
     """
-    #TODO
-    # Query is missing labels and geoname linking through closest ancestor.
-    # Closest ancestor is hard to express efficiently in SPARQL...
-    # Maybe subquery with a LIMIT 1 could work?
-    # 
-    # It is also exclusive to Ortsteils, there may be other relevant classes
-    wikidata_sparql_query = """
-    SELECT * WHERE {
-        ?id wdt:P31 wd:Q253019.
-        FILTER NOT EXISTS {
-            {?id wdt:P1566 ?geonameId} UNION {?id wdt:P227 ?gndId}
-        }
-    }
-    """
-    raise NotImplementedError("WIP - not implemented yet")
-
-def init_gnd_tables(con):
-    """
-    Creates the gnd and gndNames tables in the DuckDB database and populates 
-    them with data from the GND RDF graph.
-    """
-    print("Creating and populating GND tables...")
-    con.execute(
-        """
-        CREATE TABLE IF NOT EXISTS gnd (
-            gndUri TEXT PRIMARY KEY,
-            geonameId INTEGER,
-            FOREIGN KEY (geonameId) REFERENCES geonames(geonameId)
-        );
-    """
-    )
-    con.execute(
-        """
-        CREATE TABLE IF NOT EXISTS gndNames (
-            gndUri TEXT,
-            name TEXT,
-            isPreferred BOOLEAN,
-            FOREIGN KEY (gndUri) REFERENCES gnd(gndUri),
-            PRIMARY KEY (gndUri, name)
-        );
-    """
-    )
-    download_file(
-        "https://data.dnb.de/opendata/authorities-gnd-geografikum_lds.ttl.gz",
-        Path("dumps/gnd/authorities-gnd-geografikum_lds.ttl"),
-    )
-    populate_gnd_tables(con)
-    return con
-
-def create_names_views(con):
-    """
-    Creates a view in the DuckDB database that combines the main geonames table with the alternate names and GND names, 
-    to facilitate searching for entities by any of their names.
-    """
-    print("Creating names view...")
-    con.execute(
-        """
-        CREATE OR REPLACE VIEW allNames AS
-        SELECT * EXCLUDE (alternateNameId) FROM alternateNames
-        UNION BY NAME
-        SELECT geonameId, name AS alternateName, true AS isPreferredName FROM geonames
-        UNION BY NAME
-        SELECT geonameId, name as alternateName, isPreferred as isPreferredName, gndUri FROM gndNames
-            JOIN gnd USING (gndUri);
-    """
-    )
-
-def create_informal_hierarchy_view(con):
-    """
-    Creates a view in the DuckDB database that identifies informal parent city 
-    relationships between geonames entities based on the hierarchy table and 
-    feature codes.
-
-    This view can be used to include informal parent cities 
-    (e.g. neighborhoods) in search results.
-    """
-    print("Creating informal parent city view...")
-    con.execute(
-        """
-        CREATE OR REPLACE VIEW informalHierarchy AS
-        SELECT 
-            childId AS childId, 
-            list(parentId) AS parentId
-        FROM hierarchy
-        JOIN geonames AS parent ON hierarchy.parentId = parent.geonameId
-        JOIN geonames AS child ON hierarchy.childId = child.geonameId
-        WHERE
-            (
-                (parent.feature_class = 'P' AND parent.feature_code != 'PPLX')
-                OR
-                (parent.feature_class = 'L' AND starts_with(parent.feature_code, 'RGN'))
-            ) AND
-            hierarchy.type IS DISTINCT FROM 'ADM'
-        GROUP BY childId;
-    """
-    )
-
-def create_full_hierarchy_view(con):
-    """
-    Creates a view in the DuckDB database that associates all the ancestor geoname ids 
-    in the administrative hierarchy to each geoname entity.
+    for page in fetch_wikidata_entities():
+        with duckdbpbar(con, desc="Inserting Wikidata entities", leave=False):
+            # Inserts entity, populating some columns with data from the geonames parent
+            con.executemany(
+                """
+                INSERT OR REPLACE INTO geographical_entities (
+                    iri, classification, name, asciiname, possible_entity_types,
+                    coordinates, population, closest_geonames_id, geonames_id,
+                    iso_country_code, alternate_iso_country_codes, admin_codes, other_parent_iris
+                )
+                    SELECT (
+                        ? AS iri, 
+                        ? AS classification, 
+                        ? AS name,
+                        strip_accents(?) AS asciiname,
+                        ? AS possible_entity_types, 
+                        struct_pack(latitude := ?, longitude := ?) AS coordinates,
+                        NULL AS population,
+                        geonames_id AS closest_geonames_id,
+                        NULL AS geonames_id,
+                        iso_country_code,
+                        alternate_iso_country_codes,
+                        admin_codes,
+                        other_parent_iris
+                    ) 
+                    FROM geographical_entities 
+                    WHERE geonames_id = ?
+                ON CONFLICT (iri) DO NOTHING;
+                """,
+                [
+                    (
+                        entity_id, source_class, 
+                        label_en or label_de, label_en or label_de,
+                        entity_types, lat, lon, parent_geoname
+                    )
+                    for entity_id,  parent_geoname, label_en, label_de, lat, lon, entity_types, source_class
+                        in page if (label_en or label_de)
+                ]
+            )
+        with duckdbpbar(con, desc="Inserting Wikidata english names", leave=False):
+            # Inserts entity, populating some columns with data from the geonames parent
+            con.executemany(
+                """
+                INSERT OR REPLACE INTO geographical_names (
+                    iri, name, is_preferred_name, is_short_name, is_colloquial,
+                    name_provider, isolanguage
+                )
+                VALUES (?, ?, NULL, NULL, NULL, 'http://www.wikidata.org/entity/', 'en')
+                """,
+                [
+                    (entity_id, label_en)
+                    for entity_id,  parent_geoname, label_en, label_de, lat, lon, entity_types, source_class
+                        in page if label_en
+                ]
+            )
+        with duckdbpbar(con, desc="Inserting Wikidata german names", leave=False):
+            # Inserts entity, populating some columns with data from the geonames parent
+            con.executemany(
+                """
+                INSERT OR REPLACE INTO geographical_names (
+                    iri, name, is_preferred_name, is_short_name, is_colloquial,
+                    name_provider, isolanguage
+                )
+                VALUES (?, ?, NULL, NULL, NULL, 'http://www.wikidata.org/entity/', 'de')
+                """,
+                [
+                    (entity_id, label_de)
+                    for entity_id,  parent_geoname, label_en, label_de, lat, lon, entity_types, source_class
+                        in page if label_de
+                ]
+            )
+            
     
-    Additionally includes informal parent city relationships as well, 
-    but only if the city has a single parent city to avoid ambiguity.
-    """
-    print("Creating full hierarchy view...")
-    query = [
-        """
-        CREATE OR REPLACE VIEW fullHierarchy AS
-        SELECT child.geonameId AS childId, parent.geonameid AS parentId, 'Country' AS level
-            FROM geonames AS child JOIN countryInfo AS parent ON child.country_code = parent.ISO
-            WHERE child.geonameId != parent.geonameid
-    """]
-    N_LEVELS = 5
-    # Append each admin level
-    for i in range(1, N_LEVELS + 1):
-        join_codes = ", ".join(f"admin{j}_code" for j in range(1, i + 1))
-        next_level_guard = f"parent.admin{i+1}_code IS NULL AND" if i < N_LEVELS else ""
-        query.append(
-            f"""
-            UNION
-            SELECT child.geonameId AS childId, parent.geonameId AS parentId, 'ADM{i}' AS level
-                FROM geonames AS child JOIN geonames AS parent USING (country_code, {join_codes})
-                WHERE 
-                    parent.feature_class = 'A' AND 
-                    starts_with(parent.feature_code, 'ADM{i}') AND 
-                    parent.admin{i}_code IS NOT NULL AND
-                    {next_level_guard}
-                    child.geonameId != parent.geonameId
-        """)
-    # Append informal parent cities
-    query.append(
-        """
-        UNION
-        SELECT childId, parentId, 'City' AS level FROM informalParentCity
-    """)
-    con.execute("\n".join(query))
-
-def create_simplified_geonames_view(con):
-    """
-    Creates a view in the DuckDB database that simplifies the geonames table by including only the most relevant columns for searching and matching.
-    This can be used to speed up search queries by reducing the amount of data that needs to be scanned.
-    """
-    print("Creating simplified geonames view...")
-    con.execute(
-        """
-        CREATE OR REPLACE VIEW simplifiedGeonames AS
-        WITH
-        informalParentCity AS (
-            SELECT 
-                childId AS geonameId, 
-                list(parentId) AS parentCityIds
-            FROM hierarchy
-            JOIN geonames AS parent ON hierarchy.parentId = parent.geonameId
-            JOIN geonames AS child ON hierarchy.childId = child.geonameId
-            WHERE
-                parent.feature_class = 'P' AND parent.feature_code != 'PPLX' AND
-                hierarchy.type IS DISTINCT FROM 'ADM'
-            GROUP BY childId
-        ),
-        informalParentRegion AS (
-            SELECT 
-                childId AS geonameId, 
-                list(parentId) AS parentRegionIds
-            FROM hierarchy
-            JOIN geonames AS parent ON hierarchy.parentId = parent.geonameId
-            JOIN geonames AS child ON hierarchy.childId = child.geonameId
-            WHERE
-                (parent.feature_class = 'L' AND parent.feature_code LIKE 'RGN%')
-                OR
-                (parent.feature_class = 'A' AND parent.feature_code LIKE 'ADM%')
-            GROUP BY childId
-        )
-        SELECT 
-            geonameId, name, asciiname, feature_class, feature_code, country_code, 
-            admin1_code, admin2_code, admin3_code, admin4_code, admin5_code, 
-            parentCityIds, parentRegionIds
-        FROM geonames 
-            LEFT JOIN informalParentCity USING (geonameId)
-            LEFT JOIN informalParentRegion USING (geonameId);
-    """
-    )
-
-def create_views(con):
-    """
-    Creates all necessary views in the DuckDB database.
-    """
-    create_names_views(con)
-    #create_informal_hierarchy_view(con)
-    #create_full_hierarchy_view(con)
-    create_simplified_geonames_view(con)
 
 def cleanup_dump_files():
     """
@@ -798,7 +851,7 @@ def cleanup_dump_files():
     print("Cleaning up downloaded dump files...")
     shutil.rmtree("dumps")
 
-def init_duckdb(cleanup=True):
+def init_duckdb(cleanup=True, update=False):
     """
     Initializes the DuckDB database by creating the necessary tables and populating them with data 
     from the geonames and GND dumps. Fails if the database already exists.
@@ -806,18 +859,20 @@ def init_duckdb(cleanup=True):
     This function will take a long time to run (up to 30 minutes).
     """
     start = time.monotonic()
-    if Path(DUCK_DB_PATH).exists():
+    if Path(DUCK_DB_PATH).exists() and not update:
         raise FileExistsError(
             f"DuckDB database already exists at {DUCK_DB_PATH}. Please remove it before creating a new one."
         )
     con = duckdb.connect(DUCK_DB_PATH)
     con.execute("SET enable_progress_bar=true;")
     print("Creating and populating DuckDB database... (this may take up to 30 minutes)")
-    init_geonames_table(con)
-    init_geonames_alternate_names_table(con)
-    init_geonames_hierarchy_table(con)
-    init_country_info_table(con)
-    init_gnd_tables(con)
+    if not update:
+        con.execute(_INIT_GEO_ENTITIES_TABLES_SQL)
+    #populate_entities_from_geonames(con)
+    #populate_country_data(con)
+    #populate_names_from_geonames(con)
+    #populate_names_from_gnd(con)
+    populate_wikidata_entities(con)
     if cleanup:
         cleanup_dump_files()
     end = time.monotonic()
@@ -830,83 +885,24 @@ def open_or_init_duckdb(rebuild_views=False):
     """
     Opens a connection to the DuckDB database if it exists, otherwise initializes a new database.
     """
+    if rebuild_views:
+        warnings.warn("Deprecated", stacklevel=2)
     if not Path(DUCK_DB_PATH).exists():
         print(f"DuckDB database not found at {DUCK_DB_PATH}. Initializing new database...")
         init_duckdb()
-    elif rebuild_views:
-        conn = duckdb.connect(DUCK_DB_PATH) # with write permission
-        create_views(conn)
-        conn.close()
     return duckdb.connect(DUCK_DB_PATH, read_only=True)
 
-def attach_or_init_duckdb(conn, rebuild_views=False):
+def attach_or_init_duckdb(conn, name="geo_db", rebuild_views=False):
     """
     Opens a connection to the DuckDB database if it exists, otherwise initializes a new database.
     """
+    if rebuild_views:
+        warnings.warn("Deprecated", stacklevel=2)
     if not Path(DUCK_DB_PATH).exists():
         print(f"DuckDB database not found at {DUCK_DB_PATH}. Initializing new database...")
         init_duckdb()
-    elif rebuild_views:
-        conn = duckdb.connect(DUCK_DB_PATH) # with write permission
-        create_views(conn)
-        conn.close()
-    conn.execute(f"ATTACH '{DUCK_DB_PATH}' AS geonames (READ_ONLY);")
+    conn.execute(f"ATTACH '{DUCK_DB_PATH}' AS {name} (READ_ONLY);")
     return conn
-
-def rebuild_tables(table_names):
-    """
-    Rebuilds the specified tables in the DuckDB database.
-    Tables must be provided in order of dependency, meaning if table B can only be deleted after table A,
-    then A must be listed before B in the input list.
-    """
-    con = duckdb.connect(DUCK_DB_PATH)
-    if ("gnd" in table_names) != ("gndNames" in table_names):
-        print(
-            "Warning: Tables gnd and gndNames are interdependent; both tables will be rebuilt"
-        )
-    else:
-        # Delete gndNames to avoid repeated build
-        table_names = [t for t in table_names if t != "gndNames"]
-    for table in table_names:
-        if table not in [
-            "geonames",
-            "alternateNames",
-            "hierarchy",
-            "countryInfo",
-            "gnd",
-            "gndNames",
-        ]:
-            raise ValueError(f"Invalid table name '{table}' specified for rebuilding")
-    print("Deleting current tables...")
-    # Delete tables in order of dependencies to avoid issues with foreign key constraints
-    # Assume input order respects dependencies (e.g. alternateNames which depends on geonames is deleted before geonames)
-    for table in table_names:
-        if table == "geonames":
-            con.execute("DROP TABLE IF EXISTS geonames;")
-        elif table == "alternateNames":
-            con.execute("DROP TABLE IF EXISTS alternateNames;")
-        elif table == "hierarchy":
-            con.execute("DROP TABLE IF EXISTS hierarchy;")
-        elif table == "countryInfo":
-            con.execute("DROP TABLE IF EXISTS countryInfo;")
-        elif table == "gnd" or table == "gndNames":
-            con.execute("DROP TABLE IF EXISTS gndNames;")
-            con.execute("DROP TABLE IF EXISTS gnd;")
-
-    print("Rebuilding tables...")
-    # Rebuild tables in reverse order of dependencies to avoid issues with foreign key constraints
-    for table in reversed(table_names):
-        if table == "geonames":
-            init_geonames_table(con)
-        elif table == "alternateNames":
-            init_geonames_alternate_names_table(con)
-        elif table == "hierarchy":
-            init_geonames_hierarchy_table(con)
-        elif table == "countryInfo":
-            init_country_info_table(con)
-        elif table == "gnd" or table == "gndNames":
-            init_gnd_tables(con)
-
 
 def main(args=None):
     """
@@ -918,28 +914,21 @@ def main(args=None):
         description="Build DuckDB database from Geonames and GND dumps"
     )
     parser.add_argument(
-        "--rebuild-views",
-        action="store_true",
-        help="Rebuild database views without rebuilding the entire database",
-    )
-    parser.add_argument(
         "--rebuild",
         action="store_true",
         help="Delete existing database and rebuild from scratch",
+    )
+    parser.add_argument(
+        "--update",
+        action="store_true",
+        help="Repopulate the database",
     )
     parser.add_argument(
         "--cleanup",
         action="store_true",
         help="Remove downloaded dump files after building the database",
     )
-    parser.add_argument(
-        "--rebuild-table",
-        nargs="*",
-        help="Rebuild a specific table (geonames, gnd, etc.). Can be used multiple times.",
-    )
     args = parser.parse_args(args=args)
-    if args.rebuild and args.rebuild_table:
-        parser.error("Cannot use --rebuild and --rebuild-table together")
 
     duckdb_path = Path(DUCK_DB_PATH)
     delete_old_db = False
@@ -948,28 +937,14 @@ def main(args=None):
         print(f"Moving existing database at {DUCK_DB_PATH}...")
         shutil.move(DUCK_DB_PATH, f"{DUCK_DB_PATH}.old")
         delete_old_db = True
-    if args.rebuild_table:
-        if not duckdb_path.exists():
-            parser.error(
-                f"Database does not exist at {DUCK_DB_PATH}. Cannot rebuild tables."
-            )
-        rebuild_tables(args.rebuild_table)
-    elif args.rebuild_views:
-        if not duckdb_path.exists():
-            parser.error(
-                f"Database does not exist at {DUCK_DB_PATH}. Cannot rebuild tables."
-            )
-        conn = duckdb.connect(DUCK_DB_PATH)
-        create_views(conn)
-        conn.close()
-    elif duckdb_path.exists():
+    if duckdb_path.exists() and not args.update:
         print(
             f"Database already exists at {DUCK_DB_PATH}. Use --rebuild to delete and rebuild."
         )
         if args.cleanup:
             cleanup_dump_files()
     else:
-        init_duckdb(cleanup=args.cleanup)
+        init_duckdb(cleanup=args.cleanup, update=args.update)
     if delete_old_db:
         print(f"Deleting old database backup at {DUCK_DB_PATH}.old...")
         Path(f"{DUCK_DB_PATH}.old").unlink()
