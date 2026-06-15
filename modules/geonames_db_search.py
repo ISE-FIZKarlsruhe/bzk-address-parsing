@@ -8,7 +8,7 @@ import pandas as pd
 import modules.utils as utils
 import duckdb
 import modules.build_geonames_db as build_geonames_db
-from typing import Optional, Literal, LiteralString
+from typing import NamedTuple, Optional, Literal
 import contextlib
 import enum
 import dataclasses
@@ -18,29 +18,11 @@ import textwrap
 import itertools
 import time
 from collections import defaultdict
-
-@dataclasses.dataclass
-class EntityTypeProperties:
-    entity_type : LiteralString
-    hierarchy_level : int # lower means higher in the hierarchy. Induces a partial order
-
-class EntityType(EntityTypeProperties, enum.Enum):
-    Country = "Country", 0
-    State = "State", 1
-    Region = "Region", 1
-    District = "District", 2
-    City = "City", 3
-    Neighborhood = "Neighborhood", 4
-
-    def __gt__(self, other):
-        if not isinstance(other, EntityType):
-            return NotImplemented
-        return self.hierarchy_level > other.hierarchy_level
-    
-    def __lt__(self, other):
-        if not isinstance(other, EntityType):
-            return NotImplemented
-        return self.hierarchy_level < other.hierarchy_level
+from modules.pipeline.geographical_entity import GeographicalEntityType, GeonamesAdminCodes
+import tantivy
+from tqdm.auto import tqdm
+import unicodedata
+import re
 
 # Used to materialize in memory a distilled version of the names table
 # TODO filter neighborhoods?
@@ -111,16 +93,63 @@ CREATE TEMP MACRO filter_entity_type(tbl, entity_type) AS TABLE
 """
 
 
+GERMAN_ASCII_DUCKDB_MACRO = """
+-- Converts to ascii but
+-- rather than converting ä to a, apply german rules and convert ä to ae, etc.
+-- Useful for matching against
+CREATE OR REPLACE TEMP MACRO german_ascii(nfc_name) AS 
+strip_accents(
+    replace(
+        replace(
+            replace(
+                replace(
+                    lower(nfc_name), 
+                'ä', 'ae'),
+            'ö', 'oe'),
+        'ü', 'ue'),
+    'ß', 'ss')
+);
+"""
 
-def abbreviation_pattern_to_regex(part : str) -> str:
+LANGUAGE_FILTERED_NAMES_PARTIAL_SQL = """
+FROM geo_db.geographical_names 
+    JOIN geo_db.geographical_entities USING (iri)
+    JOIN geo_db.country_data ON (geo_db.geographical_entities.iso_country_code = geo_db.country_data.iso_code)
+WHERE
+    geo_db.geographical_names.is_preferred_name IS TRUE OR
+    geo_db.geographical_names.isolanguage == '' OR
+    geo_db.geographical_names.isolanguage IN ('en', 'de', 'abbr') OR
+    list_bool_or([(geo_db.geographical_names.isolanguage IN lang) FOR lang IN geo_db.country_data.iso_languages]);
+"""
+
+LANGUAGE_FILTERED_NAMES_SELECT = """
+SELECT
+    nfc_normalize(geo_db.geographical_names.name) AS nfc_name,
+    german_ascii(geo_db.geographical_names.name) AS german_ascii_name,
+    regexp_replace(strip_accents(lower(nfc_name)), '[^\\w\\s]', '', 'g') AS ascii_name,
+    geo_db.geographical_names.name AS name, 
+    geo_db.geographical_names.iri AS iri, 
+    geo_db.geographical_entities.possible_entity_types AS possible_entity_types,
+    geo_db.geographical_entities.iso_country_code AS country_code,
+    geo_db.geographical_entities.admin_codes AS admin_codes,
+    geo_db.geographical_names.is_preferred_name AS is_preferred_name,
+    geo_db.geographical_names.isolanguage AS isolanguage
+""" + LANGUAGE_FILTERED_NAMES_PARTIAL_SQL
+
+LANGUAGE_FILTERED_NAMES_COUNT = "SELECT count(*)\n" + LANGUAGE_FILTERED_NAMES_PARTIAL_SQL
+
+
+def abbreviation_pattern_to_sql_regex(part : str) -> str:
     """
     Converts an abbreviation pattern to a regex pattern that can be used in SQL.
     """
-    #TODO arbitrary abbreviation size limit
+    #TODO delete?
     initials = []
     for char in part:
         if char.isupper() and char.isalpha():
             initials.append(char.lower())
+            #TODO arbitrary abbreviation size limit
+            # matches CSR and USSR, are there other important abbreviations that would be missed?
             if len(initials) > 4:
                 initials = None
                 break
@@ -139,92 +168,236 @@ def abbreviation_pattern_to_regex(part : str) -> str:
     else:
         return None
 
-def build_closest_matches_query(
-        entity_type : Optional[EntityType] = None,
-        topk : int = 5,
-        threshold : int | float = 3,
-        table : Literal["candidate_names", "reduced_candidate_names"] = "candidate_names"  
-    ):
-    if isinstance(entity_type, str):
-        entity_type = EntityType[entity_type]
-    elif not isinstance(entity_type, EntityType) and entity_type is not None:
-        raise ValueError(f"Invalid entity type: {entity_type}")
-    if entity_type is not None:
-        entity_type_filter = f"filter_entity_type('{table}', '{entity_type.entity_type}')"
+def abbreviation_pattern_to_regex(part : str) -> str:
+    """
+    Converts an abbreviation pattern to a regex pattern.
+    """
+    initials = []
+    for char in part:
+        if char.isupper() and char.isalpha():
+            initials.append(char.lower())
+            #TODO arbitrary abbreviation size limit
+            # matches CSR and USSR, are there other important abbreviations that would be missed?
+            if len(initials) > 4:
+                initials = None
+                break
+        elif char == ".":
+            continue
+        else:
+            initials = None
+            break
+    if not initials and '.' in part:
+        initials = part.split(".")
+        if len(initials[-1]) == 0:
+            initials = initials[:-1]
+    if initials:
+        initials = [x.lower() for x in initials]
+        return ".* ".join(initials) + ".*"
     else:
-        entity_type_filter = table
+        return None
+
+_STRIP_PUNCTUATION_REGEX = re.compile(r'[^\w\s]')
+
+def ascii_normalize(nfc_query : str) -> str:
+    """
+    Converts a string to lowercase, strips accents and punctuation.
+    This is used for matching against similarly normalized names in the database.
+    """
+    result = nfc_query.lower()
+    # Strip accents replacements may differ on implementation
+    # Call duckdb function to ensure the same behavior as in the database
+    result = duckdb.execute("SELECT strip_accents($1)", [result]).fetchone()[0]
+    result = _STRIP_PUNCTUATION_REGEX.sub("", result)
+    return result
+
+def german_normalize(nfc_query : str) -> str:
+    """
+    Converts a string to lowercase, strips accents and punctuation.
+    Accent stripping takes into account german rules for conversion of umlauts and ß.
+    This is used for matching against similarly normalized names in the database.
+    """
+    result = nfc_query.lower()
+    result = result.replace("ä", "ae")
+    result = result.replace("ö", "oe")
+    result = result.replace("ü", "ue")
+    result = result.replace("ß", "ss")
+    return ascii_normalize(result)
+
+class TantivifySearchMatch(NamedTuple):
+    score : float
+    german_ascii_name: str
+    ascii_name: str
+    iri: str
+
+
+class TantivySearchResult(NamedTuple):
+    nfc_query : str
+    german_ascii_query: str
+    ascii_query: str
+    abbreviation_pattern : Optional[str]
+    matches : list[TantivifySearchMatch]
+
+
+class TantivySearchIndex:
+    def __init__(self, index_path : str | Path):
+        self.schema = self.create_schema()
+        self.index_path = Path(index_path)
+        self.already_exists = self.index_path.exists()
+        if not self.already_exists:
+            self.index_path.mkdir(parents=True)
+        self.index = tantivy.Index(self.schema, path=str(self.index_path))
+
+    def populate_index(self, geo_db_connection : duckdb.DuckDBPyConnection, skip_if_exists=True):
+        if skip_if_exists and self.already_exists:
+            self.index.reload()
+            return
+        total_rows = geo_db_connection.execute(LANGUAGE_FILTERED_NAMES_COUNT).fetchone()[0]
+        geo_db_connection.execute(GERMAN_ASCII_DUCKDB_MACRO)
+        with self.index.writer() as writer:
+            for row in tqdm(geo_db_connection.execute(LANGUAGE_FILTERED_NAMES_SELECT).fetchall(), total=total_rows, desc="Populating Tantivy index"):
+                doc = tantivy.Document()
+                doc.add_text("german_ascii_name", row[1])
+                doc.add_text("ascii_name", row[2])
+                doc.add_text("iri", row[4])
+
+                # TODO not implemented, is it useful at all?
+                # extra fields for search restriction
+                for entity_type in GeographicalEntityType:
+                    doc.add_boolean(entity_type.entity_type, entity_type.entity_type in row[5])
+                doc.add_text("country_code", row[6] or "")
+                admin_codes = row[7] or {}
+                for admin_level in range(1, 6):
+                    admin_code = admin_codes.get(f"admin{admin_level}_code")
+                    doc.add_text(f"admin{admin_level}_code", admin_code or "")
+                writer.add_document(doc)
+        self.index.reload()
+
+    def create_schema(self):
+        schema_builder = tantivy.SchemaBuilder()
+        text_field_options = dict( 
+            # Use raw tokenizer; tantivy tokenizer is a full text search feature, 
+            # we only need single term matching
+            tokenizer_name = 'raw',
+            index_option = 'basic'
+        )
+        # search keys
+        schema_builder.add_text_field("german_ascii_name", stored=True, **text_field_options)
+        schema_builder.add_text_field("ascii_name", stored=True, **text_field_options)
+        # iri for db retrieval later
+        schema_builder.add_text_field("iri", stored=True, **text_field_options)
+
+        # extra fields for search restriction
+        for entity_type in GeographicalEntityType:
+            schema_builder.add_boolean_field(entity_type.entity_type, indexed=True)
+        schema_builder.add_text_field("country_code", **text_field_options)
+        for code in ["admin1_code", "admin2_code", "admin3_code", "admin4_code", "admin5_code"]:
+            schema_builder.add_text_field(code, **text_field_options)
+        return schema_builder.build()
+
+    def _build_entity_type_restriction(
+            self, entity_types : list[GeographicalEntityType]) -> tantivy.Query:
+        if len(entity_types) == 1:
+            return tantivy.Query.term_query(
+                self.schema, entity_types[0].entity_type, True)
+        else:
+            disjuction = []
+            for entity_type in entity_types:
+                disjuction.append((
+                    tantivy.Occur.Should, 
+                    tantivy.Query.term_query(self.schema, entity_type.entity_type, True)
+                ))
+            return tantivy.Query.boolean_query(disjuction, 1)
+
+    def _build_country_code_restriction(self, country_codes : list[str]) -> tantivy.Query:
+        if len(country_codes) == 1:
+            return tantivy.Query.term_query(self.schema, "country_code", country_codes[0])
+        else:
+            disjuction = []
+            for country_code in country_codes:
+                disjuction.append((
+                    tantivy.Occur.Should, 
+                    tantivy.Query.term_query(self.schema, "country_code", country_code)
+                ))
+            return tantivy.Query.boolean_query(disjuction, 1)
     
-    if threshold > 0:
-        match_filter = f"cleaned_distance <= {threshold} OR may_be_abbreviation"
-    else:
-        match_filter = "clean_alt_name = clean_query"
+    def _build_admin_code_restriction(self, admin_codes : list[GeonamesAdminCodes]) -> tantivy.Query:
+        def _admin_code_to_query(admin_code : GeonamesAdminCodes) -> tantivy.Query:
+            admin_code_queries = []
+            for k, v in admin_code._asdict().items():
+                if v is not None:
+                    admin_code_queries.append(
+                        tantivy.Occur.Must, tantivy.Query.term_query(self.schema, k, v))
+            if len(admin_code_queries) == 1:
+                return admin_code_queries[0][1]
+            else:
+                return tantivy.Query.boolean_query(admin_code_queries)
+        if len(admin_codes) == 1:
+            return _admin_code_to_query(admin_codes[0])
+        else:
+            disjuction = []
+            for admin_code in admin_codes:
+                disjuction.append((
+                    tantivy.Occur.Should, 
+                    _admin_code_to_query(admin_code)
+                ))
+            return tantivy.Query.boolean_query(disjuction, 1)
 
-    ranking_order = """
-ORDER BY 
-    CASE 
-        WHEN raw_distance = 0 THEN 0 
-        WHEN cleaned_distance = 0 THEN 1
-        WHEN may_be_abbreviation THEN 2 
-        ELSE 3 
-    END,
-    raw_distance,
-    cleaned_distance,
-    CASE WHEN isPreferredName IS TRUE THEN 0 ELSE 1 END
-ASC
-"""
+    def search(
+            self, 
+            query_string, 
+            threshold : int, 
+            limit : int = 10,
+            entity_types : Optional[list[GeographicalEntityType]] = None,
+            country_codes : Optional[list[str]] = None,
+            admin_codes : Optional[list[GeonamesAdminCodes]] = None
+        ):
+        nfc_query = unicodedata.normalize("NFC", query_string)
+        german_query = german_normalize(nfc_query)
+        ascii_query = ascii_normalize(nfc_query)
+        name_queries = [
+            (tantivy.Occur.Should, tantivy.Query.fuzzy_term_query(self.schema,
+                "german_ascii_name", german_query, distance=threshold)),
+            (tantivy.Occur.Should, tantivy.Query.fuzzy_term_query(self.schema,
+                "ascii_name", ascii_query, distance=threshold))
+        ]
 
-    query = f"""
-WITH
-query_prep AS (
-    SELECT 
-        $1 AS query,
-        nfc_normalize(query) AS nfc_query,
-        regexp_replace(lower(strip_accents(nfc_query)), '[^\\w\\s]', '', 'g') AS clean_query,
-        $2 AS country_restriction,
-        $3 AS abbreviation_pattern
-),
-candidates AS(
-    SELECT filtered.*
-    FROM {entity_type_filter} AS filtered, query_prep
-    WHERE 
-        query_prep.country_restriction IS NULL 
-        OR 
-        country_code IN query_prep.country_restriction 
-),
-ranked_matches AS(
-    SELECT 
-        query_prep.*,
-        nfc_alt_name,
-        clean_alt_name,
-        levenshtein(nfc_alt_name, nfc_query) AS raw_distance,
-        levenshtein(clean_alt_name, clean_query) AS cleaned_distance,
-        CASE 
-            WHEN query_prep.abbreviation_pattern IS NOT NULL THEN 
-                clean_alt_name LIKE query_prep.abbreviation_pattern
-            ELSE FALSE
-        END AS may_be_abbreviation,
-        ROW_NUMBER() OVER (
-            PARTITION BY geonameId 
-{textwrap.indent(ranking_order, ' ' * 4 * 3)}
-            ) AS match_rank,
-        candidates.* EXCLUDE (nfc_alt_name, clean_alt_name)
-    FROM candidates, query_prep
-    WHERE {match_filter}
-),
-ranked_entities AS (
-    SELECT *,
-    RANK() OVER (
-{textwrap.indent(ranking_order, ' ' * 4)}
-    ) AS entity_rank
-    FROM ranked_matches
-    WHERE match_rank = 1
-)
-SELECT * EXCLUDE (match_rank)
-FROM ranked_entities
-WHERE entity_rank <= {topk}
-ORDER BY entity_rank
-"""
-    return query.strip()
+        abbrev_pattern = abbreviation_pattern_to_regex(query_string)
+        if abbrev_pattern:
+            name_queries.append((tantivy.Occur.Should, 
+                            tantivy.Query.regex_query(self.schema, "ascii_name", abbrev_pattern)))
+            name_queries.append((tantivy.Occur.Should, 
+                            tantivy.Query.regex_query(self.schema, "german_ascii_name", abbrev_pattern)))
+        final_name_query = tantivy.Query.boolean_query(name_queries, 1)
+        restrictions = [(tantivy.Occur.Must, final_name_query)]
+
+        if entity_types is not None: 
+            restrictions.append((tantivy.Occur.Must, self._build_entity_type_restriction(entity_types)))
+        if country_codes is not None:
+            restrictions.append((tantivy.Occur.Must, self._build_country_code_restriction(country_codes)))
+        if admin_codes is not None:
+            restrictions.append((tantivy.Occur.Must, self._build_admin_code_restriction(admin_codes)))
+        if len(restrictions) > 1:
+            final_query = tantivy.Query.boolean_query(restrictions)
+        else:
+            final_query = restrictions[0][1]
+        searcher = self.index.searcher()
+        search_results = searcher.search(final_query, limit=limit)
+        matches = []
+        for score, doc_address in search_results.hits:
+            doc = searcher.doc(doc_address)
+            matches.append(TantivifySearchMatch(
+                score=score,
+                german_ascii_name=doc.get_first("german_ascii_name"),
+                ascii_name=doc.get_first("ascii_name"),
+                iri=doc.get_first("iri")
+            ))
+        return TantivySearchResult(
+            nfc_query=nfc_query,
+            german_ascii_query=german_query,
+            ascii_query=ascii_query,
+            abbreviation_pattern=abbrev_pattern,
+            matches=matches
+        )
 
 
 def falling_query_list(
@@ -248,6 +421,7 @@ class GeonamesSearch(contextlib.AbstractContextManager):
             threshold : int | float = 3,
             search_cache_db : str | Literal[':memory:'] = "search_cache.duckdb"
         ):
+        raise NotImplementedError("This class is being refactored and should not be used in its current state.")
         self.connection = duckdb.connect(search_cache_db)
         build_geonames_db.attach_or_init_duckdb(self.connection)
         self.connection.execute(CANDIDATE_NAMES_INIT_QUERY)
@@ -257,7 +431,7 @@ class GeonamesSearch(contextlib.AbstractContextManager):
     def search_entities(
             self,
         parts : list[str],
-        entity_type : Optional[EntityType] = None,
+        entity_type : Optional[GeographicalEntityType] = None,
         country_hints : Optional[list[list[str]]] = None,
         fall_to_all_entities : bool = False,
     ) -> list[pd.DataFrame]:
@@ -285,7 +459,7 @@ class GeonamesSearch(contextlib.AbstractContextManager):
             if pd.isna(part) or part.strip() == "":
                 results.append(pd.DataFrame())
                 continue
-            abbreviation_regex = abbreviation_pattern_to_regex(cleaned)
+            abbreviation_regex = abbreviation_pattern_to_sql_regex(cleaned)
             matches = []
             start = time.monotonic()
             matches, hit_query_idx = falling_query_list(
@@ -293,9 +467,9 @@ class GeonamesSearch(contextlib.AbstractContextManager):
                 [
                     (country_hint is not None, exact_query, [part, country_hint, abbreviation_regex]),
                     (True, exact_query, [part, None, abbreviation_regex]),
-                    (entity_type != EntityType.Country, exact_reduced_query, [part, None, abbreviation_regex]),
+                    (entity_type != GeographicalEntityType.Country, exact_reduced_query, [part, None, abbreviation_regex]),
                     (country_hint is not None, query, [part, country_hint, abbreviation_regex]),
-                    (entity_type != EntityType.Country, reduced_query, [part, None, abbreviation_regex]),
+                    (entity_type != GeographicalEntityType.Country, reduced_query, [part, None, abbreviation_regex]),
                     (True, query, [part, None, abbreviation_regex]),
                     (fall_to_all_entities, all_types_query, [part, None, abbreviation_regex])
                 ]
@@ -315,13 +489,13 @@ class GeonamesSearch(contextlib.AbstractContextManager):
             addresses = pd.DataFrame(addresses)
         else:
             addresses = addresses.reset_index(drop=True)
-        addresses = addresses[[c for c in addresses.columns if c in EntityType.__members__]]
+        addresses = addresses[[c for c in addresses.columns if c in GeographicalEntityType.__members__]]
         matches = []
         country_hints = {}
-        for entity_type in EntityType:
+        for entity_type in GeographicalEntityType:
             if entity_type.name not in addresses.columns:
                 continue
-            target_cols = [entity_type.name, "Country"] if entity_type != EntityType.Country else ["Country"]
+            target_cols = [entity_type.name, "Country"] if entity_type != GeographicalEntityType.Country else ["Country"]
             targets = addresses[target_cols].reset_index(names="input_row").dropna(subset=[entity_type.name])
             if len(targets) == 0:
                 continue
@@ -334,7 +508,7 @@ class GeonamesSearch(contextlib.AbstractContextManager):
             entity_matches = self.search_entities(nodupes[entity_type.name], country_hints=nodupes["country_hints"], entity_type=entity_type)
             end = time.monotonic()
             print(f"Search for entity type {entity_type.name} took {utils.format_time(end - start)} and returned {sum(len(df) for df in entity_matches)} matches")
-            if entity_type == EntityType.Country:
+            if entity_type == GeographicalEntityType.Country:
                 for idx, match in enumerate(entity_matches):
                     if len(match) > 0 and not match["country_code"].isna().all():
                         country = addresses.loc[nodupes.iloc[idx]["input_row"], "Country"]
@@ -431,7 +605,7 @@ class GeonamesSearch(contextlib.AbstractContextManager):
         orig_index_levels = addr_matches.index.names
         addr_matches = addr_matches.reset_index()
         ungrouped_entities = set(addr_matches["geonameId"])
-        matched_entity_types = [EntityType[entity_type] for entity_type in addr_matches["entity_type"].unique()]
+        matched_entity_types = [GeographicalEntityType[entity_type] for entity_type in addr_matches["entity_type"].unique()]
         matched_entity_types.sort(reverse=True)
         grouped_matches : list[tuple[tuple[int, float], pd.DataFrame]] = []
         for entity_type in matched_entity_types:

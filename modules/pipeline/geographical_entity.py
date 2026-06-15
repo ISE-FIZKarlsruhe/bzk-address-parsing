@@ -1,12 +1,12 @@
 from dataclasses import dataclass
 from enum import Enum
-from typing import LiteralString, Optional, TYPE_CHECKING, NamedTuple
+from typing import Optional, TYPE_CHECKING, NamedTuple
 import pandas as pd
 
 
 @dataclass(frozen=True)
 class GeographicalEntityTypeProperties:
-    entity_type : LiteralString
+    entity_type : str
     hierarchy_level : int # lower means higher in the hierarchy. Induces a partial order
 
 class GeographicalEntityType(GeographicalEntityTypeProperties, Enum):

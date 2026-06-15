@@ -13,3 +13,5 @@ geonames.duckdb
 geonames.duckdb.wal
 search_cache.duckdb
 search_cache.duckdb.wal
+*_tantivy_index/
+geo.duckdb

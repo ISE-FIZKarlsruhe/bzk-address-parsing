@@ -24,6 +24,7 @@ are resolved by making a request to the geonames server which triggers a redirec
 The rest of the entities with invalid geoname ids are ignored.
 """
 import contextlib
+import json
 from pathlib import Path
 import io
 import csv
@@ -40,12 +41,19 @@ from urllib.parse import urlparse
 from datetime import timedelta
 import time
 import warnings
-from SPARQLWrapper import SPARQLWrapper, JSON
+from SPARQLWrapper import SPARQLWrapper, JSON, __version__ as SPARQLWrapper_version
 import sys
 import pprint
+import textwrap
+import pandas as pd
 
 DUCK_DB_PATH = "geo.duckdb"
-
+WIKIDATA_USER_AGENT = (
+    "BZKAddressLinkingDB/0.0.1 "
+    "(https://github.com/ISE-FIZKarlsruhe/bzk-address-parsing; rafael.patronilo@fiz-karlsruhe.de) "
+    f"Python/{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro} "
+    f"SPARQLWrapper/{SPARQLWrapper_version}"
+)
 
 _INIT_GEO_ENTITIES_TABLES_SQL = """
 CREATE TABLE IF NOT EXISTS geographical_entities (
@@ -661,25 +669,28 @@ def populate_names_from_gnd(db_con: duckdb.DuckDBPyConnection):
         if gnd_names:
             flush()
 
-
-def fetch_wikidata_entities():
-    endpoint_url = "https://query.wikidata.org/sparql"
-    target_classes = {
+WIKIDATA_TARGET_CLASSES = {
         "<http://www.wikidata.org/entity/Q486972>" : ["City", "Neighborhood"], # Populated place
         "<http://www.wikidata.org/entity/Q253019>" : ["Neighborhood"], # Ortsteil
         "<http://www.wikidata.org/entity/Q262166>" : ["City"], # Municipality in Germany
         "<http://www.wikidata.org/entity/Q82794>" : ["Region"] # Region
     }
 
+
+
+def fetch_wikidata_entities():
+    endpoint_url = "https://query.wikidata.org/sparql"
+    
     # Grabs only entities whose direct parent is linked to geonames.
     # This is not necessarily complete but it is unlikely
     # to miss entities and it is efficient.
     sparql_template = """
-    SELECT ?id ?parentGeoname ?labelEN ?labelDE ?lat ?lon WHERE {
+    SELECT ?id ?parentGeoname ?labelEN ?labelDE ?lat ?lon ?class WHERE {
         ?parent wdt:P17 wd:Q183.
         ?parent wdt:P1566 ?parentGeoname.
         ?id wdt:P131 ?parent.
-        ?id wdt:P31 %(wikidata_class)s.
+        BIND (%(wikidata_class)s AS ?class)
+        ?id wdt:P31 ?class.
         OPTIONAL { ?id wdt:P1566 ?ownGeoname. }
         FILTER(!BOUND(?ownGeoname))
         OPTIONAL {?id rdfs:label ?labelEN FILTER (LANG(?labelEN) = "en")} 
@@ -690,26 +701,24 @@ def fetch_wikidata_entities():
             BIND(geof:longitude(?coords) AS ?lon)
         }}
     }
+    """
+    paginator_statements = """
     LIMIT %(page_size)s
     OFFSET %(offset)s
     """
-    page_size = 500
+    page_size = 5_000
     sparql = SPARQLWrapper(endpoint_url)
-    sparql.addCustomHttpHeader(
-        "User-Agent",
-        "bzk-address-parsing - "
-        f"Python/{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro} "
-        "(mailto:rafael.patronilo@fiz-karlsruhe.de)"
-    )
+    sparql.addCustomHttpHeader("User-Agent", WIKIDATA_USER_AGENT)
     sparql.setReturnFormat(JSON)
     
-    for wikidata_class, entity_types in target_classes.items():
+    for wikidata_class, entity_types in WIKIDATA_TARGET_CLASSES.items():
         page_idx = 0
         offset = 0
         page = []
         exhausted = False
         while not exhausted:
-            query = sparql_template % dict(wikidata_class=wikidata_class, page_size=page_size, offset=offset)
+            print(f"Querying Wikidata for class {wikidata_class}, page {page_idx} (limit {page_size}, offset {offset})...")
+            query = (sparql_template + paginator_statements) % dict(wikidata_class=wikidata_class, page_size=page_size, offset=offset)
             sparql.setQuery(query)
             request_timestamp = time.monotonic()
             query_success = False
@@ -721,7 +730,21 @@ def fetch_wikidata_entities():
                 headers = getattr(e, "headers", {})
                 print(f"Query failed for page {page_idx} class {wikidata_class}: {e}")
                 print("Headers:")
-                pprint.pprint(headers)
+                pprint.pprint(dict(headers))
+                print()
+                print(textwrap.dedent("""
+                The WikiData SPARQL Endpoint seems to be particularly strict for bots. 
+                You may want to consider running the query manually at https://query.wikidata.org/
+                and downloading the results as json into dumps/wikidata/
+                You can then load these using the --load-wikidata-dumps option
+                These are the queries you should run:
+                                      
+                """))
+                for wikidata_class, entity_types in WIKIDATA_TARGET_CLASSES.items():
+                    print(f"### For class {wikidata_class}")
+                    print(textwrap.dedent(sparql_template) % dict(wikidata_class=wikidata_class))
+                    print()
+                print()
                 print(f"Will retry respecting rate limit...")
                 retry_after = headers.get("Retry-After")
                 if retry_after and retry_after.isdigit():
@@ -760,9 +783,32 @@ def fetch_wikidata_entities():
             if elapsed < 60: # respect rate limit of 1 request per minute
                 time.sleep(60 - elapsed)
             
-            
+def load_wikidata_entities_from_manual_dumps():
+    """Loads wikidata entities from manually downloaded dumps in dumps/wikidata/"""
+    page_size = 10_000
+    page = []
+    for dump_file in tqdm(sorted(Path("dumps/wikidata/").glob("*.json")), desc="Loading wikidata dumps"):
+        with open(dump_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            for row in tqdm(data, desc=f"Loading {dump_file.name}", unit=" entities"):
+                entity_id      = row["id"]
+                parent_geoname = row["parentGeoname"]
+                cls = row["class"]
+                label_en       = row.get("labelEN")
+                label_de       = row.get("labelDE")
+                lat            = row.get("lat")
+                lon            = row.get("lon")
+                entity_types   = WIKIDATA_TARGET_CLASSES.get(cls, [])
+                page.append((entity_id, parent_geoname,
+                    label_en, label_de, lat, lon,
+                    entity_types, cls ))
+                if len(page) >= page_size:
+                    yield page
+                    page = []
+    if page:
+        yield page
 
-def populate_wikidata_entities(con):
+def populate_wikidata_entities(con, load_wikidata_dumps=False):
     """ TODO change comment
     Work in progress - There are 58k "Ortsteils" in wikidata
     that do not link to a geonames of gnd entity.
@@ -770,77 +816,79 @@ def populate_wikidata_entities(con):
     (Sudberg, https://www.wikidata.org/wiki/Q2362997)
     We should probaly include and link these entities as well.
     """
-    for page in fetch_wikidata_entities():
-        with duckdbpbar(con, desc="Inserting Wikidata entities", leave=False):
-            # Inserts entity, populating some columns with data from the geonames parent
-            con.executemany(
-                """
-                INSERT OR REPLACE INTO geographical_entities (
-                    iri, classification, name, asciiname, possible_entity_types,
-                    coordinates, population, closest_geonames_id, geonames_id,
-                    iso_country_code, alternate_iso_country_codes, admin_codes, other_parent_iris
-                )
-                    SELECT (
-                        ? AS iri, 
-                        ? AS classification, 
-                        ? AS name,
-                        strip_accents(?) AS asciiname,
-                        ? AS possible_entity_types, 
-                        struct_pack(latitude := ?, longitude := ?) AS coordinates,
-                        NULL AS population,
-                        geonames_id AS closest_geonames_id,
-                        NULL AS geonames_id,
-                        iso_country_code,
-                        alternate_iso_country_codes,
-                        admin_codes,
-                        other_parent_iris
-                    ) 
-                    FROM geographical_entities 
-                    WHERE geonames_id = ?
-                ON CONFLICT (iri) DO NOTHING;
-                """,
-                [
-                    (
-                        entity_id, source_class, 
-                        label_en or label_de, label_en or label_de,
-                        entity_types, lat, lon, parent_geoname
-                    )
-                    for entity_id,  parent_geoname, label_en, label_de, lat, lon, entity_types, source_class
-                        in page if (label_en or label_de)
-                ]
+    iterator = None
+    if load_wikidata_dumps:
+        iterator = load_wikidata_entities_from_manual_dumps()
+    else:
+        iterator = fetch_wikidata_entities()
+    for page in iterator:
+        page_df = pd.DataFrame(page, columns=[
+            "entity_id", "parent_geoname", "label_en", "label_de",
+            "lat", "lon", "entity_types", "source_class"
+        ])
+        con.execute(
+            """
+            INSERT OR REPLACE INTO geographical_entities (
+                iri, classification, name, asciiname, possible_entity_types,
+                coordinates, population, closest_geonames_id, geonames_id,
+                iso_country_code, alternate_iso_country_codes, admin_codes, other_parent_iris
             )
-        with duckdbpbar(con, desc="Inserting Wikidata english names", leave=False):
-            # Inserts entity, populating some columns with data from the geonames parent
-            con.executemany(
-                """
-                INSERT OR REPLACE INTO geographical_names (
-                    iri, name, is_preferred_name, is_short_name, is_colloquial,
-                    name_provider, isolanguage
-                )
-                VALUES (?, ?, NULL, NULL, NULL, 'http://www.wikidata.org/entity/', 'en')
-                """,
-                [
-                    (entity_id, label_en)
-                    for entity_id,  parent_geoname, label_en, label_de, lat, lon, entity_types, source_class
-                        in page if label_en
-                ]
+                SELECT 
+                    page_df.entity_id AS iri, 
+                    page_df.source_class AS classification, 
+                    coalesce(page_df.label_en, page_df.label_de) AS name,
+                    strip_accents(coalesce(page_df.label_en, page_df.label_de)) AS asciiname,
+                    page_df.entity_types AS possible_entity_types, 
+                    struct_pack(latitude := page_df.lat, longitude := page_df.lon) AS coordinates,
+                    NULL AS population,
+                    geonames_id AS closest_geonames_id,
+                    NULL AS geonames_id,
+                    iso_country_code,
+                    alternate_iso_country_codes,
+                    admin_codes,
+                    other_parent_iris
+                FROM geographical_entities 
+                    JOIN page_df ON geographical_entities.geonames_id = page_df.parent_geoname;
+            """
+        )
+        # Insert english labels
+        con.execute(
+            """
+            INSERT OR REPLACE INTO geographical_names (
+                iri, name, is_preferred_name, is_short_name, is_colloquial,
+                name_provider, isolanguage
             )
-        with duckdbpbar(con, desc="Inserting Wikidata german names", leave=False):
-            # Inserts entity, populating some columns with data from the geonames parent
-            con.executemany(
-                """
-                INSERT OR REPLACE INTO geographical_names (
-                    iri, name, is_preferred_name, is_short_name, is_colloquial,
-                    name_provider, isolanguage
-                )
-                VALUES (?, ?, NULL, NULL, NULL, 'http://www.wikidata.org/entity/', 'de')
-                """,
-                [
-                    (entity_id, label_de)
-                    for entity_id,  parent_geoname, label_en, label_de, lat, lon, entity_types, source_class
-                        in page if label_de
-                ]
+            SELECT 
+                page_df.entity_id AS iri,
+                page_df.label_en AS name,
+                NULL AS is_preferred_name,
+                NULL AS is_short_name,
+                NULL AS is_colloquial,
+                'http://www.wikidata.org/entity/' AS name_provider,
+                'en' AS isolanguage
+            FROM page_df
+            WHERE page_df.label_en IS NOT NULL AND page_df.label_en != ''
+            """
+        )
+        # Insert german labels
+        con.execute(
+            """
+            INSERT OR REPLACE INTO geographical_names (
+                iri, name, is_preferred_name, is_short_name, is_colloquial,
+                name_provider, isolanguage
             )
+            SELECT 
+                page_df.entity_id AS iri,
+                page_df.label_de AS name,
+                NULL AS is_preferred_name,
+                NULL AS is_short_name,
+                NULL AS is_colloquial,
+                'http://www.wikidata.org/entity/' AS name_provider,
+                'de' AS isolanguage
+            FROM page_df
+            WHERE page_df.label_de IS NOT NULL AND page_df.label_de != ''
+            """
+        )
             
     
 
@@ -851,7 +899,25 @@ def cleanup_dump_files():
     print("Cleaning up downloaded dump files...")
     shutil.rmtree("dumps")
 
-def init_duckdb(cleanup=True, update=False):
+def compact_db():
+    db_path = Path(DUCK_DB_PATH)
+    compacted_path = db_path.with_suffix(".compacted.duckdb")
+    if not Path(DUCK_DB_PATH).exists():
+        raise FileNotFoundError(f"DuckDB database not found at {DUCK_DB_PATH}. Cannot compact non-existent database.")
+    if compacted_path.exists():
+        raise FileExistsError(f"Compacted database already exists at {compacted_path}. Please remove it before compacting.")
+    print(f"Compacting DuckDB database at {DUCK_DB_PATH}...")
+    # Copying a whole database in duckdb compacts it: https://duckdb.org/docs/lts/operations_manual/footprint_of_duckdb/reclaiming_space
+    duckdb.execute(f"""
+    ATTACH '{DUCK_DB_PATH}' AS old_db;
+    ATTACH '{compacted_path}' AS new_db;
+    COPY FROM DATABASE old_db TO new_db;
+    """)
+    print(f"Compaction complete! Replacing old database with compacted version...")
+    db_path.unlink()
+    compacted_path.rename(DUCK_DB_PATH)
+
+def init_duckdb(cleanup=True, update=False, load_wikidata_dumps=False):
     """
     Initializes the DuckDB database by creating the necessary tables and populating them with data 
     from the geonames and GND dumps. Fails if the database already exists.
@@ -864,21 +930,22 @@ def init_duckdb(cleanup=True, update=False):
             f"DuckDB database already exists at {DUCK_DB_PATH}. Please remove it before creating a new one."
         )
     con = duckdb.connect(DUCK_DB_PATH)
-    con.execute("SET enable_progress_bar=true;")
+    con.execute("SET enable_progress_bar=true; SET enable_progress_bar_print=false;")
     print("Creating and populating DuckDB database... (this may take up to 30 minutes)")
     if not update:
         con.execute(_INIT_GEO_ENTITIES_TABLES_SQL)
-    #populate_entities_from_geonames(con)
-    #populate_country_data(con)
-    #populate_names_from_geonames(con)
-    #populate_names_from_gnd(con)
-    populate_wikidata_entities(con)
+    populate_entities_from_geonames(con)
+    populate_country_data(con)
+    populate_names_from_geonames(con)
+    populate_names_from_gnd(con)
+    populate_wikidata_entities(con, load_wikidata_dumps=load_wikidata_dumps)
     if cleanup:
         cleanup_dump_files()
     end = time.monotonic()
     elapsed = end - start
     print(f"Database creation complete! (Elapsed time: {timedelta(seconds=elapsed)})")
     con.close()
+    compact_db()
 
 
 def open_or_init_duckdb(rebuild_views=False):
@@ -919,6 +986,11 @@ def main(args=None):
         help="Delete existing database and rebuild from scratch",
     )
     parser.add_argument(
+        "--compact-only",
+        action="store_true",
+        help="Compact existing database",
+    )
+    parser.add_argument(
         "--update",
         action="store_true",
         help="Repopulate the database",
@@ -928,11 +1000,19 @@ def main(args=None):
         action="store_true",
         help="Remove downloaded dump files after building the database",
     )
+    parser.add_argument(
+        "--load-wikidata-dumps",
+        action="store_true",
+        help="Load Wikidata entities from manual dump files",
+    )
     args = parser.parse_args(args=args)
 
     duckdb_path = Path(DUCK_DB_PATH)
     delete_old_db = False
 
+    if args.compact_only:
+        compact_db()
+        return
     if args.rebuild and duckdb_path.exists():
         print(f"Moving existing database at {DUCK_DB_PATH}...")
         shutil.move(DUCK_DB_PATH, f"{DUCK_DB_PATH}.old")
@@ -944,7 +1024,7 @@ def main(args=None):
         if args.cleanup:
             cleanup_dump_files()
     else:
-        init_duckdb(cleanup=args.cleanup, update=args.update)
+        init_duckdb(cleanup=args.cleanup, update=args.update, load_wikidata_dumps=args.load_wikidata_dumps)
     if delete_old_db:
         print(f"Deleting old database backup at {DUCK_DB_PATH}.old...")
         Path(f"{DUCK_DB_PATH}.old").unlink()
