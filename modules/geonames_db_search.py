@@ -23,6 +23,7 @@ import tantivy
 from tqdm.auto import tqdm
 import unicodedata
 import re
+import os
 
 # Used to materialize in memory a distilled version of the names table
 # TODO filter neighborhoods?
@@ -192,7 +193,7 @@ def abbreviation_pattern_to_regex(part : str) -> str:
             initials = initials[:-1]
     if initials:
         initials = [x.lower() for x in initials]
-        return ".* ".join(initials) + ".*"
+        return "[a-z]* ".join(initials) + "[a-z]*"
     else:
         return None
 
@@ -223,7 +224,7 @@ def german_normalize(nfc_query : str) -> str:
     result = result.replace("ß", "ss")
     return ascii_normalize(result)
 
-class TantivifySearchMatch(NamedTuple):
+class TantivySearchMatch(NamedTuple):
     score : float
     german_ascii_name: str
     ascii_name: str
@@ -232,20 +233,24 @@ class TantivifySearchMatch(NamedTuple):
 
 class TantivySearchResult(NamedTuple):
     nfc_query : str
-    german_ascii_query: str
+    german_ascii_query: Optional[str]
     ascii_query: str
     abbreviation_pattern : Optional[str]
-    matches : list[TantivifySearchMatch]
+    matches : list[TantivySearchMatch]
 
 
 class TantivySearchIndex:
-    def __init__(self, index_path : str | Path):
+    def __init__(self, index_path : str | Path, n_threads : int | Literal['auto'] = 'auto'):
+        if n_threads == 'auto':
+            n_threads = max(1, getattr(os, "process_cpu_count", lambda : None)() or os.cpu_count() or 8)
         self.schema = self.create_schema()
         self.index_path = Path(index_path)
         self.already_exists = self.index_path.exists()
         if not self.already_exists:
             self.index_path.mkdir(parents=True)
+        self.n_threads = n_threads
         self.index = tantivy.Index(self.schema, path=str(self.index_path))
+        self.index.config_reader(num_warmers=self.n_threads)
 
     def populate_index(self, geo_db_connection : duckdb.DuckDBPyConnection, skip_if_exists=True):
         if skip_if_exists and self.already_exists:
@@ -253,7 +258,7 @@ class TantivySearchIndex:
             return
         total_rows = geo_db_connection.execute(LANGUAGE_FILTERED_NAMES_COUNT).fetchone()[0]
         geo_db_connection.execute(GERMAN_ASCII_DUCKDB_MACRO)
-        with self.index.writer() as writer:
+        with self.index.writer(num_threads=self.n_threads) as writer:
             for row in tqdm(geo_db_connection.execute(LANGUAGE_FILTERED_NAMES_SELECT).fetchall(), total=total_rows, desc="Populating Tantivy index"):
                 doc = tantivy.Document()
                 doc.add_text("german_ascii_name", row[1])
@@ -298,35 +303,31 @@ class TantivySearchIndex:
             self, entity_types : list[GeographicalEntityType]) -> tantivy.Query:
         if len(entity_types) == 1:
             return tantivy.Query.term_query(
-                self.schema, entity_types[0].entity_type, True)
+                self.schema, entity_types[0].entity_type, True, index_option='basic')
         else:
             disjuction = []
             for entity_type in entity_types:
-                disjuction.append((
-                    tantivy.Occur.Should, 
-                    tantivy.Query.term_query(self.schema, entity_type.entity_type, True)
-                ))
-            return tantivy.Query.boolean_query(disjuction, 1)
+                disjuction.append(tantivy.Query.term_query(self.schema, entity_type.entity_type, True))
+            return tantivy.Query.disjunction_max_query(disjuction)
 
     def _build_country_code_restriction(self, country_codes : list[str]) -> tantivy.Query:
         if len(country_codes) == 1:
-            return tantivy.Query.term_query(self.schema, "country_code", country_codes[0])
+            return tantivy.Query.term_query(self.schema, "country_code", country_codes[0], index_option='basic')
         else:
             disjuction = []
             for country_code in country_codes:
-                disjuction.append((
-                    tantivy.Occur.Should, 
-                    tantivy.Query.term_query(self.schema, "country_code", country_code)
-                ))
-            return tantivy.Query.boolean_query(disjuction, 1)
+                disjuction.append(tantivy.Query.term_query(self.schema, "country_code", country_code))
+            return tantivy.Query.disjunction_max_query(disjuction)
     
     def _build_admin_code_restriction(self, admin_codes : list[GeonamesAdminCodes]) -> tantivy.Query:
         def _admin_code_to_query(admin_code : GeonamesAdminCodes) -> tantivy.Query:
             admin_code_queries = []
             for k, v in admin_code._asdict().items():
-                if v is not None:
+                if v is not None and v != '':
                     admin_code_queries.append(
-                        tantivy.Occur.Must, tantivy.Query.term_query(self.schema, k, v))
+                        tantivy.Occur.Must, tantivy.Query.term_query(self.schema, k, v, index_option='basic'))
+            if len(admin_code_queries) == 0:
+                return None
             if len(admin_code_queries) == 1:
                 return admin_code_queries[0][1]
             else:
@@ -336,17 +337,62 @@ class TantivySearchIndex:
         else:
             disjuction = []
             for admin_code in admin_codes:
-                disjuction.append((
-                    tantivy.Occur.Should, 
-                    _admin_code_to_query(admin_code)
-                ))
-            return tantivy.Query.boolean_query(disjuction, 1)
+                admin_code_query = _admin_code_to_query(admin_code)
+                if admin_code_query is not None:
+                    disjuction.append(admin_code_query)
+            return tantivy.Query.disjunction_max_query(disjuction)
+
+
+    def _search_inner(
+            self, 
+            ascii_query : str, 
+            german_query : Optional[str], 
+            abbrev_pattern : Optional[str], 
+            restrictions : list[tuple[tantivy.Occur, tantivy.Query]], 
+            threshold : int, 
+            limit : int
+        ) -> list[TantivySearchMatch]:
+        query_strings = [("ascii_name", ascii_query)]
+        if german_query is not None:
+            query_strings.append(("german_ascii_name", german_query))
+        if threshold == 0:
+            name_queries = [
+                tantivy.Query.term_query(self.schema, field, query, index_option='basic')
+                for field, query in query_strings
+            ]
+        else:
+            name_queries = [
+                tantivy.Query.boost_query(tantivy.Query.fuzzy_term_query(self.schema,
+                    field, query, distance=threshold), 1.0)
+                for field, query in query_strings
+            ]
+        if abbrev_pattern:
+            name_queries.append(tantivy.Query.regex_query(self.schema, "ascii_name", abbrev_pattern))
+            name_queries.append(tantivy.Query.regex_query(self.schema, "german_ascii_name", abbrev_pattern))
+        final_name_query = tantivy.Query.disjunction_max_query(name_queries)
+        if len(restrictions) > 0:
+            final_query = tantivy.Query.boolean_query([(tantivy.Occur.Must, final_name_query)] + restrictions)
+        else:
+            final_query = final_name_query
+        searcher = self.index.searcher()
+        search_results = searcher.search(final_query, limit=limit)
+        matches = []
+        for score, doc_address in search_results.hits:
+            doc = searcher.doc(doc_address)
+            matches.append(TantivySearchMatch(
+                score=score,
+                german_ascii_name=doc.get_first("german_ascii_name"),
+                ascii_name=doc.get_first("ascii_name"),
+                iri=doc.get_first("iri")
+            ))
+        return matches
 
     def search(
             self, 
             query_string, 
             threshold : int, 
             limit : int = 10,
+            match_abbreviations : bool = True,
             entity_types : Optional[list[GeographicalEntityType]] = None,
             country_codes : Optional[list[str]] = None,
             admin_codes : Optional[list[GeonamesAdminCodes]] = None
@@ -354,43 +400,32 @@ class TantivySearchIndex:
         nfc_query = unicodedata.normalize("NFC", query_string)
         german_query = german_normalize(nfc_query)
         ascii_query = ascii_normalize(nfc_query)
-        name_queries = [
-            (tantivy.Occur.Should, tantivy.Query.fuzzy_term_query(self.schema,
-                "german_ascii_name", german_query, distance=threshold)),
-            (tantivy.Occur.Should, tantivy.Query.fuzzy_term_query(self.schema,
-                "ascii_name", ascii_query, distance=threshold))
-        ]
-
-        abbrev_pattern = abbreviation_pattern_to_regex(query_string)
-        if abbrev_pattern:
-            name_queries.append((tantivy.Occur.Should, 
-                            tantivy.Query.regex_query(self.schema, "ascii_name", abbrev_pattern)))
-            name_queries.append((tantivy.Occur.Should, 
-                            tantivy.Query.regex_query(self.schema, "german_ascii_name", abbrev_pattern)))
-        final_name_query = tantivy.Query.boolean_query(name_queries, 1)
-        restrictions = [(tantivy.Occur.Must, final_name_query)]
-
+        if ascii_query == german_query:
+            german_query = None
+        if match_abbreviations:
+            abbrev_pattern = abbreviation_pattern_to_regex(query_string)
+        else: abbrev_pattern = None
+        
+        restrictions = []
         if entity_types is not None: 
             restrictions.append((tantivy.Occur.Must, self._build_entity_type_restriction(entity_types)))
         if country_codes is not None:
             restrictions.append((tantivy.Occur.Must, self._build_country_code_restriction(country_codes)))
         if admin_codes is not None:
-            restrictions.append((tantivy.Occur.Must, self._build_admin_code_restriction(admin_codes)))
-        if len(restrictions) > 1:
-            final_query = tantivy.Query.boolean_query(restrictions)
-        else:
-            final_query = restrictions[0][1]
-        searcher = self.index.searcher()
-        search_results = searcher.search(final_query, limit=limit)
-        matches = []
-        for score, doc_address in search_results.hits:
-            doc = searcher.doc(doc_address)
-            matches.append(TantivifySearchMatch(
-                score=score,
-                german_ascii_name=doc.get_first("german_ascii_name"),
-                ascii_name=doc.get_first("ascii_name"),
-                iri=doc.get_first("iri")
-            ))
+            admin_code_restriction = self._build_admin_code_restriction(admin_codes)
+            if admin_code_restriction is not None:
+                restrictions.append((tantivy.Occur.Must, admin_code_restriction))
+        for i in range(0, threshold + 1):
+            matches = self._search_inner(
+                ascii_query=ascii_query,
+                german_query=german_query,
+                abbrev_pattern=abbrev_pattern,
+                restrictions=restrictions,
+                threshold=i,
+                limit=limit
+            )
+            if len(matches) > 0:
+                break
         return TantivySearchResult(
             nfc_query=nfc_query,
             german_ascii_query=german_query,

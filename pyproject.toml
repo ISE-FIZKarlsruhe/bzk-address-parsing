@@ -23,7 +23,11 @@ de-core-news-sm = { url = "https://github.com/explosion/spacy-models/releases/do
 [project]
 name = "bzk-address-parsing"
 version = "0.1.0"
-requires-python = ">=3.10"
+
+# deepparse is not compatible with Python 3.14 yet
+requires-python = ">=3.13, <3.14"
+
+
 dependencies = [
     "pandas>=2.3.3",
     "numpy>=2.2.6",
