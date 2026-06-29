@@ -434,6 +434,11 @@ class TantivySearchIndex:
             matches=matches
         )
 
+class SymSpellSearchIndex:
+    def __init__(self):
+        raise NotImplementedError("This class is being refactored and should not be used in its current state.")
+
+    
 
 def falling_query_list(
         connection : duckdb.DuckDBPyConnection, 

@@ -59,7 +59,9 @@ dependencies = [
     "jupysql>=0.1.0",
     "itables>=2.8.0",
     "sparqlwrapper>=2.0.0",
-    "tantivy>=0.26.0"
+    "tantivy>=0.26.0",
+    "unidecode>=1.4.0",
+    "symspellpy>=0.2.0"
 ]
 
 [project.optional-dependencies]
