@@ -43,10 +43,11 @@ class Disambiguator:
         address : LinkedAddress, 
         entity : MatchedEntity
         ) -> list[PossibleAddress]:
-        mean_match_scores_with_other_entities = [0.0] * len(entity.matches)
+        possible_addresses = []
+        if len(address.matched_entities) <= 1:
+            return possible_addresses
         for i, match in enumerate(entity.matches):
-            n_matches_with_other_entities = 1
-            sum_score = match.raw_similarity
+            matched = {}
             for other_entity in address.matched_entities:
                 if other_entity is entity:
                     continue
@@ -54,7 +55,20 @@ class Disambiguator:
                     prob = self._prob_child(match, other_match)
                     if prob > 0.0:
                         n_matches_with_other_entities += 1
-                        sum_score += prob * other_match.raw_similarity
+                        score = prob * other_match.raw_similarity
+                        old_score, _ = matched.get(other_entity, (0.0, None))
+                        if score > old_score:
+                            matched[other_entity] = (score, other_match)
+            matched_entities = [(k, v[1]) for k, v in matched.items()]
+            matched_entities.sort(key=lambda x : x[0], reverse=True)
+            score = sum(s for s, m in matched.values()) + match.raw_similarity
+            score = score / len(address.matched_entities)
+            possible_addresses.append(PossibleAddress(
+                main_entity=entity,
+                entities=[x[1] for x in matched_entities],
+                score=score
+            ))
+        return sorted(possible_addresses, key=lambda a: a.score, reverse=True)
                 
 
 
@@ -80,9 +94,27 @@ class Disambiguator:
         if len(entities_to_disambiguate) == 0:
             entities_to_disambiguate.append(max(address.matched_entities, key=lambda e: e.entity_type.value))
         
-        for entity in entities_to_disambiguate:
-            if len(entity.matches) == 1:
-                entity.disambiguation_result = entity.matches
-            elif len(entity.matches) > 1:
-                for match in entity.matches:
-                    pass # TODO implement scoring of ambiguous matches
+
+        for entity in sorted(address.matched_entities, key=lambda e: e.entity_type.value, reverse=True):
+            possible_addresses = self._score_ambiguous_matches(address, entity)
+            possible_addresses.sort(key=lambda a: a.score, reverse=True)
+            if len(possible_addresses) > 0:
+                best_address = possible_addresses[0]
+                filtered_addresses = [best_address]
+                for other_address in possible_addresses[1:]:
+                    if best_address.score - other_address.score < self.score_threshold:
+                        filtered_addresses.append(other_address)
+                if len(filtered_addresses) > 1:
+                    best_address = None
+
+                return LinkedAddress(
+                    id=address.id,
+                    full_address=address.full_address,
+                    bzk_field_name=address.bzk_field_name,
+                    matched_entities=address.matched_entities,
+                    possible_addresses=filtered_addresses,
+                    linked_to=best_address
+                )
+        return None
+    
+    

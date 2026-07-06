@@ -101,5 +101,5 @@ class LinkedAddress:
     full_address: str
     bzk_field_name: BZKFieldName
     matched_entities: list[MatchedEntity]
-    matched_addresses: list[PossibleAddress]
+    possible_addresses: list[PossibleAddress]
     linked_to : Optional[PossibleAddress]
