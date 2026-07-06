@@ -30,7 +30,7 @@ class AddressLinkingMetadata:
         it may be desirable to drop them after disambiguation
         """
         minimized_entities = []
-        for entity in self.address.entities:
+        for entity in self.address.matched_entities:
             minimized_entities.append(entity.minimize())
         minimized_address = self.address.copy(update={"entities": minimized_entities})
         return AddressLinkingMetadata(

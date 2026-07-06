@@ -369,6 +369,7 @@ dependencies = [
     { name = "de-core-news-sm" },
     { name = "deepparse" },
     { name = "duckdb" },
+    { name = "editdistpy" },
     { name = "flash-linear-attention" },
     { name = "huggingface-hub" },
     { name = "ipympl" },
@@ -390,10 +391,12 @@ dependencies = [
     { name = "spacy" },
     { name = "spacy-lookups-data" },
     { name = "sparqlwrapper" },
+    { name = "symspellpy" },
     { name = "tantivy" },
     { name = "torch" },
     { name = "tqdm" },
     { name = "transformers" },
+    { name = "unidecode" },
 ]
 
 [package.optional-dependencies]
@@ -409,6 +412,7 @@ requires-dist = [
     { name = "de-core-news-sm", url = "https://github.com/explosion/spacy-models/releases/download/de_core_news_sm-3.8.0/de_core_news_sm-3.8.0-py3-none-any.whl" },
     { name = "deepparse", specifier = ">=0.9.0" },
     { name = "duckdb", specifier = ">=1.0.0" },
+    { name = "editdistpy", specifier = "==0.2.0" },
     { name = "flash-linear-attention" },
     { name = "huggingface-hub", specifier = ">=0.20.0" },
     { name = "ipympl", specifier = ">=0.9.0" },
@@ -432,10 +436,12 @@ requires-dist = [
     { name = "spacy", specifier = ">=3.8.11" },
     { name = "spacy-lookups-data", specifier = ">=1.0.5" },
     { name = "sparqlwrapper", specifier = ">=2.0.0" },
+    { name = "symspellpy", specifier = ">=0.2.0" },
     { name = "tantivy", specifier = ">=0.26.0" },
     { name = "torch", specifier = ">=2.10.0" },
     { name = "tqdm", specifier = ">=4.0.0" },
     { name = "transformers", specifier = ">=4.0.0" },
+    { name = "unidecode", specifier = ">=1.4.0" },
 ]
 provides-extras = ["dev"]
 
@@ -843,6 +849,20 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/bd/21/d903cc63a5140c822b7b62b373a87dc557e60c29b321dfb435061c5e67cf/duckdb-1.5.2-cp313-cp313-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:70631c847ca918ee710ec874241b00cf9d2e5be90762cbb2a0389f17823c08f7", size = 21429837, upload-time = "2026-04-13T11:29:41.135Z" },
     { url = "https://files.pythonhosted.org/packages/e3/0a/b770d1f60c70597302130d6247f418549b7094251a02348fbaf1c7e147ae/duckdb-1.5.2-cp313-cp313-win_amd64.whl", hash = "sha256:52a21823f3fbb52f0f0e5425e20b07391ad882464b955879499b5ff0b45a376b", size = 13107699, upload-time = "2026-04-13T11:29:43.905Z" },
     { url = "https://files.pythonhosted.org/packages/d9/cf/e200fe431d700962d1a908d2ce89f53ccee1cc8db260174ae663ba09686b/duckdb-1.5.2-cp313-cp313-win_arm64.whl", hash = "sha256:411ad438bd4140f189a10e7f515781335962c5d18bd07837dc6d202e3985253d", size = 13927646, upload-time = "2026-04-13T11:29:46.598Z" },
+]
+
+[[package]]
+name = "editdistpy"
+version = "0.2.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/5e/16/20f22c305c9108f7b3f1dc30f1e1c24a9adad9b78442866e422a20a087cb/editdistpy-0.2.0.tar.gz", hash = "sha256:6cd95c61687a2681b11e28c914a90c2d73a771dea3d38473dc94cc8c64563ed1", size = 125413, upload-time = "2026-02-13T12:30:12.724Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d6/4c/a53ff8ae2f53aa7bc18dea410c4baa052218f2f8afd98abea8c5c8d4c7ae/editdistpy-0.2.0-cp313-cp313-macosx_10_13_x86_64.whl", hash = "sha256:78d508610df1207b430ac9ad1f88726afa2d1269f6f0cc182d994a2f7c8e778b", size = 168537, upload-time = "2026-02-13T12:29:54.89Z" },
+    { url = "https://files.pythonhosted.org/packages/42/c3/e18259cb58a910f108661727756082a9cd728cca8c91ac959dc5141e003b/editdistpy-0.2.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:bba9e4a002324109fec475b9a9362688b87fdb9b31ded908ff78b7a6a25cf4a1", size = 169739, upload-time = "2026-02-13T12:29:56.191Z" },
+    { url = "https://files.pythonhosted.org/packages/56/5e/ec47add106db6d0ffd8ffc1dfa86d4f9bfb9cae1461a3d27e2743b2282ac/editdistpy-0.2.0-cp313-cp313-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:a10b30674e8d68e81b3be8588a7502bc31e901886d5cd4f351ea515e49d314ed", size = 167556, upload-time = "2026-02-13T12:29:57.867Z" },
+    { url = "https://files.pythonhosted.org/packages/30/8e/e3ec63e997ab7b7f707840985f5067efd4236c763835eb28ec265148d12b/editdistpy-0.2.0-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:b475f127dc16737ae36c5673a447992801ce118e4b96c4e0fd73cea92e037f8f", size = 168367, upload-time = "2026-02-13T12:29:59.076Z" },
+    { url = "https://files.pythonhosted.org/packages/cb/e8/de585ede37cdcc03eefc80bbf023ac8bf8b94ac3295c552f12a57da03494/editdistpy-0.2.0-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:5161bbe021f84632ecfe55f2e0e4aec512add3dab57a1c55460b60ebba3dd5b7", size = 1200475, upload-time = "2026-02-13T12:30:01.041Z" },
+    { url = "https://files.pythonhosted.org/packages/e7/8f/17172d6a45157c1d3f2953f11d67683adaf9ca9a3ac40c0df138dd2267d1/editdistpy-0.2.0-cp313-cp313-win_amd64.whl", hash = "sha256:0079918a9dca01289ebd7a0c09c9e19697cf5994f47ac500d601fc61c1923469", size = 169387, upload-time = "2026-02-13T12:30:02.372Z" },
 ]
 
 [[package]]
@@ -2324,7 +2344,7 @@ name = "pexpect"
 version = "4.9.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "ptyprocess" },
+    { name = "ptyprocess", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/42/92/cc564bf6381ff43ce1f4d06852fc19a2f11d180f23dc32d9588bee2f149d/pexpect-4.9.0.tar.gz", hash = "sha256:ee7d41123f3c9911050ea2c2dac107568dc43b2d3b0c7557a33212c398ead30f", size = 166450, upload-time = "2023-11-25T09:07:26.339Z" }
 wheels = [
@@ -3347,6 +3367,18 @@ wheels = [
 ]
 
 [[package]]
+name = "symspellpy"
+version = "6.9.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "editdistpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ce/42/f445e683376bb5eee35db34e062372e0c4cfa6671632cb0b0dafa747e32e/symspellpy-6.9.0.tar.gz", hash = "sha256:5ce8cb8a13e531db03f664407abc9e42e272f16bab7c0639500a8bdd07eee482", size = 2615560, upload-time = "2025-03-09T09:42:33.92Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/54/07/c903a3a42222a4bb6aedf620a63554f577f3020b4f56f339889718126c1c/symspellpy-6.9.0-py3-none-any.whl", hash = "sha256:b6dba96275fdbedc240491854160bbe596dda930f2d58567ad55faf82a4e4b43", size = 2612234, upload-time = "2025-03-09T09:42:32.311Z" },
+]
+
+[[package]]
 name = "tantivy"
 version = "0.26.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3636,6 +3668,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/5e/a7/c202b344c5ca7daf398f3b8a477eeb205cf3b6f32e7ec3a6bac0629ca975/tzdata-2025.3.tar.gz", hash = "sha256:de39c2ca5dc7b0344f2eba86f49d614019d29f060fc4ebc8a417896a620b56a7", size = 196772, upload-time = "2025-12-13T17:45:35.667Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c7/b0/003792df09decd6849a5e39c28b513c06e84436a54440380862b5aeff25d/tzdata-2025.3-py2.py3-none-any.whl", hash = "sha256:06a47e5700f3081aab02b2e513160914ff0694bce9947d6b76ebd6bf57cfc5d1", size = 348521, upload-time = "2025-12-13T17:45:33.889Z" },
+]
+
+[[package]]
+name = "unidecode"
+version = "1.4.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/94/7d/a8a765761bbc0c836e397a2e48d498305a865b70a8600fd7a942e85dcf63/Unidecode-1.4.0.tar.gz", hash = "sha256:ce35985008338b676573023acc382d62c264f307c8f7963733405add37ea2b23", size = 200149, upload-time = "2025-04-24T08:45:03.798Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8f/b7/559f59d57d18b44c6d1250d2eeaa676e028b9c527431f5d0736478a73ba1/Unidecode-1.4.0-py3-none-any.whl", hash = "sha256:c3c7606c27503ad8d501270406e345ddb480a7b5f38827eafe4fa82a137f0021", size = 235837, upload-time = "2025-04-24T08:45:01.609Z" },
 ]
 
 [[package]]

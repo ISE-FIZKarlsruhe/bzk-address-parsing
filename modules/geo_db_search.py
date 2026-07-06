@@ -18,7 +18,9 @@ import textwrap
 import itertools
 import time
 from collections import defaultdict
-from modules.pipeline.geographical_entity import GeographicalEntityType, GeonamesAdminCodes
+from modules.pipeline.geographical_entity import GeographicalEntity, GeographicalEntityType, GeonamesAdminCodes
+from modules.pipeline.linked_data import MatchedEntity, MatchedName
+from modules.pipeline.linking_steps import LinkingStep
 import tantivy
 from tqdm.auto import tqdm
 import unicodedata
@@ -112,22 +114,13 @@ strip_accents(
 );
 """
 
-LANGUAGE_FILTERED_NAMES_PARTIAL_SQL = """
-FROM geo_db.geographical_names 
-    JOIN geo_db.geographical_entities USING (iri)
-    JOIN geo_db.country_data ON (geo_db.geographical_entities.iso_country_code = geo_db.country_data.iso_code)
-WHERE
-    geo_db.geographical_names.is_preferred_name IS TRUE OR
-    geo_db.geographical_names.isolanguage == '' OR
-    geo_db.geographical_names.isolanguage IN ('en', 'de', 'abbr') OR
-    list_bool_or([(geo_db.geographical_names.isolanguage IN lang) FOR lang IN geo_db.country_data.iso_languages]);
-"""
 
 LANGUAGE_FILTERED_NAMES_SELECT = """
 SELECT
+    geo_db.geographical_names.name_id,
     nfc_normalize(geo_db.geographical_names.name) AS nfc_name,
     german_ascii(geo_db.geographical_names.name) AS german_ascii_name,
-    regexp_replace(strip_accents(lower(nfc_name)), '[^\\w\\s]', '', 'g') AS ascii_name,
+    regexp_replace(replace(strip_accents(lower(nfc_name)), '-', ' '), '[^\\w\\s]', '', 'g') AS ascii_name,
     geo_db.geographical_names.name AS name, 
     geo_db.geographical_names.iri AS iri, 
     geo_db.geographical_entities.possible_entity_types AS possible_entity_types,
@@ -135,10 +128,74 @@ SELECT
     geo_db.geographical_entities.admin_codes AS admin_codes,
     geo_db.geographical_names.is_preferred_name AS is_preferred_name,
     geo_db.geographical_names.isolanguage AS isolanguage
-""" + LANGUAGE_FILTERED_NAMES_PARTIAL_SQL
+FROM geo_db.geographical_names 
+    JOIN geo_db.geographical_entities USING (iri)
+    JOIN geo_db.country_data ON (geo_db.geographical_entities.iso_country_code = geo_db.country_data.iso_code)
+WHERE
+    geo_db.geographical_names.is_preferred_name IS TRUE OR
+    geo_db.geographical_names.isolanguage == '' OR
+    geo_db.geographical_names.isolanguage LIKE 'en%' OR
+    geo_db.geographical_names.isolanguage LIKE 'de%' OR
+    geo_db.geographical_names.isolanguage == 'abbr' OR
+    list_bool_or([(geo_db.geographical_names.isolanguage IN lang) FOR lang IN geo_db.country_data.iso_languages])
+"""
 
-LANGUAGE_FILTERED_NAMES_COUNT = "SELECT count(*)\n" + LANGUAGE_FILTERED_NAMES_PARTIAL_SQL
+LANGUAGE_FILTERED_NAMES_COUNT = "SELECT count(*) FROM (\n" + LANGUAGE_FILTERED_NAMES_SELECT + "\n)"
 
+# TODO index names only for fuzzy search, and then search duckdb for all names that match the correction exactly
+# This is important because otherwise we may fill our topk with the same name over and over again
+
+WORDS_QUERY = """
+WITH language_filtered AS (
+""" + LANGUAGE_FILTERED_NAMES_SELECT + """
+)
+SELECT
+    string_split(german_ascii_name, ' ') AS german_ascii_words, 
+    string_split(ascii_name, ' ') AS ascii_words,
+    * EXCLUDE (german_ascii_name, ascii_name)
+FROM language_filtered
+""" + LANGUAGE_FILTERED_NAMES_SELECT + "\n)\n"
+
+UNIQUE_WORDS_QUERY = """
+WITH
+words AS (
+""" + WORDS_QUERY + """
+),
+flattened AS (
+    SELECT unnest(german_ascii_words || ascii_words) AS word FROM words
+)
+SELECT word, COUNT(*) AS freq
+FROM flattened
+WHERE word != ''
+GROUP BY word
+"""
+
+UNIQUE_BIGRAMS_QUERY = """
+WITH
+words AS (
+""" + WORDS_QUERY + """
+),
+bigrams AS (
+    SELECT
+        list_zip(words.german_ascii_words[:-1], words.german_ascii_words[2:]) AS german_ascii_bigrams,
+        list_zip(words.ascii_words[:-1], words.ascii_words[2:]) AS ascii_bigrams
+    FROM words
+),
+bigram_strings AS (
+    SELECT
+        array_to_string(german_ascii_bigrams, ' ') AS german_ascii_bigram_strings,
+        array_to_string(ascii_bigrams, ' ') AS ascii_bigram_strings
+    FROM bigrams
+),
+flattened AS (
+    SELECT unnest(german_ascii_bigram_strings || ascii_bigram_strings) AS bigram 
+    FROM bigram_strings
+)
+SELECT bigram, COUNT(*) AS freq 
+FROM flattened
+WHERE bigram != ''
+GROUP BY bigram
+"""
 
 def abbreviation_pattern_to_sql_regex(part : str) -> str:
     """
@@ -208,6 +265,7 @@ def ascii_normalize(nfc_query : str) -> str:
     # Strip accents replacements may differ on implementation
     # Call duckdb function to ensure the same behavior as in the database
     result = duckdb.execute("SELECT strip_accents($1)", [result]).fetchone()[0]
+    result = result.replace("-", " ")
     result = _STRIP_PUNCTUATION_REGEX.sub("", result)
     return result
 
@@ -224,19 +282,27 @@ def german_normalize(nfc_query : str) -> str:
     result = result.replace("ß", "ss")
     return ascii_normalize(result)
 
-class TantivySearchMatch(NamedTuple):
+class IndexSearchMatch(NamedTuple):
     score : float
+    nfc_query : str
+    german_ascii_query: Optional[str]
+    ascii_query: str
+
+class IndexSearchMatch(NamedTuple):
+    score : float # score as returned by the the specific index search, meaning differs
     german_ascii_name: str
     ascii_name: str
-    iri: str
+    name_id: Optional[int]
+    iri : Optional[str]
+    levenshtein_distance: Optional[int] = None
 
 
-class TantivySearchResult(NamedTuple):
+class IndexSearchResult(NamedTuple):
     nfc_query : str
     german_ascii_query: Optional[str]
     ascii_query: str
     abbreviation_pattern : Optional[str]
-    matches : list[TantivySearchMatch]
+    matches : list[IndexSearchMatch]
 
 
 class TantivySearchIndex:
@@ -256,21 +322,24 @@ class TantivySearchIndex:
         if skip_if_exists and self.already_exists:
             self.index.reload()
             return
-        total_rows = geo_db_connection.execute(LANGUAGE_FILTERED_NAMES_COUNT).fetchone()[0]
         geo_db_connection.execute(GERMAN_ASCII_DUCKDB_MACRO)
-        with self.index.writer(num_threads=self.n_threads) as writer:
+        total_rows = geo_db_connection.execute(LANGUAGE_FILTERED_NAMES_COUNT).fetchone()[0]
+        print(f"Populating Tantivy index with {total_rows} names from the geonames database...")
+        geo_db_connection.execute(GERMAN_ASCII_DUCKDB_MACRO)
+        with self.index.writer(num_threads=8) as writer:
             for row in tqdm(geo_db_connection.execute(LANGUAGE_FILTERED_NAMES_SELECT).fetchall(), total=total_rows, desc="Populating Tantivy index"):
                 doc = tantivy.Document()
-                doc.add_text("german_ascii_name", row[1])
-                doc.add_text("ascii_name", row[2])
-                doc.add_text("iri", row[4])
+                doc.add_integer("name_id", row[0])
+                doc.add_text("german_ascii_name", row[2])
+                doc.add_text("ascii_name", row[3])
+                doc.add_text("iri", row[5])
 
                 # TODO not implemented, is it useful at all?
                 # extra fields for search restriction
                 for entity_type in GeographicalEntityType:
-                    doc.add_boolean(entity_type.entity_type, entity_type.entity_type in row[5])
-                doc.add_text("country_code", row[6] or "")
-                admin_codes = row[7] or {}
+                    doc.add_boolean(entity_type.entity_type, entity_type.entity_type in row[6])
+                doc.add_text("country_code", row[7] or "")
+                admin_codes = row[8] or {}
                 for admin_level in range(1, 6):
                     admin_code = admin_codes.get(f"admin{admin_level}_code")
                     doc.add_text(f"admin{admin_level}_code", admin_code or "")
@@ -285,6 +354,8 @@ class TantivySearchIndex:
             tokenizer_name = 'raw',
             index_option = 'basic'
         )
+        # name id
+        schema_builder.add_integer_field("name_id", stored=True)
         # search keys
         schema_builder.add_text_field("german_ascii_name", stored=True, **text_field_options)
         schema_builder.add_text_field("ascii_name", stored=True, **text_field_options)
@@ -351,10 +422,9 @@ class TantivySearchIndex:
             restrictions : list[tuple[tantivy.Occur, tantivy.Query]], 
             threshold : int, 
             limit : int
-        ) -> list[TantivySearchMatch]:
+        ) -> list[IndexSearchMatch]:
         query_strings = [("ascii_name", ascii_query)]
-        if german_query is not None:
-            query_strings.append(("german_ascii_name", german_query))
+        query_strings.append(("german_ascii_name", german_query))
         if threshold == 0:
             name_queries = [
                 tantivy.Query.term_query(self.schema, field, query, index_option='basic')
@@ -379,11 +449,12 @@ class TantivySearchIndex:
         matches = []
         for score, doc_address in search_results.hits:
             doc = searcher.doc(doc_address)
-            matches.append(TantivySearchMatch(
+            matches.append(IndexSearchMatch(
                 score=score,
                 german_ascii_name=doc.get_first("german_ascii_name"),
                 ascii_name=doc.get_first("ascii_name"),
-                iri=doc.get_first("iri")
+                iri=doc.get_first("iri"),
+                name_id=doc.get_first("name_id")
             ))
         return matches
 
@@ -400,8 +471,6 @@ class TantivySearchIndex:
         nfc_query = unicodedata.normalize("NFC", query_string)
         german_query = german_normalize(nfc_query)
         ascii_query = ascii_normalize(nfc_query)
-        if ascii_query == german_query:
-            german_query = None
         if match_abbreviations:
             abbrev_pattern = abbreviation_pattern_to_regex(query_string)
         else: abbrev_pattern = None
@@ -426,7 +495,7 @@ class TantivySearchIndex:
             )
             if len(matches) > 0:
                 break
-        return TantivySearchResult(
+        return IndexSearchResult(
             nfc_query=nfc_query,
             german_ascii_query=german_query,
             ascii_query=ascii_query,
@@ -438,8 +507,70 @@ class SymSpellSearchIndex:
     def __init__(self):
         raise NotImplementedError("This class is being refactored and should not be used in its current state.")
 
-    
+class GeoDBSearch(LinkingStep):
+    def __init__(
+            self, search_cache_db, 
+            search_index : TantivySearchIndex, materialize_table : bool = True,
+            distance_threshold : int = 2, topk : int = 5
+        ):
+        self.search_cache_db_path = search_cache_db
+        self.search_index = search_index
+        self.materialize_table = materialize_table
+        self.distance_threshold = distance_threshold
+        self.topk = topk
 
+    def initialize(self):
+        self.connection = duckdb.connect(self.search_cache_db_path)
+        self.search_index.populate_index(self.connection, skip_if_exists=True)
+        return super().initialize()
+    
+    def finalize(self):
+        self.connection.close()
+        return super().finalize()
+
+    def _search_entity(self, entity : MatchedEntity, country_codes : Optional[list[str]], admin_codes : Optional[list[GeonamesAdminCodes]]) -> IndexSearchResult:
+        entity_type = entity.entity_type
+        index_matches = self.search_index.search(
+            query_string=entity.name,
+            threshold=self.distance_threshold,
+            limit=self.topk,
+            match_abbreviations=True,
+            entity_types=[entity_type],
+            country_codes=country_codes,
+            admin_codes=admin_codes
+        )
+        if len(index_matches.matches) == 0:
+            index_matches = self.search_index.search(
+                query_string=entity.name,
+                threshold=self.distance_threshold,
+                limit=self.topk,
+                match_abbreviations=True
+            )
+        matched_names = []
+        for match in index_matches.matches:
+            if match.iri is not None:
+                db_matches = self.connection.execute(
+                    """
+                    SELECT * FROM geo_db.geographical_entities_with_countries 
+                    WHERE iri = $1
+                    """, 
+                    [match.iri]
+                ).fetchdf()
+            else:
+                raise NotImplementedError("Search result without iri is not implemented yet.")
+            for _, row in db_matches.iterrows():
+                matched_names.append(MatchedName(
+                    
+                ))
+
+    def apply(self, address):
+        country_codes = None
+        admin_codes = None
+        for entity in sorted(address.matched_entities, key=lambda e: e.entity_type):
+            pass # TODO fix
+        index_matches = self.search_index.search(
+
+        )
 def falling_query_list(
         connection : duckdb.DuckDBPyConnection, 
         queries : list[tuple[bool, str, list]]

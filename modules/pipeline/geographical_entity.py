@@ -99,3 +99,6 @@ class GeographicalName:
     is_colloquial : Optional[bool]
     name_provider : Optional[GeographicalEntityProvider]
     isolanguage : Optional[str]
+
+    def from_flat_dict(cls, data: dict) -> "GeographicalName":
+        raise NotImplementedError("from_flat_dict is not implemented yet for GeographicalName")

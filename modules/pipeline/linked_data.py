@@ -7,6 +7,8 @@ from modules.pipeline.geographical_entity import (
 )
 
 import pandas as pd
+from functools import cached_property
+
 
 class BZKFieldName(str, Enum):
     APPLICANT_CURRENT_ADDRESS = "ApplicantCurrentAddress"
@@ -18,31 +20,39 @@ class BZKFieldName(str, Enum):
 @dataclass(frozen=True)
 class MatchedName:
     geographical_name : GeographicalName
-    query : str
     nfc_query : str
-    clean_query : str
-    abbreviation_pattern : Optional[str]
     nfc_alt_name : str
-    clean_alt_name : str
-    raw_distance : int
-    cleaned_distance : int
-    may_be_abbreviation : bool
+    cleaned_queries : list[str]
+    cleaned_alt_names : list[str]
+    cleaned_edit_distances : list[int]
+    matching_method : str
+    abbreviation_pattern : Optional[str]
+    edit_distance : int
+    is_abbreviation_match : bool
 
-    @property
+    @cached_property
     def raw_similarity(self) -> float:
         max_dist = max(len(self.nfc_query), len(self.nfc_alt_name))
         if max_dist == 0:
             return 1.0
         else:
-            return 1 - self.raw_distance / max_dist
+            return 1 - self.edit_distance / max_dist
     
-    @property
+    @cached_property
     def cleaned_similarity(self) -> float:
-        max_dist = max(len(self.clean_query), len(self.clean_alt_name))
-        if max_dist == 0:
-            return 1.0
-        else:
-            return 1 - self.cleaned_distance / max_dist
+        max_sim = 0.0
+        for clean_query, clean_alt_name, clean_distance in zip(self.cleaned_queries, self.cleaned_alt_names, self.cleaned_edit_distances):
+            max_dist = max(len(clean_query), len(clean_alt_name))
+            if max_dist == 0:
+                return 1.0
+            else:
+                sim = 1 - clean_distance / max_dist
+                if sim == 1.0:
+                    return 1.0
+                if sim > max_sim:
+                    max_sim = sim
+        return max_sim
+            
     
     def __dict_encode__(self, default_encoder) -> dict:
         return default_encoder(self).update({
@@ -55,13 +65,12 @@ class AddressSpan(NamedTuple):
     end: int
 
 @dataclass(frozen=True)
-class LinkedEntity:
+class MatchedEntity:
     raw_text: str
     span : Optional[AddressSpan]
     nearby : bool # This entity is near the target address but the target may not be contained in it
     entity_type: GeographicalEntityType
     matches : Optional[list[MatchedName]]
-    disambiguation_result : Optional[list[MatchedName]]
     
     @property
     def linked_to(self) -> MatchedName | None:
@@ -79,10 +88,18 @@ class LinkedEntity:
             "is_resolved": self.is_resolved
         })
 
+@dataclass(frozen=True)
+class PossibleAddress:
+    main_entity : MatchedEntity
+    entities : list[MatchedEntity]
+    score : float
+    
 
 @dataclass(frozen=True)
 class LinkedAddress:
     id : str
     full_address: str
     bzk_field_name: BZKFieldName
-    entities: list[LinkedEntity]
+    matched_entities: list[MatchedEntity]
+    matched_addresses: list[PossibleAddress]
+    linked_to : Optional[PossibleAddress]

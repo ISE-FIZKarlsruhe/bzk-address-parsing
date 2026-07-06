@@ -1,4 +1,4 @@
-import modules.geonames_db_search as geonames_db_search
+import modules.geo_db_search as geo_db_search
 import argparse
 import re
 import pandas as pd
@@ -166,7 +166,7 @@ class BasicRegexAddressParser:
 def parse_and_correct(
         df : pd.DataFrame, 
         address_parser,
-        search_db : geonames_db_search.GeonamesSearch, 
+        search_db : geo_db_search.GeonamesSearch, 
         stats : Stats
     ):
     """
@@ -316,7 +316,7 @@ def main(argv=None):
     args = arg_parser.parse_args(argv)
     
     address_parser = BasicRegexAddressParser()
-    search_db = geonames_db_search.GeonamesSearch(topk=args.topk, threshold=args.threshold)
+    search_db = geo_db_search.GeonamesSearch(topk=args.topk, threshold=args.threshold)
 
     input_dir = Path(args.input_file_directory)
     assert input_dir.is_dir(), f"{args.input_file_directory} is not a valid directory"

@@ -34,7 +34,7 @@ import zipfile
 import gzip
 import shutil
 import duckdb
-from typing import IO, Generator
+from typing import IO, Generator, Optional
 from tqdm.auto import tqdm
 import threading
 from urllib.parse import urlparse
@@ -78,7 +78,10 @@ CREATE TABLE IF NOT EXISTS geographical_entities (
     other_parent_iris TEXT[]
 );
 
+CREATE SEQUENCE IF NOT EXISTS geographical_names_id_seq START 1;
+
 CREATE TABLE IF NOT EXISTS geographical_names (
+    name_id INTEGER PRIMARY KEY DEFAULT nextval('geographical_names_id_seq'),
     iri TEXT, -- REFERENCES geographical_entities(iri), -- Constraint has bug, see https://duckdb.org/docs/current/sql/indexes#over-eager-constraint-checking-in-foreign-keys
     name TEXT,
     is_preferred_name BOOLEAN,
@@ -86,7 +89,7 @@ CREATE TABLE IF NOT EXISTS geographical_names (
     is_colloquial BOOLEAN,
     name_provider TEXT NOT NULL,
     isolanguage TEXT,
-    PRIMARY KEY (iri, name, name_provider, isolanguage)
+    UNIQUE (iri, name, name_provider, isolanguage)
 );
 
 CREATE TABLE IF NOT EXISTS country_data (
@@ -352,27 +355,29 @@ def populate_entities_from_geonames(con: duckdb.DuckDBPyConnection):
     with duckdbpbar(con, desc="Populating official names from main table"):
         con.execute(
         """
-        INSERT INTO geographical_names
-        SELECT 
-            'https://sws.geonames.org/' || geonameId AS iri,
-            name AS name,
-            TRUE AS is_preferred_name,
-            NULL AS is_short_name,
-            NULL AS is_colloquial,
-            'https://sws.geonames.org/' AS name_provider,
-            '' AS isolanguage
-        FROM read_csv_auto(
-            'dumps/geonames/allCountries.txt', 
-            delim='\t', 
-            header=False,
-            columns={
-                'geonameId': 'INTEGER', 'name': 'TEXT', 'asciiname': 'TEXT', 
-                'alternatenames': 'TEXT', 'latitude': 'FLOAT', 'longitude': 'FLOAT', 
-                'feature_class': 'TEXT', 'feature_code': 'TEXT', 'country_code': 'TEXT', 'cc2': 'TEXT', 
-                'admin1_code': 'TEXT', 'admin2_code': 'TEXT', 'admin3_code': 'TEXT', 'admin4_code': 'TEXT', 
-                'population': 'BIGINT', 'elevation': 'INTEGER', 'dem': 'INTEGER', 'timezone': 'TEXT', 
-                'modification_date': 'DATE'
-            }
+        INSERT INTO geographical_names BY NAME
+        (
+            SELECT 
+                'https://sws.geonames.org/' || geonameId AS iri,
+                name AS name,
+                TRUE AS is_preferred_name,
+                NULL AS is_short_name,
+                NULL AS is_colloquial,
+                'https://sws.geonames.org/' AS name_provider,
+                '' AS isolanguage
+            FROM read_csv_auto(
+                'dumps/geonames/allCountries.txt', 
+                delim='\t', 
+                header=False,
+                columns={
+                    'geonameId': 'INTEGER', 'name': 'TEXT', 'asciiname': 'TEXT', 
+                    'alternatenames': 'TEXT', 'latitude': 'FLOAT', 'longitude': 'FLOAT', 
+                    'feature_class': 'TEXT', 'feature_code': 'TEXT', 'country_code': 'TEXT', 'cc2': 'TEXT', 
+                    'admin1_code': 'TEXT', 'admin2_code': 'TEXT', 'admin3_code': 'TEXT', 'admin4_code': 'TEXT', 
+                    'population': 'BIGINT', 'elevation': 'INTEGER', 'dem': 'INTEGER', 'timezone': 'TEXT', 
+                    'modification_date': 'DATE'
+                }
+            )
         )
         ON CONFLICT (iri, name, name_provider, isolanguage) DO UPDATE SET is_preferred_name = TRUE
         """
@@ -432,28 +437,34 @@ def populate_names_from_geonames(con: duckdb.DuckDBPyConnection):
     with duckdbpbar(con, desc="Importing alternate names"):
         con.execute(
             """
-        INSERT OR REPLACE INTO geographical_names
-        SELECT 
-            'https://sws.geonames.org/' || geonameId AS iri,
-            alternateName AS name,
-            isPreferredName AS is_preferred_name,
-            isShortName AS is_short_name,
-            isColloquial AS is_colloquial,
-            'https://sws.geonames.org/' AS name_provider,
-            CASE 
-                WHEN isolanguage IS NULL THEN ''
-                ELSE isolanguage
-            END AS isolanguage
-        FROM read_csv_auto(
-            'dumps/geonames/alternateNames.txt', delim='\t', header=False,
-            columns = {
-                'alternateNameId': 'INTEGER', 'geonameId': 'INTEGER', 
-                'isolanguage': 'TEXT', 'alternateName': 'TEXT',
-                'isPreferredName': 'BOOLEAN', 'isShortName': 'BOOLEAN', 'isColloquial': 'BOOLEAN',
-                'isHistoric': 'BOOLEAN'
-            }
+        INSERT INTO geographical_names BY NAME
+        (
+            SELECT 
+                'https://sws.geonames.org/' || geonameId AS iri,
+                alternateName AS name,
+                isPreferredName AS is_preferred_name,
+                isShortName AS is_short_name,
+                isColloquial AS is_colloquial,
+                'https://sws.geonames.org/' AS name_provider,
+                CASE 
+                    WHEN isolanguage IS NULL THEN ''
+                    ELSE isolanguage
+                END AS isolanguage
+            FROM read_csv_auto(
+                'dumps/geonames/alternateNames.txt', delim='\t', header=False,
+                columns = {
+                    'alternateNameId': 'INTEGER', 'geonameId': 'INTEGER', 
+                    'isolanguage': 'TEXT', 'alternateName': 'TEXT',
+                    'isPreferredName': 'BOOLEAN', 'isShortName': 'BOOLEAN', 'isColloquial': 'BOOLEAN',
+                    'isHistoric': 'BOOLEAN'
+                }
+            )
+            WHERE alternateName != '' AND alternateName IS NOT NULL
         )
-        WHERE alternateName != '' AND alternateName IS NOT NULL
+        ON CONFLICT (iri, name, name_provider, isolanguage)
+        DO UPDATE SET is_preferred_name = is_preferred_name OR EXCLUDED.is_preferred_name,
+            is_short_name = is_short_name OR EXCLUDED.is_short_name,
+            is_colloquial = is_colloquial OR EXCLUDED.is_colloquial;
         """
         )
 
@@ -646,15 +657,17 @@ def populate_names_from_gnd(db_con: duckdb.DuckDBPyConnection):
             with duckdbpbar(db_con, desc="Inserting GND names", leave=False):
                 db_con.executemany(
                     """
-                    INSERT INTO geographical_names
-                    SELECT 
-                        'https://sws.geonames.org/' || ? as iri, 
-                        ? AS name,
-                        ? AS is_preferred_name,
-                        NULL AS is_short_name,
-                        NULL AS is_colloquial,
-                        'https://d-nb.info/gnd/' AS name_provider,
-                        '' AS isolanguage
+                    INSERT INTO geographical_names BY NAME
+                    (
+                        SELECT 
+                            'https://sws.geonames.org/' || ? as iri, 
+                            ? AS name,
+                            ? AS is_preferred_name,
+                            NULL AS is_short_name,
+                            NULL AS is_colloquial,
+                            'https://d-nb.info/gnd/' AS name_provider,
+                            '' AS isolanguage
+                    )
                     ON CONFLICT (iri, name, name_provider, isolanguage) 
                     DO UPDATE SET is_preferred_name = is_preferred_name OR EXCLUDED.is_preferred_name; 
                     """,
@@ -854,39 +867,33 @@ def populate_wikidata_entities(con, load_wikidata_dumps=False):
         # Insert english labels
         con.execute(
             """
-            INSERT OR REPLACE INTO geographical_names (
-                iri, name, is_preferred_name, is_short_name, is_colloquial,
-                name_provider, isolanguage
+            INSERT INTO geographical_names BY NAME(
+                SELECT 
+                    page_df.entity_id AS iri,
+                    page_df.label_en AS name,
+                    'http://www.wikidata.org/entity/' AS name_provider,
+                    'en' AS isolanguage
+                FROM page_df
+                WHERE page_df.label_en IS NOT NULL AND page_df.label_en != ''
             )
-            SELECT 
-                page_df.entity_id AS iri,
-                page_df.label_en AS name,
-                NULL AS is_preferred_name,
-                NULL AS is_short_name,
-                NULL AS is_colloquial,
-                'http://www.wikidata.org/entity/' AS name_provider,
-                'en' AS isolanguage
-            FROM page_df
-            WHERE page_df.label_en IS NOT NULL AND page_df.label_en != ''
+            ON CONFLICT (iri, name, name_provider, isolanguage)
+            DO NOTHING;
             """
         )
         # Insert german labels
         con.execute(
             """
-            INSERT OR REPLACE INTO geographical_names (
-                iri, name, is_preferred_name, is_short_name, is_colloquial,
-                name_provider, isolanguage
+            INSERT INTO geographical_names BY NAME(
+                SELECT 
+                    page_df.entity_id AS iri,
+                    page_df.label_de AS name,
+                    'http://www.wikidata.org/entity/' AS name_provider,
+                    'de' AS isolanguage
+                FROM page_df
+                WHERE page_df.label_de IS NOT NULL AND page_df.label_de != ''
             )
-            SELECT 
-                page_df.entity_id AS iri,
-                page_df.label_de AS name,
-                NULL AS is_preferred_name,
-                NULL AS is_short_name,
-                NULL AS is_colloquial,
-                'http://www.wikidata.org/entity/' AS name_provider,
-                'de' AS isolanguage
-            FROM page_df
-            WHERE page_df.label_de IS NOT NULL AND page_df.label_de != ''
+            ON CONFLICT (iri, name, name_provider, isolanguage)
+            DO NOTHING;
             """
         )
             
@@ -917,7 +924,7 @@ def compact_db():
     db_path.unlink()
     compacted_path.rename(DUCK_DB_PATH)
 
-def init_duckdb(cleanup=True, update=False, load_wikidata_dumps=False):
+def init_duckdb(cleanup=True, update_sources : Optional[list[str]] = None, load_wikidata_dumps=False):
     """
     Initializes the DuckDB database by creating the necessary tables and populating them with data 
     from the geonames and GND dumps. Fails if the database already exists.
@@ -925,20 +932,24 @@ def init_duckdb(cleanup=True, update=False, load_wikidata_dumps=False):
     This function will take a long time to run (up to 30 minutes).
     """
     start = time.monotonic()
-    if Path(DUCK_DB_PATH).exists() and not update:
+    if Path(DUCK_DB_PATH).exists() and not update_sources:
         raise FileExistsError(
             f"DuckDB database already exists at {DUCK_DB_PATH}. Please remove it before creating a new one."
         )
     con = duckdb.connect(DUCK_DB_PATH)
     con.execute("SET enable_progress_bar=true; SET enable_progress_bar_print=false;")
     print("Creating and populating DuckDB database... (this may take up to 30 minutes)")
-    if not update:
+    if not update_sources:
         con.execute(_INIT_GEO_ENTITIES_TABLES_SQL)
-    populate_entities_from_geonames(con)
-    populate_country_data(con)
-    populate_names_from_geonames(con)
-    populate_names_from_gnd(con)
-    populate_wikidata_entities(con, load_wikidata_dumps=load_wikidata_dumps)
+    update_sources = update_sources or []
+    if "geonames" in update_sources:
+        populate_entities_from_geonames(con)
+        populate_country_data(con)
+        populate_names_from_geonames(con)
+    if "gnd" in update_sources:
+        populate_names_from_gnd(con)
+    if "wikidata" in update_sources:
+        populate_wikidata_entities(con, load_wikidata_dumps=load_wikidata_dumps)
     if cleanup:
         cleanup_dump_files()
     end = time.monotonic()
@@ -991,9 +1002,10 @@ def main(args=None):
         help="Compact existing database",
     )
     parser.add_argument(
-        "--update",
-        action="store_true",
-        help="Repopulate the database",
+        "--update-source",
+        action="append",
+        choices=["geonames", "gnd", "wikidata"],
+        help="Repopulate the database from the given source (geonames, gnd, wikidata). Can be specified multiple times.",
     )
     parser.add_argument(
         "--cleanup",
@@ -1017,14 +1029,14 @@ def main(args=None):
         print(f"Moving existing database at {DUCK_DB_PATH}...")
         shutil.move(DUCK_DB_PATH, f"{DUCK_DB_PATH}.old")
         delete_old_db = True
-    if duckdb_path.exists() and not args.update:
+    if duckdb_path.exists() and not args.update_source:
         print(
             f"Database already exists at {DUCK_DB_PATH}. Use --rebuild to delete and rebuild."
         )
         if args.cleanup:
             cleanup_dump_files()
     else:
-        init_duckdb(cleanup=args.cleanup, update=args.update, load_wikidata_dumps=args.load_wikidata_dumps)
+        init_duckdb(cleanup=args.cleanup, update_sources=args.update_source, load_wikidata_dumps=args.load_wikidata_dumps)
     if delete_old_db:
         print(f"Deleting old database backup at {DUCK_DB_PATH}.old...")
         Path(f"{DUCK_DB_PATH}.old").unlink()

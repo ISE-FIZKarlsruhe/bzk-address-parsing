@@ -7,7 +7,6 @@ from modules.pipeline.linked_data import LinkedAddress
 from datetime import datetime
 
 
-@dataclass(frozen=True)
 class LinkingStepResult(ABC):
     descriptive_code : str
     metadata : dict
@@ -30,18 +29,21 @@ class LinkingStepResult(ABC):
 
 @dataclass(frozen=True)
 class Success(LinkingStepResult):
-    pass
+    descriptive_code : str
+    metadata : dict
 
 @dataclass(frozen=True)
 class Unresolved(LinkingStepResult):
-    pass
+    descriptive_code : str
+    metadata : dict
 
 @dataclass(frozen=True)
 class Failed(LinkingStepResult):
-    descriptive_code : str = "failed"
     error_message : str
     exception_class : str
     stack_trace : str
+    metadata : dict
+    descriptive_code : str = "failed"
 
 class ParallelizationType(str, Enum):
     # The process cannot be further parallelized at all
