@@ -8,7 +8,7 @@ import pandas as pd
 import modules.utils as utils
 import duckdb
 import modules.build_geonames_db as build_geonames_db
-from typing import NamedTuple, Optional, Literal
+from typing import Iterable, NamedTuple, Optional, Literal
 import contextlib
 import enum
 import dataclasses
@@ -18,7 +18,7 @@ import textwrap
 import itertools
 import time
 from collections import defaultdict
-from modules.pipeline.geographical_entity import GeographicalEntity, GeographicalEntityType, GeonamesAdminCodes
+from modules.pipeline.geographical_entity import CountryData, GeographicalEntity, GeographicalEntityType, GeographicalName, GeonamesAdminCodes
 from modules.pipeline.linked_data import MatchedEntity, MatchedName
 from modules.pipeline.linking_steps import LinkingStep
 import tantivy
@@ -26,6 +26,20 @@ from tqdm.auto import tqdm
 import unicodedata
 import re
 import os
+import editdistpy
+import sys
+import dataclasses
+
+
+def levenshtein(a : str, b : str, max_distance : int) -> int:
+    """
+    Computes the Levenshtein distance between two strings.
+    If max_distance is provided, the computation will stop if the distance exceeds max_distance.
+    """
+    dist = editdistpy.levenshtein.distance(a, b, max_distance=max_distance)
+    if dist < 0:
+        return sys.maxsize
+    return dist
 
 # Used to materialize in memory a distilled version of the names table
 # TODO filter neighborhoods?
@@ -511,12 +525,15 @@ class GeoDBSearch(LinkingStep):
     def __init__(
             self, search_cache_db, 
             search_index : TantivySearchIndex, materialize_table : bool = True,
-            distance_threshold : int = 2, topk : int = 5
+            distance_threshold : int = 2,
+            similarity_threshold : float = 0.8,
+            topk : int = 5
         ):
         self.search_cache_db_path = search_cache_db
         self.search_index = search_index
         self.materialize_table = materialize_table
         self.distance_threshold = distance_threshold
+        self.similarity_threshold = similarity_threshold
         self.topk = topk
 
     def initialize(self):
@@ -531,7 +548,7 @@ class GeoDBSearch(LinkingStep):
     def _search_entity(self, entity : MatchedEntity, country_codes : Optional[list[str]], admin_codes : Optional[list[GeonamesAdminCodes]]) -> IndexSearchResult:
         entity_type = entity.entity_type
         index_matches = self.search_index.search(
-            query_string=entity.name,
+            query_string=entity.raw_text,
             threshold=self.distance_threshold,
             limit=self.topk,
             match_abbreviations=True,
@@ -541,36 +558,73 @@ class GeoDBSearch(LinkingStep):
         )
         if len(index_matches.matches) == 0:
             index_matches = self.search_index.search(
-                query_string=entity.name,
+                query_string=entity.raw_text,
+                threshold=self.distance_threshold,
+                limit=self.topk,
+                match_abbreviations=True,
+                entity_types=[entity_type]
+            )
+        if len(index_matches.matches) == 0:
+            index_matches = self.search_index.search(
+                query_string=entity.raw_text,
                 threshold=self.distance_threshold,
                 limit=self.topk,
                 match_abbreviations=True
             )
-        matched_names = []
-        for match in index_matches.matches:
-            if match.iri is not None:
-                db_matches = self.connection.execute(
+        return index_matches
+            
+    def _fetch_from_db(self, index_result : IndexSearchResult) -> Iterable[MatchedName]:
+        named_ids = [[index_match.name_id] for index_match in index_result.matches if index_match.name_id is not None]
+        query_df = pd.DataFrame(named_ids, columns=["name_id"])
+        db_matches_df = self.connection.execute("""
+            SELECT * FROM geo_db.geographical_names_with_entities
+            INNER JOIN query_df USING (name_id)
+        """).fetchdf()
+        db_matches_df.set_index("name_id", inplace=True, drop=False)
+        for index_match in index_result.matches:
+            db_matches = self.connection.execute(
                     """
-                    SELECT * FROM geo_db.geographical_entities_with_countries 
-                    WHERE iri = $1
+                    SELECT * FROM geo_db.geographical_names_with_entities
+                    WHERE name_id = $1
                     """, 
-                    [match.iri]
+                    [index_match.name_id]
                 ).fetchdf()
-            else:
-                raise NotImplementedError("Search result without iri is not implemented yet.")
-            for _, row in db_matches.iterrows():
-                matched_names.append(MatchedName(
-                    
-                ))
+            for _, db_match in db_matches.iterrows():
+                nfc_alt_name = unicodedata.normalize("NFC", db_match["name"])
+                matched_name = MatchedName(
+                    geographical_name=GeographicalName.from_dict(db_match.to_dict()),
+                    nfc_query=index_result.nfc_query,
+                    nfc_alt_name=nfc_alt_name,
+                    cleaned_queries=[index_result.ascii_query, index_result.german_ascii_query],
+                    cleaned_alt_names=[index_match.ascii_name, index_match.german_ascii_name],
+                    cleaned_edit_distances=[
+                        levenshtein(index_result.ascii_query, index_match.ascii_name, self.distance_threshold),
+                        levenshtein(index_result.german_ascii_query, index_match.german_ascii_name, self.distance_threshold)
+                    ],
+                    edit_distance=levenshtein(index_result.ascii_query, index_match.ascii_name, self.distance_threshold),
+                    abbreviation_pattern=index_result.abbreviation_pattern,
+                    is_abbreviation_match=index_result.abbreviation_pattern is not None and re.fullmatch(index_result.abbreviation_pattern, index_match.ascii_name) is not None,
+                    matching_method="tantivy"
+                )
+                if matched_name.cleaned_similarity > self.similarity_threshold:
+                    yield matched_name
 
     def apply(self, address):
-        country_codes = None
-        admin_codes = None
-        for entity in sorted(address.matched_entities, key=lambda e: e.entity_type):
-            pass # TODO fix
-        index_matches = self.search_index.search(
+        new_entities = []
+        for entity in address.matched_entities:
+            index_result = self._search_entity(entity, country_codes=None, admin_codes=None)
+            matched_names = list(self._fetch_from_db(index_result))
+            new_entities.append(dataclasses.replace(
+                entity,
+                matches=matched_names
+            ))
+        return dataclasses.replace(address, matched_entities=new_entities)
+    
+    def bulk_retrieve(self, addresses : list[LinkedAddress], matches : list[IndexSearchResult])
+        query_params = []
+        for match in matches
 
-        )
+
 def falling_query_list(
         connection : duckdb.DuckDBPyConnection, 
         queries : list[tuple[bool, str, list]]

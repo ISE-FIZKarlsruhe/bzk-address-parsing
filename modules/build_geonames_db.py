@@ -101,20 +101,14 @@ CREATE TABLE IF NOT EXISTS country_data (
     neighboring_countries_iso_codes TEXT[]
 );
 
-CREATE VIEW IF NOT EXISTS geographical_entities_with_countries AS
+CREATE OR REPLACE VIEW geographical_entities_with_countries AS
 SELECT 
-    geographical_entities.* EXCLUDE (alternate_iso_country_codes, iso_country_code), 
-    alternate_countries.alternate_countries AS alternate_countries,
+    geographical_entities.* EXCLUDE (iso_country_code), 
     country_data as country 
 FROM geographical_entities 
-    JOIN country_data ON geographical_entities.iso_country_code = country_data.iso_code,
-    LATERAL (
-        SELECT LIST(alt_country) as alternate_countries FROM 
-            (SELECT UNNEST(geographical_entities.alternate_iso_country_codes) AS code) AS alt_country_codes
-            JOIN country_data AS alt_country ON alt_country.iso_code = alt_country_codes.code
-    ) alternate_countries;
+    JOIN country_data ON geographical_entities.iso_country_code = country_data.iso_code;
 
-CREATE VIEW IF NOT EXISTS geographical_names_with_entities AS
+CREATE OR REPLACE VIEW geographical_names_with_entities AS
 SELECT geographical_names.* EXCLUDE (iri), geographical_entities_with_countries AS entity 
 FROM geographical_names 
     JOIN geographical_entities_with_countries USING (iri);

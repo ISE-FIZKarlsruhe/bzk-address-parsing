@@ -67,11 +67,11 @@ class AddressSpan(NamedTuple):
 @dataclass(frozen=True)
 class MatchedEntity:
     raw_text: str
-    span : Optional[AddressSpan]
-    nearby : bool # This entity is near the target address but the target may not be contained in it
     entity_type: GeographicalEntityType
-    matches : Optional[list[MatchedName]]
-    
+    matches : Optional[list[MatchedName]] = None
+    span : Optional[AddressSpan] = None
+    nearby : bool = False # This entity is near the target address but the target may not be contained in it
+
     @property
     def linked_to(self) -> MatchedName | None:
         if self.disambiguation_result is not None and len(self.disambiguation_result) == 1:
@@ -101,5 +101,5 @@ class LinkedAddress:
     full_address: str
     bzk_field_name: BZKFieldName
     matched_entities: list[MatchedEntity]
-    possible_addresses: list[PossibleAddress]
-    linked_to : Optional[PossibleAddress]
+    possible_addresses: Optional[list[PossibleAddress]] = None
+    linked_to : Optional[PossibleAddress] = None

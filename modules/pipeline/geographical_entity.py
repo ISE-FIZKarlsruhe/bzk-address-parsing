@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional, TYPE_CHECKING, NamedTuple
 import pandas as pd
-
+from urllib.parse import urlparse
 
 @dataclass(frozen=True)
 class GeographicalEntityTypeProperties:
@@ -32,8 +32,37 @@ class GeographicalEntityType(GeographicalEntityTypeProperties, Enum):
 class GeographicalEntityProvider(str, Enum):
     #TODO check codes against actual URIs
     GEONAMES = "https://sws.geonames.org/"
-    WIKIDATA = "https://www.wikidata.org/wiki/" 
+    WIKIDATA = "http://www.wikidata.org/wiki/" 
     GND = "https://d-nb.info/gnd/"
+
+    @classmethod
+    def from_iri(cls, iri: str) -> Optional["GeographicalEntityProvider"]:
+        if iri is None:
+            return None
+        for provider in cls:
+            if iri.startswith(provider.value):
+                return provider
+        parsed_iri = urlparse(iri)
+        for provider in cls:
+            parsed_provider = urlparse(provider.value)
+            if parsed_iri.netloc == parsed_provider.netloc:
+                return provider
+        raise ValueError(f"Unknown provider for IRI: {iri}")
+    
+    @classmethod
+    def from_namespace(cls, namespace: str) -> Optional["GeographicalEntityProvider"]:
+        if namespace is None:
+            return None
+        try:
+            return cls[namespace]
+        except KeyError:
+            pass
+        parsed_namespace = urlparse(namespace)
+        for provider in cls:
+            parsed_provider = urlparse(provider.value)
+            if parsed_namespace.netloc == parsed_provider.netloc:
+                return provider
+        raise ValueError(f"Unknown provider for namespace: {namespace}")
 
 class GeonamesAdminCodes(NamedTuple):
     admin1_code : Optional[str]
@@ -61,10 +90,12 @@ class GeonamesClassification(NamedTuple):
 
 @dataclass(frozen=True)
 class CountryData:
-    iso_country_code : str
+    iso_code : str
     country_name : str
     iso_languages : list[str]
     neighboring_countries_iso_codes : list[str]
+    continent : str
+    geonames_id : int
 
 
 @dataclass(frozen=True)
@@ -77,22 +108,41 @@ class GeographicalEntity:
     possible_entity_types : list[GeographicalEntityType]
     coordinates : Optional[Coordinates]
     population : Optional[int]
+    geonames_id : Optional[int]
     closest_geonames_id : int
     country : Optional[CountryData]
-    alternate_countries : list[CountryData]
+    alternate_iso_country_codes : list[str]
     admin_codes : GeonamesAdminCodes
     other_parent_iris : list[str]
 
     @property
-    def get_all_countries(self):
+    def all_country_iso_codes(self) -> list[str]:
         if self.country is not None:
-            return [self.country] + self.alternate_countries
+            return [self.country.iso_code] + self.alternate_iso_country_codes
         else:
-            return self.alternate_countries
+            return self.alternate_iso_country_codes
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "GeographicalEntity":
+        for k, v in data.items():
+            if not isinstance(v, list) and pd.isna(v):
+                data[k] = None
+        country_data = data.pop("country", None)
+        admin_codes_data = data.pop("admin_codes", None)
+        coordinates = data.pop("coordinates", None)
+        provider = GeographicalEntityProvider.from_iri(data.get("iri"))
+        return cls(
+            **data,
+            country=CountryData(**country_data) if country_data is not None else None,
+            provider=provider,
+            admin_codes=GeonamesAdminCodes(**admin_codes_data) if admin_codes_data is not None else GeonamesAdminCodes(None, None, None, None, None),
+            coordinates=Coordinates(**coordinates) if coordinates is not None else None
+        )
 
 @dataclass(frozen=True)
 class GeographicalName:
-    alternate_name : str
+    name_id : int
+    name : str
     entity : GeographicalEntity
     is_preferred_name: bool
     is_short_name: Optional[bool]
@@ -100,5 +150,15 @@ class GeographicalName:
     name_provider : Optional[GeographicalEntityProvider]
     isolanguage : Optional[str]
 
-    def from_flat_dict(cls, data: dict) -> "GeographicalName":
-        raise NotImplementedError("from_flat_dict is not implemented yet for GeographicalName")
+    @classmethod
+    def from_dict(cls, data: dict) -> "GeographicalName":
+        for k, v in data.items():
+            if not isinstance(v, list) and pd.isna(v):
+                data[k] = None
+        name_provider = GeographicalEntityProvider.from_namespace(data.pop("name_provider"))
+        entity_data = data.pop("entity")
+        return cls(
+            **data,
+            entity=GeographicalEntity.from_dict(entity_data),
+            name_provider=name_provider
+        )
