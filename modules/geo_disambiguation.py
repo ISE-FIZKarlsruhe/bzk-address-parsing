@@ -2,10 +2,11 @@
 
 from modules.pipeline.geographical_entity import GeographicalEntityType
 from modules.pipeline.linked_data import LinkedAddress, MatchedEntity, MatchedName, PossibleAddress
+import dataclasses
 
 
 class Disambiguator:
-    def __init__(self, score_diff_threshold: float = 0.5):
+    def __init__(self, score_diff_threshold: float = 0.1):
         self.score_threshold = score_diff_threshold
 
     def _prob_child(self, parent: MatchedName, child: MatchedName) -> float:
@@ -44,9 +45,9 @@ class Disambiguator:
         entity : MatchedEntity
         ) -> list[PossibleAddress]:
         possible_addresses = []
-        if len(address.matched_entities) <= 1:
+        if len(address.matched_entities) == 0:
             return possible_addresses
-        for i, match in enumerate(entity.matches):
+        for match in entity.matches:
             matched = {}
             for other_entity in address.matched_entities:
                 if other_entity is entity:
@@ -64,8 +65,8 @@ class Disambiguator:
             score = sum(s for s, m in matched.values()) + match.raw_similarity
             score = score / len(address.matched_entities)
             possible_addresses.append(PossibleAddress(
-                main_entity=entity,
-                entities=[x[1] for x in matched_entities],
+                main_entity=match,
+                entities=[match] + [x[1] for x in matched_entities],
                 score=score
             ))
         return sorted(possible_addresses, key=lambda a: a.score, reverse=True)
@@ -84,37 +85,24 @@ class Disambiguator:
         Returns:
             LinkedAddress: The disambiguated linked address.
         """
-        entities_to_disambiguate = []
-        for entity in address.matched_entities:
-            if entity.entity_type == GeographicalEntityType.City:
-                entities_to_disambiguate.append(entity)
-        for entity in address.matched_entities:
-            if entity.entity_type == GeographicalEntityType.Neighborhood:
-                entities_to_disambiguate.append(entity)
-        if len(entities_to_disambiguate) == 0:
-            entities_to_disambiguate.append(max(address.matched_entities, key=lambda e: e.entity_type.value))
-        
 
-        for entity in sorted(address.matched_entities, key=lambda e: e.entity_type.value, reverse=True):
+        for entity in sorted(address.matched_entities, key=lambda e: e.entity_type, reverse=True):
             possible_addresses = self._score_ambiguous_matches(address, entity)
-            possible_addresses.sort(key=lambda a: a.score, reverse=True)
             if len(possible_addresses) > 0:
                 best_address = possible_addresses[0]
                 filtered_addresses = [best_address]
                 for other_address in possible_addresses[1:]:
-                    if best_address.score - other_address.score < self.score_threshold:
+                    if best_address.score - other_address.score <= self.score_threshold:
                         filtered_addresses.append(other_address)
                 if len(filtered_addresses) > 1:
                     best_address = None
 
-                return LinkedAddress(
-                    id=address.id,
-                    full_address=address.full_address,
-                    bzk_field_name=address.bzk_field_name,
-                    matched_entities=address.matched_entities,
+                return dataclasses.replace(address,
                     possible_addresses=filtered_addresses,
                     linked_to=best_address
                 )
-        return None
+        return dataclasses.replace(address,
+            possible_addresses=[]
+        )
     
     

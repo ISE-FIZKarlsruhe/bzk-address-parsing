@@ -23,8 +23,8 @@ class MatchedName:
     nfc_query : str
     nfc_alt_name : str
     cleaned_queries : list[str]
-    cleaned_alt_names : list[str]
-    cleaned_edit_distances : list[int]
+    cleaned_alt_name : str
+    cleaned_edit_distance : int
     matching_method : str
     abbreviation_pattern : Optional[str]
     edit_distance : int
@@ -71,13 +71,6 @@ class MatchedEntity:
     matches : Optional[list[MatchedName]] = None
     span : Optional[AddressSpan] = None
     nearby : bool = False # This entity is near the target address but the target may not be contained in it
-
-    @property
-    def linked_to(self) -> MatchedName | None:
-        if self.disambiguation_result is not None and len(self.disambiguation_result) == 1:
-            return self.disambiguation_result[0]
-        else:
-            return None
         
     @property
     def is_resolved(self) -> bool:
@@ -90,8 +83,8 @@ class MatchedEntity:
 
 @dataclass(frozen=True)
 class PossibleAddress:
-    main_entity : MatchedEntity
-    entities : list[MatchedEntity]
+    main_entity : MatchedName
+    entities : list[MatchedName]
     score : float
     
 
