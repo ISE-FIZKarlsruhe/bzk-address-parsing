@@ -718,23 +718,18 @@ class GeoDBSearch(LinkingStep):
             is_abreviation_match = False
             if index_result.abbreviation_pattern is not None:
                is_abreviation_match = re.fullmatch(index_result.abbreviation_pattern, index_match.matched_key) is not None
-            
-            def similarity_and_distance(query, name):
-                edit_distance = levenshtein(query, name, self.distance_threshold)
-                similarity = 1 - (edit_distance / max(len(query), len(name)))
-                return edit_distance, similarity
 
             max_clean_similarity = 0.0
             clean_alt_name = None
             cleaned_edit_distance = None
             for query_string in index_result.query_strings:
-                query_edit_distance, query_similarity = similarity_and_distance(query_string, index_match.matched_key)
+                query_edit_distance, query_similarity = similarity_and_distance(query_string, index_match.matched_key, self.distance_threshold)
                 if query_similarity > max_clean_similarity:
                     max_clean_similarity = query_similarity
                     clean_alt_name = query_string
                     cleaned_edit_distance = query_edit_distance
-            if (max_clean_similarity < self.similarity_threshold or cleaned_edit_distance > self.distance_threshold) and not is_abreviation_match:
-                continue
+            #if (max_clean_similarity < self.similarity_threshold or cleaned_edit_distance > self.distance_threshold) and not is_abreviation_match:
+            #    continue
 
             geographical_name=GeographicalName.from_dict(index_match.retrieved_data)
             nfc_alt_name = unicodedata.normalize("NFC", geographical_name.name)
@@ -751,54 +746,7 @@ class GeoDBSearch(LinkingStep):
                 matching_method="tantivy"
             )
             yield matched_name
-            
-    def _fetch_from_db(self, index_result : IndexSearchResult) -> Iterable[MatchedName]:
-        for index_match in index_result.matches:
-            #is_abrevviation_match = False
-            #if index_result.abbreviation_pattern is not None:
-            #    is_abrevviation_match = re.fullmatch(index_result.abbreviation_pattern, index_match.ascii_name) is not None
-            cleaned_edit_distances = []
-            # def similarity_and_distance(query, name):
-            #     edit_distance = levenshtein(query, name, self.distance_threshold)
-            #     similarity = 1 - (edit_distance / max(len(query), len(name)))
-            #     return edit_distance, similarity
-            # ascii_edit_distance, ascii_similarity = similarity_and_distance(index_result.ascii_query, index_match.ascii_name)
-            # cleaned_edit_distances.append(ascii_edit_distance)
-            # max_clean_similarity = ascii_similarity
-            # if (
-            #     index_result.german_ascii_query is not None and 
-            #     index_match.german_ascii_name is not None and (
-            #         index_result.german_ascii_query != index_match.german_ascii_name or
-            #         index_result.ascii_query != index_match.ascii_name
-            #     )
-            # ):
-            #     german_edit_distance, german_similarity = similarity_and_distance(index_result.german_ascii_query, index_match.german_ascii_name)
-            #     cleaned_edit_distances.append(german_edit_distance)
-            #     max_clean_similarity = max(max_clean_similarity, german_similarity)
-            # if max_clean_similarity < self.similarity_threshold:
-            #     continue
-            db_matches = self.connection.execute(
-                    """
-                    SELECT * FROM mat_geographical_names_with_entities
-                    WHERE name_id = $1
-                    """, 
-                    [index_match.name_id]
-                ).fetchdf()
-            # for _, db_match in db_matches.iterrows():
-            #     nfc_alt_name = unicodedata.normalize("NFC", db_match["name"])
-            #     matched_name = MatchedName(
-            #         geographical_name=GeographicalName.from_dict(db_match.to_dict()),
-            #         nfc_query=index_result.nfc_query,
-            #         nfc_alt_name=nfc_alt_name,
-            #         cleaned_queries=[index_result.ascii_query, index_result.german_ascii_query],
-            #         cleaned_alt_names=[index_match.ascii_name, index_match.german_ascii_name],
-            #         cleaned_edit_distances=cleaned_edit_distances,
-            #         edit_distance = 0, #levenshtein(index_result.nfc_query, nfc_alt_name, self.distance_threshold),
-            #         abbreviation_pattern=index_result.abbreviation_pattern,
-            #         is_abbreviation_match=False, #is_abrevviation_match,
-            #         matching_method="tantivy"
-            #     )
-            #     yield matched_name
+        
 
     def apply(self, address):
         new_entities = []
