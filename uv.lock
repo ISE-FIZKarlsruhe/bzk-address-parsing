@@ -370,6 +370,7 @@ dependencies = [
     { name = "deepparse" },
     { name = "duckdb" },
     { name = "editdistpy" },
+    { name = "elasticsearch" },
     { name = "flash-linear-attention" },
     { name = "huggingface-hub" },
     { name = "ipympl" },
@@ -382,6 +383,7 @@ dependencies = [
     { name = "outlines" },
     { name = "pandas" },
     { name = "plotly" },
+    { name = "podman-compose" },
     { name = "pydantic" },
     { name = "rapidfuzz" },
     { name = "rdflib" },
@@ -413,6 +415,7 @@ requires-dist = [
     { name = "deepparse", specifier = ">=0.9.0" },
     { name = "duckdb", specifier = ">=1.0.0" },
     { name = "editdistpy", specifier = "==0.2.0" },
+    { name = "elasticsearch", specifier = ">=8.0.0" },
     { name = "flash-linear-attention" },
     { name = "huggingface-hub", specifier = ">=0.20.0" },
     { name = "ipympl", specifier = ">=0.9.0" },
@@ -427,6 +430,7 @@ requires-dist = [
     { name = "outlines", specifier = ">=1.2.12" },
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "plotly", specifier = ">=5.0.0" },
+    { name = "podman-compose", specifier = ">=1.0.0" },
     { name = "pydantic", specifier = ">=2.12.5" },
     { name = "rapidfuzz", specifier = ">=3.0.0" },
     { name = "rdflib", specifier = ">=7.0.0" },
@@ -872,6 +876,36 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/2c/77/850bef8d72ffb9219f0b1aac23fbc1bf7d038ee6ea666f331fa273031aa2/einops-0.8.2.tar.gz", hash = "sha256:609da665570e5e265e27283aab09e7f279ade90c4f01bcfca111f3d3e13f2827", size = 56261, upload-time = "2026-01-26T04:13:17.638Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/2a/09/f8d8f8f31e4483c10a906437b4ce31bdf3d6d417b73fe33f1a8b59e34228/einops-0.8.2-py3-none-any.whl", hash = "sha256:54058201ac7087911181bfec4af6091bb59380360f069276601256a76af08193", size = 65638, upload-time = "2026-01-26T04:13:18.546Z" },
+]
+
+[[package]]
+name = "elastic-transport"
+version = "9.4.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "certifi" },
+    { name = "sniffio" },
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/52/be/a719a217ed7f179c9e41821dff9dfd28415b21bc94da9d35fff84f7951b2/elastic_transport-9.4.2.tar.gz", hash = "sha256:366f4614f4544c5fb5d780c82f57af8f30492b44a68ed20750390aa81e20c2ea", size = 79310, upload-time = "2026-06-16T15:27:17.182Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0b/e4/9b7ef7a8e0bb416e0fe1879c92295041cf81e5a47e3c3110744e89b6eb35/elastic_transport-9.4.2-py3-none-any.whl", hash = "sha256:33dc89bb1855faa8b98ae8b036405a39c562778dbcdbe4a00a2eaf753148556c", size = 66314, upload-time = "2026-06-16T15:27:15.875Z" },
+]
+
+[[package]]
+name = "elasticsearch"
+version = "9.4.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "elastic-transport" },
+    { name = "python-dateutil" },
+    { name = "sniffio" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e0/4b/9b753f0a8f56ae508dced2f7ac87bef7a27ce8f890e349e16812e9f7f4fa/elasticsearch-9.4.1.tar.gz", hash = "sha256:1d78fdfba97a903ec35a5eb5808a74e33392b7c620bd5f742d465a3a26c27d75", size = 908138, upload-time = "2026-05-26T16:28:40.132Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/cf/8e/2c93805e93e724a90156004a9212572ec86473974deede4605a33b8b169a/elasticsearch-9.4.1-py3-none-any.whl", hash = "sha256:71ab71c3d1b20fd88c2922fb82c3277cce7ea03c160686e7b9368b265c2b4cac", size = 993647, upload-time = "2026-05-26T16:28:36.556Z" },
 ]
 
 [[package]]
@@ -2420,6 +2454,19 @@ wheels = [
 ]
 
 [[package]]
+name = "podman-compose"
+version = "1.6.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "python-dotenv" },
+    { name = "pyyaml" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/1f/80/a6ada19562b12ed466dac5c3e02aef5ed7c8d0881864d80e0d94d0dc71f5/podman_compose-1.6.0.tar.gz", hash = "sha256:c83fd9bcbaa635100d581ce52a7a4b712ee0d457481232aff392efe3ebc5a217", size = 53935, upload-time = "2026-06-03T21:35:48.216Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/93/31/b38c2656bad6265168902793c60145b172788a79e4b15de212af9bd78728/podman_compose-1.6.0-py3-none-any.whl", hash = "sha256:98e48af25d44c10ecef948163bfcca002e32aa8bbb7e66593fbd4faff7270c30", size = 53722, upload-time = "2026-06-03T21:35:46.781Z" },
+]
+
+[[package]]
 name = "posthog"
 version = "7.15.4"
 source = { registry = "https://pypi.org/simple" }
@@ -2742,6 +2789,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/66/c0/0c8b6ad9f17a802ee498c46e004a0eb49bc148f2fd230864601a86dcf6db/python-dateutil-2.9.0.post0.tar.gz", hash = "sha256:37dd54208da7e1cd875388217d5e00ebd4179249f90fb72437e91a35459a0ad3", size = 342432, upload-time = "2024-03-01T18:36:20.211Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ec/57/56b9bcc3c9c6a792fcbaf139543cee77261f3651ca9da0c93f5c1221264b/python_dateutil-2.9.0.post0-py2.py3-none-any.whl", hash = "sha256:a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427", size = 229892, upload-time = "2024-03-01T18:36:18.57Z" },
+]
+
+[[package]]
+name = "python-dotenv"
+version = "1.2.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/82/ed/0301aeeac3e5353ef3d94b6ec08bbcabd04a72018415dcb29e588514bba8/python_dotenv-1.2.2.tar.gz", hash = "sha256:2c371a91fbd7ba082c2c1dc1f8bf89ca22564a087c2c287cd9b662adde799cf3", size = 50135, upload-time = "2026-03-01T16:00:26.196Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0b/d7/1959b9648791274998a9c3526f6d0ec8fd2233e4d4acce81bbae76b44b2a/python_dotenv-1.2.2-py3-none-any.whl", hash = "sha256:1d8214789a24de455a8b8bd8ae6fe3c6b69a5e3d64aa8a8e5d68e694bbcb285a", size = 22101, upload-time = "2026-03-01T16:00:25.09Z" },
 ]
 
 [[package]]
@@ -3189,6 +3245,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/e8/be/a66598b305763861a9ab15ff0f2fbc44e47b1ce7a776797337a4eef37c66/smart_open-7.5.1.tar.gz", hash = "sha256:3f08e16827c4733699e6b2cc40328a3568f900cb12ad9a3ad233ba6c872d9fe7", size = 54034, upload-time = "2026-02-23T11:01:28.979Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/5e/ea/dcdecd68acebb49d3fd560473a43499b1635076f7f1ae8641c060fe7ce74/smart_open-7.5.1-py3-none-any.whl", hash = "sha256:3e07cbbd9c8a908bcb8e25d48becf1a5cbb4886fa975e9f34c672ed171df2318", size = 64108, upload-time = "2026-02-23T11:01:27.429Z" },
+]
+
+[[package]]
+name = "sniffio"
+version = "1.3.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a2/87/a6771e1546d97e7e041b6ae58d80074f81b7d5121207425c964ddf5cfdbd/sniffio-1.3.1.tar.gz", hash = "sha256:f4324edc670a0f49750a81b895f35c3adb843cca46f0530f79fc1babb23789dc", size = 20372, upload-time = "2024-02-25T23:20:04.057Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e9/44/75a9c9421471a6c4805dbf2356f7c181a29c1879239abab1ea2cc8f38b40/sniffio-1.3.1-py3-none-any.whl", hash = "sha256:2f6da418d1f1e0fddd844478f41680e794e6051915791a034ff65e5f100525a2", size = 10235, upload-time = "2024-02-25T23:20:01.196Z" },
 ]
 
 [[package]]

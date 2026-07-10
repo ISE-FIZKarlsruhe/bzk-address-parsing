@@ -33,6 +33,7 @@ import json
 import pyarrow
 import unidecode
 import math
+from elasticsearch import Elasticsearch, helpers
 
 
 def levenshtein(a : str, b : str, max_distance : int) -> int:
@@ -337,13 +338,6 @@ def ascii_normalized_strings(nfc_string : str) -> list[str]:
         return [basic_normalization]
     else:
         return [basic_normalization, german_normalization]
-    
-
-class IndexSearchMatch(NamedTuple):
-    score : float
-    nfc_query : str
-    german_ascii_query: Optional[str]
-    ascii_query: str
 
 class IndexSearchMatch(NamedTuple):
     score : float # score as returned by the the specific index search, meaning differs
@@ -351,6 +345,7 @@ class IndexSearchMatch(NamedTuple):
     nfc_name: str
     levenshtein_distance: Optional[int] = None,
     retrieved_data : Optional[dict] = None
+    metadata : Optional[dict] = None
 
 
 class IndexSearchResult(NamedTuple):
@@ -358,19 +353,22 @@ class IndexSearchResult(NamedTuple):
     query_strings : list[str]
     abbreviation_pattern : Optional[str]
     matches : list[IndexSearchMatch]
+    
 
 class TantivySearchIndex:
-    def __init__(self, index_path : str | Path, n_threads : int | Literal['auto'] = 'auto'):
-        if n_threads == 'auto':
-            n_threads = max(1, getattr(os, "process_cpu_count", lambda : None)() or os.cpu_count() or 8)
+    index_descriptor = "tantivy"
+    def __init__(self, index_path : str | Path, read_threads : int | Literal['auto'] = 'auto', write_threads : int = 8):
+        if read_threads == 'auto':
+            read_threads = (max(1, getattr(os, "process_cpu_count", lambda : None)() or os.cpu_count() or 8) * 3) // 2
         self.schema = self.create_schema()
         self.index_path = Path(index_path)
         self.already_exists = self.index_path.exists()
         if not self.already_exists:
             self.index_path.mkdir(parents=True)
-        self.n_threads = n_threads
+        self.read_threads = read_threads
+        self.write_threads = write_threads
         self.index = tantivy.Index(self.schema, path=str(self.index_path))
-        self.index.config_reader(num_warmers=self.n_threads)
+        self.index.config_reader(num_warmers=self.read_threads)
 
     def populate_index(self, geo_db_connection : duckdb.DuckDBPyConnection, sql_query : str, skip_if_exists=True):
         if skip_if_exists and self.already_exists:
@@ -378,7 +376,7 @@ class TantivySearchIndex:
             return
         total_rows = geo_db_connection.execute("SELECT COUNT(*) FROM (" + sql_query + ")").fetchone()[0]
         print(f"Populating Tantivy index with {total_rows} names from the geonames database...")
-        with self.index.writer(num_threads=8) as writer:
+        with self.index.writer(num_threads=self.write_threads) as writer:
             batch_iterator = geo_db_connection.execute(sql_query).to_arrow_reader(100_000)
             pbar = tqdm(total=total_rows, desc="Populating Tantivy index")
             for batch in batch_iterator:
@@ -500,43 +498,6 @@ class TantivySearchIndex:
             ]
         if abbrev_pattern:
             name_queries.append(tantivy.Query.regex_query(self.schema, "search_key", abbrev_pattern))
-        else:
-            # If no abbreviation pattern is provided, we can determine max and min length
-            # based on the similarity threshold
-
-            # similarity = 1 - (dist(a, b) / max(len(a), len(b))))
-            #   similarity >= similarity_threshold
-            #   1 - (dist(a, b) / max(len(a), len(b)))) >= similarity_threshold
-            #   dist(a, b) / max(len(a), len(b)) <= 1 - similarity_threshold
-            #   dist(a, b) <= (1 - similarity_threshold) * max(len(a), len(b))
-            # Let us assume len(a) >= len(b). 
-            # Since we know len(a) we get an upper bound for distance:
-            #   dist(a, b) <= (1 - similarity_threshold) * len(a)
-            # since we have len(a) - len(b) <= dist(a, b)
-            #   len(a) - len(b) <= (1 - similarity_threshold) * len(a)
-            #   len(b) >= len(a) - (1 - similarity_threshold) * len(a)
-            # Let us assume len(a) < len(b)
-            # then we have len(b) - len(a) <= dist(a, b)
-            #   len(b) - len(a) <= (1 - similarity_threshold) * len(b)
-            #   1 - len(a)/len(b) <= 1 - similarity_threshold
-            #   len(a)/len(b) >= similarity_threshold
-            #   len(b) <= len(a) / similarity_threshold
-            #max_upper_bound = -float("inf")
-            #min_lower_bound = float("inf")
-            #for query in query_strings:
-            #    query_length = len(query)
-            #    # similarity based bounds
-            #    upper_bound = math.floor(query_length / similarity_threshold)
-            #    lower_bound = math.ceil(query_length - (1 - similarity_threshold) * query_length)
-            #    # distance based bounds
-            #    upper_bound = min(upper_bound, query_length + distance_threshold)
-            #    lower_bound = max(lower_bound, query_length - distance_threshold)
-            #    max_upper_bound = max(max_upper_bound, upper_bound)
-            #    min_lower_bound = min(min_lower_bound, lower_bound)
-            #restrictions = restrictions + [
-            #    (tantivy.Occur.Must, tantivy.Query.range_query(self.schema, "search_key_length", tantivy.FieldType.Integer, min_lower_bound, max_upper_bound))
-            #]
-            pass
         final_name_query = tantivy.Query.disjunction_max_query(name_queries)
         if len(restrictions) > 0:
             final_query = tantivy.Query.boolean_query([(tantivy.Occur.Must, final_name_query)] + restrictions)
@@ -599,6 +560,312 @@ class TantivySearchIndex:
             matches=matches
         ) # TODO fix
 
+class ElasticSearchClient:
+    index_descriptor = "elastic_search"
+    """
+    CLAUDE reimplementation of the TantivySearchIndex using Elasticsearch as the backend.
+    Elasticsearch-based reimplementation of TantivySearchIndex.
+
+    Key mapping decisions vs. the Tantivy version:
+      - Tantivy's `raw` tokenizer (exact single-term matching) -> ES `keyword` fields.
+      - Tantivy's `add_bytes_field(indexed=False, stored=True)` for the JSON blob ->
+        an ES sub-object with "enabled": false. ES always keeps the raw `_source`,
+        so this just tells ES not to parse/index the sub-object's fields, matching
+        Tantivy's "stored but not searchable" semantics. No manual json.dumps/loads
+        needed - `_source` is already JSON.
+      - `tantivy.Query.term_query`      -> {"term": {...}}
+      - `tantivy.Query.fuzzy_term_query`-> {"fuzzy": {...}}
+      - `tantivy.Query.regex_query`     -> {"regexp": {...}}
+      - `tantivy.Query.disjunction_max_query` -> {"dis_max": {"queries": [...]}}
+      - `tantivy.Query.boolean_query` (Occur.Must) -> {"bool": {"must": [...]}}
+      - `tantivy.Query.boost_query`     -> "boost" key inside the query clause
+    """
+
+    def __init__(
+        self,
+        index_name: str,
+        *,
+        es_client: Optional[Elasticsearch] = None,
+        es_hosts: Optional[list[str]] = None,
+    ):
+        self.index_name = index_name
+        self.es = es_client or Elasticsearch(es_hosts or ["http://localhost:9201"])
+        
+
+    # ------------------------------------------------------------------
+    # Schema / mapping
+    # ------------------------------------------------------------------
+
+    def create_settings(self) -> dict:
+        return {
+            "number_of_shards": 1,
+            "number_of_replicas": 0,
+            "analysis": {
+                "analyzer": {
+                    # Splits purely on whitespace - no lowercasing, no stemming,
+                    # no stop words, no accent folding. Case-folding and accent
+                    # stripping are already handled upstream before indexing, so
+                    # this analyzer intentionally does nothing beyond tokenizing
+                    # on spaces.
+                    "toponym_whitespace_analyzer": {
+                        "type": "custom",
+                        "tokenizer": "whitespace",
+                        "filter": [],
+                    }
+                }
+            },
+        }
+
+    def create_mappings(self) -> dict:
+        properties = {
+            # search keys - full-text field for match+fuzziness queries.
+            # Tokenized on whitespace only (see toponym_whitespace_analyzer);
+            # relies on upstream normalization for case/accents.
+            "search_key": {
+                "type": "text",
+                "analyzer": "toponym_whitespace_analyzer",
+            },
+            # nfc name, no char stripping
+            "nfc_name": {"type": "keyword"},
+            # stored-but-not-indexed JSON blob with the original row data
+            "name_data": {"type": "object", "enabled": False},
+            "country_code": {"type": "keyword"},
+        }
+        for entity_type in GeographicalEntityType:
+            properties[entity_type.entity_type] = {"type": "boolean"}
+        for level in range(1, 6):
+            properties[f"admin{level}_code"] = {"type": "keyword"}
+
+        return {"properties": properties}
+
+    # ------------------------------------------------------------------
+    # Population
+    # ------------------------------------------------------------------
+
+    def populate_index(self, geo_db_connection: duckdb.DuckDBPyConnection, sql_query: str, skip_if_exists=True):
+        if not self.es.ping():
+            raise RuntimeError("Elasticsearch cluster is not reachable.")
+            
+        already_exists = False
+        try:
+            already_exists = self.es.indices.exists(index=self.index_name)
+        except Exception as e:
+            pass
+        if skip_if_exists and already_exists:
+            self.es.indices.refresh(index=self.index_name)
+            return
+        self.es.indices.create(
+            index=self.index_name,
+            settings=self.create_settings(),
+            mappings=self.create_mappings(),
+        )
+ 
+        total_rows = geo_db_connection.execute("SELECT COUNT(*) FROM (" + sql_query + ")").fetchone()[0]
+        print(f"Populating Elasticsearch index with {total_rows} names from the geonames database...")
+ 
+        def _actions():
+            batch_iterator = geo_db_connection.execute(sql_query).to_arrow_reader(100_000)
+            for batch in batch_iterator:
+                columns = [col.to_pylist() for col in batch.columns]
+                for row_tuple in zip(*columns):
+                    row = {name: value for name, value in zip(batch.column_names, row_tuple)}
+                    nfc_name = unicodedata.normalize("NFC", row["name"])
+ 
+                    search_keys = [
+                        search_key
+                        for search_key in ascii_normalized_strings(nfc_name)
+                        if search_key is not None and search_key.strip() != ""
+                    ]
+                    if not search_keys:
+                        continue
+ 
+                    doc = {
+                        "nfc_name": nfc_name,
+                        # multivalued: ES indexes each entry as a separate term
+                        # occurrence in the same field, no array type needed
+                        "search_key": search_keys,
+                        "name_data": row,
+                        "country_code": row["entity"]["country"]["iso_code"] or "",
+                    }
+ 
+                    entity_types = row["entity"].get("entity_types", [])
+                    for entity_type in GeographicalEntityType:
+                        doc[entity_type.entity_type] = entity_type.entity_type in entity_types
+ 
+                    admin_codes = row["entity"].get("admin_codes", {})
+                    for admin_level in range(1, 6):
+                        admin_code = admin_codes.get(f"admin{admin_level}_code")
+                        doc[f"admin{admin_level}_code"] = admin_code or ""
+ 
+                    yield {"_index": self.index_name, "_source": doc}
+ 
+        pbar = tqdm(total=total_rows, desc="Populating Elasticsearch index")
+        success_count = 0
+        for ok, item in helpers.streaming_bulk(
+            self.es,
+            _actions(),
+            chunk_size=2000,
+            raise_on_error=False,
+            max_retries=3,
+        ):
+            if ok:
+                success_count += 1
+                pbar.update(1)
+            else:
+                print(f"Failed to index document: {item}")
+        pbar.close()
+ 
+        self.es.indices.refresh(index=self.index_name)
+
+
+    # ------------------------------------------------------------------
+    # Query building
+    # ------------------------------------------------------------------
+
+    def _build_entity_type_restriction(self, entity_types: Collection["GeographicalEntityType"]) -> dict:
+        if len(entity_types) == 1:
+            entity_type = next(iter(entity_types))
+            return {"term": {entity_type.entity_type: True}}
+        else:
+            return {
+                "dis_max": {
+                    "queries": [{"term": {et.entity_type: True}} for et in entity_types]
+                }
+            }
+
+    def _build_country_code_restriction(self, country_codes: Collection[str]) -> dict:
+        if len(country_codes) == 1:
+            country_code = next(iter(country_codes))
+            return {"term": {"country_code": country_code}}
+        else:
+            return {
+                "dis_max": {
+                    "queries": [{"term": {"country_code": cc}} for cc in country_codes]
+                }
+            }
+
+    def _build_admin_code_restriction(self, admin_codes: Collection["GeonamesAdminCodes"]) -> Optional[dict]:
+        def _admin_code_to_query(admin_code) -> Optional[dict]:
+            must_clauses = []
+            for k, v in admin_code._asdict().items():
+                if v is not None and v != "":
+                    must_clauses.append({"term": {k: v}})
+            if len(must_clauses) == 0:
+                return None
+            if len(must_clauses) == 1:
+                return must_clauses[0]
+            return {"bool": {"must": must_clauses}}
+
+        if len(admin_codes) == 1:
+            return _admin_code_to_query(next(iter(admin_codes)))
+        else:
+            disjunction = []
+            for admin_code in admin_codes:
+                q = _admin_code_to_query(admin_code)
+                if q is not None:
+                    disjunction.append(q)
+            if not disjunction:
+                return None
+            return {"dis_max": {"queries": disjunction}}
+
+    def _search_inner(
+        self,
+        query_strings: list[str],
+        abbrev_pattern: Optional[str],
+        restrictions: list[dict],
+        distance_threshold: int,
+        similarity_threshold: float,
+        limit: int,
+    ) -> list["IndexSearchMatch"]:
+        name_queries = [
+            {
+                "match": {
+                    "search_key": {
+                        "query": query,
+                        "analyzer": "toponym_whitespace_analyzer",
+                        "boost": 1.0,
+                    }
+                }
+            }
+            for query in query_strings
+        ]
+        if distance_threshold != 0:
+            for query in name_queries:
+                query["match"]["search_key"]["fuzziness"] = distance_threshold
+
+        if abbrev_pattern:
+            name_queries.append({"regexp": {"search_key": abbrev_pattern}})
+
+        final_name_query = {"dis_max": {"queries": name_queries}}
+
+        if len(restrictions) > 0:
+            final_query = {"bool": {"must": [final_name_query] + restrictions}}
+        else:
+            final_query = final_name_query
+
+        response = self.es.search(index=self.index_name, query=final_query, size=limit)
+
+        matches = []
+        for hit in response["hits"]["hits"]:
+            source = hit["_source"]
+            matches.append(
+                IndexSearchMatch(
+                    score=hit["_score"],
+                    matched_key=source.get("search_key"),
+                    nfc_name=source.get("nfc_name"),
+                    retrieved_data=source.get("name_data"),
+                    metadata = response
+                )
+            )
+        return matches
+
+    def search(
+        self,
+        query_string,
+        distance_threshold: int,
+        similarity_threshold: float,
+        limit: int = 10,
+        match_abbreviations: bool = True,
+        entity_types: Optional[Collection["GeographicalEntityType"]] = None,
+        country_codes: Optional[Collection[str]] = None,
+        admin_codes: Optional[Collection["GeonamesAdminCodes"]] = None,
+    ):
+        nfc_query = unicodedata.normalize("NFC", query_string)
+        query_strings = ascii_normalized_strings(nfc_query)
+        if match_abbreviations:
+            abbrev_pattern = abbreviation_pattern_to_regex(query_string)
+        else:
+            abbrev_pattern = None
+
+        restrictions = []
+        if entity_types is not None:
+            restrictions.append(self._build_entity_type_restriction(entity_types))
+        if country_codes is not None:
+            restrictions.append(self._build_country_code_restriction(country_codes))
+        if admin_codes is not None:
+            admin_code_restriction = self._build_admin_code_restriction(admin_codes)
+            if admin_code_restriction is not None:
+                restrictions.append(admin_code_restriction)
+
+        for i in range(0, distance_threshold + 1):
+            matches = self._search_inner(
+                query_strings=query_strings,
+                abbrev_pattern=abbrev_pattern,
+                restrictions=restrictions,
+                distance_threshold=i,
+                similarity_threshold=similarity_threshold,
+                limit=limit,
+            )
+            if len(matches) > 0:
+                break
+
+        return IndexSearchResult(
+            nfc_query=nfc_query,
+            query_strings=query_strings,
+            abbreviation_pattern=abbrev_pattern,
+            matches=matches,
+        )    
+
 class SymSpellSearchIndex:
     def __init__(self):
         raise NotImplementedError("This class is being refactored and should not be used in its current state.")
@@ -619,7 +886,7 @@ PRIORITY_COUNTRIES = [
 class GeoDBSearch(LinkingStep):
     def __init__(
             self, search_cache_db, 
-            search_index : TantivySearchIndex, materialize_table : bool = True,
+            search_index : TantivySearchIndex | ElasticSearchClient, materialize_table : bool = True,
             distance_threshold : int = 2,
             similarity_threshold : float = 0.8,
             topk : int = 5,
@@ -672,15 +939,7 @@ class GeoDBSearch(LinkingStep):
             country_codes=country_codes,
             admin_codes=admin_codes
         )
-        if len(index_matches.matches) == 0:
-            index_matches = self.search_index.search(
-                query_string=entity.raw_text,
-                distance_threshold=self.distance_threshold,
-                similarity_threshold=self.similarity_threshold,
-                limit=self.topk,
-                match_abbreviations=True,
-                entity_types=[entity_type]
-            )
+        # TODO If I comment this, levenshtein gives an error (????)
         if len(index_matches.matches) == 0 and (
                 country_codes is not None or admin_codes is not None
             ):
@@ -728,8 +987,8 @@ class GeoDBSearch(LinkingStep):
                     max_clean_similarity = query_similarity
                     clean_alt_name = query_string
                     cleaned_edit_distance = query_edit_distance
-            #if (max_clean_similarity < self.similarity_threshold or cleaned_edit_distance > self.distance_threshold) and not is_abreviation_match:
-            #    continue
+            if (max_clean_similarity < self.similarity_threshold or cleaned_edit_distance > self.distance_threshold) and not is_abreviation_match:
+                continue
 
             geographical_name=GeographicalName.from_dict(index_match.retrieved_data)
             nfc_alt_name = unicodedata.normalize("NFC", geographical_name.name)
@@ -743,7 +1002,7 @@ class GeoDBSearch(LinkingStep):
                 edit_distance = levenshtein(index_result.nfc_query, nfc_alt_name, self.distance_threshold),
                 abbreviation_pattern=index_result.abbreviation_pattern,
                 is_abbreviation_match=is_abreviation_match,
-                matching_method="tantivy"
+                matching_method=self.search_index.index_descriptor
             )
             yield matched_name
         
