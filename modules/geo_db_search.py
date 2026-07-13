@@ -8,7 +8,7 @@ import pandas as pd
 import modules.utils as utils
 import duckdb
 import modules.build_geonames_db as build_geonames_db
-from typing import Collection, Iterable, NamedTuple, Optional, Literal, Callable
+from typing import Collection, Iterable, NamedTuple, Optional, Literal, Callable, TYPE_CHECKING
 import contextlib
 import enum
 import dataclasses
@@ -33,7 +33,7 @@ import json
 import pyarrow
 import unidecode
 import math
-from elasticsearch import Elasticsearch, helpers
+from abc import ABC, abstractmethod
 
 
 def levenshtein(a : str, b : str, max_distance : int) -> int:
@@ -41,6 +41,7 @@ def levenshtein(a : str, b : str, max_distance : int) -> int:
     Computes the Levenshtein distance between two strings.
     If max_distance is provided, the computation will stop if the distance exceeds max_distance.
     """
+    # wrapper method to correct logic
     dist = editdistpy.levenshtein.distance(a, b, max_distance=max_distance)
     if dist < 0:
         return sys.maxsize
@@ -51,105 +52,6 @@ def similarity_and_distance(a : str, b : str, max_distance : int, distance_funct
     similarity = 1 - (edit_distance / max(len(a), len(b)))
     return edit_distance, similarity
 
-# Used to materialize in memory a distilled version of the names table
-# TODO filter neighborhoods?
-CANDIDATE_NAMES_INIT_QUERY = """
-CREATE TABLE IF NOT EXISTS candidate_names AS
-SELECT 
-    nfc_normalize(alternateName) AS nfc_alt_name,
-    regexp_replace(lower(strip_accents(nfc_alt_name)), '[^\\w\\s]', '', 'g') AS clean_alt_name,
-    allNames.*, 
-    simplifiedGeonames.*, 
-    countryInfo.Country,
-    { 
-        'Country' : (
-            (
-                feature_class = 'A' AND 
-                feature_code IN ('TERR', 'PCLI', 'PCL', 'PCLF', 'LTER', 'ZN', 'PCLD', 'PCLH', 'PCLS', 'PRSH', 'PCLIX')
-            ) OR (
-                -- United Kingdom member states are often thought of as countries.
-                feature_class = 'A' AND feature_code = 'ADM1' AND country_code = 'GB'
-            )
-        ),
-        'State' : (
-            feature_class = 'A' AND 
-            feature_code IN ('ADM1', 'ADM1H', 'ADMDH', 'ADMD')
-        ),
-        'Region' : (
-            (
-                feature_class = 'A' AND 
-                feature_code IN ('ADM1', 'ADM1H', 'ADMDH', 'ADMD', 'ADM2', 'ADM2H', 'ADM3H', 'ADM3', 'ADM4', 'ADM4H', 'ADM5')
-            ) OR (
-                feature_class = 'L' AND
-                feature_code IN ('RGN', 'RGNH')
-            )
-        ),
-        'District' : (
-            feature_class = 'A' AND
-            feature_code IN ('ADM1', 'ADM1H', 'ADMDH', 'ADMD', 'ADM2', 'ADM2H', 'ADM3H', 'ADM3', 'ADM4', 'ADM4H', 'ADM5')
-        ),
-        'City' : (
-            feature_class = 'P' AND feature_code != 'PPLX'
-        ),
-        'Neighborhood' : (
-            feature_class = 'P'
-        )
-    } AS entity_type_map
-FROM geonames.allNames 
-    NATURAL JOIN geonames.simplifiedGeonames 
-    JOIN geonames.countryInfo ON (country_code = ISO)
-WHERE
-    (
-        allNames.isolanguage IS NULL OR 
-        split(allNames.isolanguage, '-')[1] IN ('en', 'de', 'abbr') OR
-        allNames.isolanguage IN countryInfo.Languages
-    )
-    AND
-    alternateName IS NOT NULL AND 
-    alternateName != '' AND
-    clean_alt_name != '';
-
-CREATE TABLE IF NOT EXISTS reduced_candidate_names AS
-SELECT candidate_names.*
-FROM candidate_names JOIN geonames.countryInfo ON (country_code = ISO)
-WHERE 
-    country_code IN ('US', 'IL', 'DE') OR 'DE' IN neighbours;
-
-CREATE TEMP MACRO filter_entity_type(tbl, entity_type) AS TABLE 
-    SELECT * FROM query_table(tbl) WHERE entity_type_map[entity_type];
-"""
-
-
-GERMAN_ASCII_DUCKDB_MACRO = """
--- Converts to ascii but
--- rather than converting ä to a, apply german rules and convert ä to ae, etc.
--- Useful for matching against
-CREATE OR REPLACE MACRO german_ascii(nfc_name) AS 
-strip_accents(
-    replace(
-        replace(
-            replace(
-                replace(
-                    lower(nfc_name), 
-                'ä', 'ae'),
-            'ö', 'oe'),
-        'ü', 'ue'),
-    'ß', 'ss')
-);
-"""
-
-
-LANGUAGE_FILTERED_NAMES_SELECT = """
-SELECT *
-FROM geo_db.geographical_names_with_entities
-WHERE
-    is_preferred_name IS TRUE OR
-    isolanguage == '' OR
-    isolanguage LIKE 'en%' OR
-    isolanguage LIKE 'de%' OR
-    isolanguage == 'abbr' OR
-    list_bool_or([(isolanguage IN lang) FOR lang IN entity.country.iso_languages])
-"""
 
 POP_LANGUAGE_FILTERED_NAMES_SELECT = """
 SELECT *
@@ -175,61 +77,6 @@ WHERE (
     isolanguage == 'abbr' OR
     list_bool_or([(isolanguage IN lang) FOR lang IN entity.country.iso_languages])
 ) AND len(entity.possible_entity_types) = 0
-"""
-
-# TODO index names only for fuzzy search, and then search duckdb for all names that match the correction exactly
-# This is important because otherwise we may fill our topk with the same name over and over again
-
-WORDS_QUERY = """
-WITH language_filtered AS (
-""" + LANGUAGE_FILTERED_NAMES_SELECT + """
-)
-SELECT
-    string_split(german_ascii_name, ' ') AS german_ascii_words, 
-    string_split(ascii_name, ' ') AS ascii_words,
-    * EXCLUDE (german_ascii_name, ascii_name)
-FROM language_filtered
-"""
-
-UNIQUE_WORDS_QUERY = """
-WITH
-words AS (
-""" + WORDS_QUERY + """
-),
-flattened AS (
-    SELECT unnest(german_ascii_words || ascii_words) AS word FROM words
-)
-SELECT word, COUNT(*) AS freq
-FROM flattened
-WHERE word != ''
-GROUP BY word
-"""
-
-UNIQUE_BIGRAMS_QUERY = """
-WITH
-words AS (
-""" + WORDS_QUERY + """
-),
-bigrams AS (
-    SELECT
-        list_zip(words.german_ascii_words[:-1], words.german_ascii_words[2:]) AS german_ascii_bigrams,
-        list_zip(words.ascii_words[:-1], words.ascii_words[2:]) AS ascii_bigrams
-    FROM words
-),
-bigram_strings AS (
-    SELECT
-        array_to_string(german_ascii_bigrams, ' ') AS german_ascii_bigram_strings,
-        array_to_string(ascii_bigrams, ' ') AS ascii_bigram_strings
-    FROM bigrams
-),
-flattened AS (
-    SELECT unnest([german_ascii_bigram_strings, ascii_bigram_strings]) AS bigram 
-    FROM bigram_strings
-)
-SELECT bigram, COUNT(*) AS freq 
-FROM flattened
-WHERE bigram != ''
-GROUP BY bigram
 """
 
 def abbreviation_pattern_to_sql_regex(part : str) -> str:
@@ -290,6 +137,7 @@ def abbreviation_pattern_to_regex(part : str) -> str:
         return None
 
 _STRIP_PUNCTUATION_REGEX = re.compile(r'[^\w\s]')
+_DEDUPE_WHITESPACE_REGEX = re.compile(r'\s+')
 
 def ascii_normalize(nfc_string : str) -> str:
     """
@@ -297,11 +145,10 @@ def ascii_normalize(nfc_string : str) -> str:
     This is used for matching against similarly normalized names in the database.
     """
     result = nfc_string.lower()
-    # Strip accents replacements may differ on implementation
-    # Call duckdb function to ensure the same behavior as in the database
     result = unidecode.unidecode(result)
     result = result.replace("-", " ")
-    result = _STRIP_PUNCTUATION_REGEX.sub("", result)
+    result = _STRIP_PUNCTUATION_REGEX.sub('', result)
+    # TODO # result = _DEDUPE_WHITESPACE_REGEX.sub(' ', result).strip()
     return result
 
 _GERMAN_NORMALIZATION_REPLACEMENTS = [
@@ -326,12 +173,13 @@ def german_normalize(nfc_string : str) -> str:
         result = result.replace(old, new)
     return ascii_normalize(result)
 
-def ascii_normalized_strings(nfc_string : str) -> list[str]:
+def normalized_search_strings(nfc_string : str) -> list[str]:
     """
     Produces (if differing) two ascii normalized versions of the input string.
     One will use the german ascii normalization rules for umlauts and ß, 
     the other will use the basic ascii normalization rules.
     """
+    # TODO maybe remove stop words?
     basic_normalization = ascii_normalize(nfc_string)
     german_normalization = german_normalize(nfc_string)
     if basic_normalization == german_normalization:
@@ -355,7 +203,26 @@ class IndexSearchResult(NamedTuple):
     matches : list[IndexSearchMatch]
     
 
-class TantivySearchIndex:
+class GeoSearchIndex(ABC):
+    index_descriptor : str
+    @abstractmethod
+    def populate_index(self, geo_db_connection : duckdb.DuckDBPyConnection, sql_query : str, skip_if_exists=True):
+        pass
+    @abstractmethod
+    def search(
+            self, 
+            query_string, 
+            distance_threshold : int, 
+            similarity_threshold : float,
+            limit : int = 10,
+            match_abbreviations : bool = True,
+            entity_types : Optional[Collection[GeographicalEntityType]] = None,
+            country_codes : Optional[Collection[str]] = None,
+            admin_codes : Optional[Collection[GeonamesAdminCodes]] = None
+        ):
+        pass
+
+class TantivySearchIndex(GeoSearchIndex):
     index_descriptor = "tantivy"
     def __init__(self, index_path : str | Path, read_threads : int | Literal['auto'] = 'auto', write_threads : int = 8):
         if read_threads == 'auto':
@@ -369,6 +236,12 @@ class TantivySearchIndex:
         self.write_threads = write_threads
         self.index = tantivy.Index(self.schema, path=str(self.index_path))
         self.index.config_reader(num_warmers=self.read_threads)
+        self.index.register_tokenizer(
+            "whitespace",
+            tantivy.TextAnalyzerBuilder(
+                tantivy.Tokenizer.whitespace()
+            ).build()
+        )
 
     def populate_index(self, geo_db_connection : duckdb.DuckDBPyConnection, sql_query : str, skip_if_exists=True):
         if skip_if_exists and self.already_exists:
@@ -384,7 +257,7 @@ class TantivySearchIndex:
                 for row_tuple in zip(*columns):
                     row = {name : value for name, value in zip(batch.column_names, row_tuple)}
                     nfc_name = unicodedata.normalize("NFC", row["name"])
-                    for search_key in ascii_normalized_strings(nfc_name):
+                    for search_key in normalized_search_strings(nfc_name):
                         if search_key is None or search_key.strip() == "":
                             continue
                         doc = tantivy.Document()
@@ -414,8 +287,10 @@ class TantivySearchIndex:
             tokenizer_name = 'raw',
             index_option = 'basic'
         )
+        # TODO make fields fast=True
         # search keys
         schema_builder.add_text_field("search_key", stored=True, **text_field_options)
+        # TODO schema_builder.add_text_field("search_key", stored=True, fast=True, tokenizer_name='whitespace')
         # json blob with the original data
         schema_builder.add_bytes_field("name_data", stored=True, indexed=False)
         # nfc name, no char stripping
@@ -491,16 +366,18 @@ class TantivySearchIndex:
                 for query in query_strings
             ]
         else:
+            
             name_queries = [
-                tantivy.Query.boost_query(tantivy.Query.fuzzy_term_query(self.schema,
-                    "search_key", query, distance=distance_threshold), 1.0)
+                tantivy.Query.fuzzy_term_query(self.schema,
+                    "search_key", query, distance=distance_threshold)
                 for query in query_strings
             ]
         if abbrev_pattern:
             name_queries.append(tantivy.Query.regex_query(self.schema, "search_key", abbrev_pattern))
         final_name_query = tantivy.Query.disjunction_max_query(name_queries)
         if len(restrictions) > 0:
-            final_query = tantivy.Query.boolean_query([(tantivy.Occur.Must, final_name_query)] + restrictions)
+            final_query = tantivy.Query.boolean_query(
+                [(tantivy.Occur.Must, final_name_query)] + restrictions)
         else:
             final_query = final_name_query
         searcher = self.index.searcher()
@@ -528,25 +405,25 @@ class TantivySearchIndex:
             admin_codes : Optional[Collection[GeonamesAdminCodes]] = None
         ):
         nfc_query = unicodedata.normalize("NFC", query_string)
-        query_strings = ascii_normalized_strings(nfc_query)
+        query_strings = normalized_search_strings(nfc_query)
         if match_abbreviations:
             abbrev_pattern = abbreviation_pattern_to_regex(query_string)
         else: abbrev_pattern = None
         
         restrictions = []
-        if entity_types is not None: 
-            restrictions.append((tantivy.Occur.Must, self._build_entity_type_restriction(entity_types)))
+        if entity_types is not None:
+            restrictions.append((tantivy.Occur.Should, self._build_entity_type_restriction(entity_types)))
         if country_codes is not None:
-            restrictions.append((tantivy.Occur.Must, self._build_country_code_restriction(country_codes)))
+            restrictions.append((tantivy.Occur.Should, self._build_country_code_restriction(country_codes)))
         if admin_codes is not None:
             admin_code_restriction = self._build_admin_code_restriction(admin_codes)
             if admin_code_restriction is not None:
-                restrictions.append((tantivy.Occur.Must, admin_code_restriction))
+                restrictions.append((tantivy.Occur.Should, admin_code_restriction))
         for i in range(0, distance_threshold + 1):
             matches = self._search_inner(
                 query_strings=query_strings,
                 abbrev_pattern=abbrev_pattern,
-                restrictions=restrictions,
+                restrictions=[], # TODO reatach restrictions,
                 distance_threshold=i,
                 similarity_threshold=similarity_threshold,
                 limit=limit
@@ -558,317 +435,7 @@ class TantivySearchIndex:
             query_strings=query_strings,
             abbreviation_pattern=abbrev_pattern,
             matches=matches
-        ) # TODO fix
-
-class ElasticSearchClient:
-    index_descriptor = "elastic_search"
-    """
-    CLAUDE reimplementation of the TantivySearchIndex using Elasticsearch as the backend.
-    Elasticsearch-based reimplementation of TantivySearchIndex.
-
-    Key mapping decisions vs. the Tantivy version:
-      - Tantivy's `raw` tokenizer (exact single-term matching) -> ES `keyword` fields.
-      - Tantivy's `add_bytes_field(indexed=False, stored=True)` for the JSON blob ->
-        an ES sub-object with "enabled": false. ES always keeps the raw `_source`,
-        so this just tells ES not to parse/index the sub-object's fields, matching
-        Tantivy's "stored but not searchable" semantics. No manual json.dumps/loads
-        needed - `_source` is already JSON.
-      - `tantivy.Query.term_query`      -> {"term": {...}}
-      - `tantivy.Query.fuzzy_term_query`-> {"fuzzy": {...}}
-      - `tantivy.Query.regex_query`     -> {"regexp": {...}}
-      - `tantivy.Query.disjunction_max_query` -> {"dis_max": {"queries": [...]}}
-      - `tantivy.Query.boolean_query` (Occur.Must) -> {"bool": {"must": [...]}}
-      - `tantivy.Query.boost_query`     -> "boost" key inside the query clause
-    """
-
-    def __init__(
-        self,
-        index_name: str,
-        *,
-        es_client: Optional[Elasticsearch] = None,
-        es_hosts: Optional[list[str]] = None,
-    ):
-        self.index_name = index_name
-        self.es = es_client or Elasticsearch(es_hosts or ["http://localhost:9201"])
-        
-
-    # ------------------------------------------------------------------
-    # Schema / mapping
-    # ------------------------------------------------------------------
-
-    def create_settings(self) -> dict:
-        return {
-            "number_of_shards": 1,
-            "number_of_replicas": 0,
-            "analysis": {
-                "analyzer": {
-                    # Splits purely on whitespace - no lowercasing, no stemming,
-                    # no stop words, no accent folding. Case-folding and accent
-                    # stripping are already handled upstream before indexing, so
-                    # this analyzer intentionally does nothing beyond tokenizing
-                    # on spaces.
-                    "toponym_whitespace_analyzer": {
-                        "type": "custom",
-                        "tokenizer": "whitespace",
-                        "filter": [],
-                    }
-                }
-            },
-        }
-
-    def create_mappings(self) -> dict:
-        properties = {
-            # search keys - full-text field for match+fuzziness queries.
-            # Tokenized on whitespace only (see toponym_whitespace_analyzer);
-            # relies on upstream normalization for case/accents.
-            "search_key": {
-                "type": "text",
-                "analyzer": "toponym_whitespace_analyzer",
-            },
-            # nfc name, no char stripping
-            "nfc_name": {"type": "keyword"},
-            # stored-but-not-indexed JSON blob with the original row data
-            "name_data": {"type": "object", "enabled": False},
-            "country_code": {"type": "keyword"},
-        }
-        for entity_type in GeographicalEntityType:
-            properties[entity_type.entity_type] = {"type": "boolean"}
-        for level in range(1, 6):
-            properties[f"admin{level}_code"] = {"type": "keyword"}
-
-        return {"properties": properties}
-
-    # ------------------------------------------------------------------
-    # Population
-    # ------------------------------------------------------------------
-
-    def populate_index(self, geo_db_connection: duckdb.DuckDBPyConnection, sql_query: str, skip_if_exists=True):
-        if not self.es.ping():
-            raise RuntimeError("Elasticsearch cluster is not reachable.")
-            
-        already_exists = False
-        try:
-            already_exists = self.es.indices.exists(index=self.index_name)
-        except Exception as e:
-            pass
-        if skip_if_exists and already_exists:
-            self.es.indices.refresh(index=self.index_name)
-            return
-        self.es.indices.create(
-            index=self.index_name,
-            settings=self.create_settings(),
-            mappings=self.create_mappings(),
         )
- 
-        total_rows = geo_db_connection.execute("SELECT COUNT(*) FROM (" + sql_query + ")").fetchone()[0]
-        print(f"Populating Elasticsearch index with {total_rows} names from the geonames database...")
- 
-        def _actions():
-            batch_iterator = geo_db_connection.execute(sql_query).to_arrow_reader(100_000)
-            for batch in batch_iterator:
-                columns = [col.to_pylist() for col in batch.columns]
-                for row_tuple in zip(*columns):
-                    row = {name: value for name, value in zip(batch.column_names, row_tuple)}
-                    nfc_name = unicodedata.normalize("NFC", row["name"])
- 
-                    search_keys = [
-                        search_key
-                        for search_key in ascii_normalized_strings(nfc_name)
-                        if search_key is not None and search_key.strip() != ""
-                    ]
-                    if not search_keys:
-                        continue
- 
-                    doc = {
-                        "nfc_name": nfc_name,
-                        # multivalued: ES indexes each entry as a separate term
-                        # occurrence in the same field, no array type needed
-                        "search_key": search_keys,
-                        "name_data": row,
-                        "country_code": row["entity"]["country"]["iso_code"] or "",
-                    }
- 
-                    entity_types = row["entity"].get("entity_types", [])
-                    for entity_type in GeographicalEntityType:
-                        doc[entity_type.entity_type] = entity_type.entity_type in entity_types
- 
-                    admin_codes = row["entity"].get("admin_codes", {})
-                    for admin_level in range(1, 6):
-                        admin_code = admin_codes.get(f"admin{admin_level}_code")
-                        doc[f"admin{admin_level}_code"] = admin_code or ""
- 
-                    yield {"_index": self.index_name, "_source": doc}
- 
-        pbar = tqdm(total=total_rows, desc="Populating Elasticsearch index")
-        success_count = 0
-        for ok, item in helpers.streaming_bulk(
-            self.es,
-            _actions(),
-            chunk_size=2000,
-            raise_on_error=False,
-            max_retries=3,
-        ):
-            if ok:
-                success_count += 1
-                pbar.update(1)
-            else:
-                print(f"Failed to index document: {item}")
-        pbar.close()
- 
-        self.es.indices.refresh(index=self.index_name)
-
-
-    # ------------------------------------------------------------------
-    # Query building
-    # ------------------------------------------------------------------
-
-    def _build_entity_type_restriction(self, entity_types: Collection["GeographicalEntityType"]) -> dict:
-        if len(entity_types) == 1:
-            entity_type = next(iter(entity_types))
-            return {"term": {entity_type.entity_type: True}}
-        else:
-            return {
-                "dis_max": {
-                    "queries": [{"term": {et.entity_type: True}} for et in entity_types]
-                }
-            }
-
-    def _build_country_code_restriction(self, country_codes: Collection[str]) -> dict:
-        if len(country_codes) == 1:
-            country_code = next(iter(country_codes))
-            return {"term": {"country_code": country_code}}
-        else:
-            return {
-                "dis_max": {
-                    "queries": [{"term": {"country_code": cc}} for cc in country_codes]
-                }
-            }
-
-    def _build_admin_code_restriction(self, admin_codes: Collection["GeonamesAdminCodes"]) -> Optional[dict]:
-        def _admin_code_to_query(admin_code) -> Optional[dict]:
-            must_clauses = []
-            for k, v in admin_code._asdict().items():
-                if v is not None and v != "":
-                    must_clauses.append({"term": {k: v}})
-            if len(must_clauses) == 0:
-                return None
-            if len(must_clauses) == 1:
-                return must_clauses[0]
-            return {"bool": {"must": must_clauses}}
-
-        if len(admin_codes) == 1:
-            return _admin_code_to_query(next(iter(admin_codes)))
-        else:
-            disjunction = []
-            for admin_code in admin_codes:
-                q = _admin_code_to_query(admin_code)
-                if q is not None:
-                    disjunction.append(q)
-            if not disjunction:
-                return None
-            return {"dis_max": {"queries": disjunction}}
-
-    def _search_inner(
-        self,
-        query_strings: list[str],
-        abbrev_pattern: Optional[str],
-        restrictions: list[dict],
-        distance_threshold: int,
-        similarity_threshold: float,
-        limit: int,
-    ) -> list["IndexSearchMatch"]:
-        name_queries = [
-            {
-                "match": {
-                    "search_key": {
-                        "query": query,
-                        "analyzer": "toponym_whitespace_analyzer",
-                        "boost": 1.0,
-                    }
-                }
-            }
-            for query in query_strings
-        ]
-        if distance_threshold != 0:
-            for query in name_queries:
-                query["match"]["search_key"]["fuzziness"] = distance_threshold
-
-        if abbrev_pattern:
-            name_queries.append({"regexp": {"search_key": abbrev_pattern}})
-
-        final_name_query = {"dis_max": {"queries": name_queries}}
-
-        if len(restrictions) > 0:
-            final_query = {"bool": {"must": [final_name_query] + restrictions}}
-        else:
-            final_query = final_name_query
-
-        response = self.es.search(index=self.index_name, query=final_query, size=limit)
-
-        matches = []
-        for hit in response["hits"]["hits"]:
-            source = hit["_source"]
-            matches.append(
-                IndexSearchMatch(
-                    score=hit["_score"],
-                    matched_key=source.get("search_key"),
-                    nfc_name=source.get("nfc_name"),
-                    retrieved_data=source.get("name_data"),
-                    metadata = response
-                )
-            )
-        return matches
-
-    def search(
-        self,
-        query_string,
-        distance_threshold: int,
-        similarity_threshold: float,
-        limit: int = 10,
-        match_abbreviations: bool = True,
-        entity_types: Optional[Collection["GeographicalEntityType"]] = None,
-        country_codes: Optional[Collection[str]] = None,
-        admin_codes: Optional[Collection["GeonamesAdminCodes"]] = None,
-    ):
-        nfc_query = unicodedata.normalize("NFC", query_string)
-        query_strings = ascii_normalized_strings(nfc_query)
-        if match_abbreviations:
-            abbrev_pattern = abbreviation_pattern_to_regex(query_string)
-        else:
-            abbrev_pattern = None
-
-        restrictions = []
-        if entity_types is not None:
-            restrictions.append(self._build_entity_type_restriction(entity_types))
-        if country_codes is not None:
-            restrictions.append(self._build_country_code_restriction(country_codes))
-        if admin_codes is not None:
-            admin_code_restriction = self._build_admin_code_restriction(admin_codes)
-            if admin_code_restriction is not None:
-                restrictions.append(admin_code_restriction)
-
-        for i in range(0, distance_threshold + 1):
-            matches = self._search_inner(
-                query_strings=query_strings,
-                abbrev_pattern=abbrev_pattern,
-                restrictions=restrictions,
-                distance_threshold=i,
-                similarity_threshold=similarity_threshold,
-                limit=limit,
-            )
-            if len(matches) > 0:
-                break
-
-        return IndexSearchResult(
-            nfc_query=nfc_query,
-            query_strings=query_strings,
-            abbreviation_pattern=abbrev_pattern,
-            matches=matches,
-        )    
-
-class SymSpellSearchIndex:
-    def __init__(self):
-        raise NotImplementedError("This class is being refactored and should not be used in its current state.")
 
 # Based on observation of the distribution of countries
 PRIORITY_COUNTRIES = [
@@ -886,10 +453,10 @@ PRIORITY_COUNTRIES = [
 class GeoDBSearch(LinkingStep):
     def __init__(
             self, search_cache_db, 
-            search_index : TantivySearchIndex | ElasticSearchClient, materialize_table : bool = True,
+            search_index : GeoSearchIndex, materialize_table : bool = True,
             distance_threshold : int = 2,
             similarity_threshold : float = 0.8,
-            topk : int = 5,
+            topk : int = 50,
             priority_countries : Optional[list[str]] = PRIORITY_COUNTRIES,
             geo_db_path : str = "geo.duckdb"
         ):
@@ -905,14 +472,7 @@ class GeoDBSearch(LinkingStep):
     def initialize(self):
         self.connection = duckdb.connect(self.search_cache_db_path)
         self.connection.execute(f"ATTACH DATABASE '{self.geo_db_path}' AS geo_db (READ_ONLY)")
-        self.connection.execute(GERMAN_ASCII_DUCKDB_MACRO)
         self.search_index.populate_index(self.connection, sql_query=POP_LANGUAGE_FILTERED_NAMES_SELECT, skip_if_exists=True)
-        #self.connection.execute("""
-        #CREATE TABLE IF NOT EXISTS mat_geographical_names_with_entities AS
-        #SELECT * FROM geo_db.geographical_names_with_entities
-        #""")
-        #self.connection.execute("ALTER TABLE mat_geographical_names_with_entities ADD PRIMARY KEY (name_id)")
-        #self.connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_name_id ON mat_geographical_names_with_entities(name_id)")
         return super().initialize()
     
     def finalize(self):
@@ -926,7 +486,6 @@ class GeoDBSearch(LinkingStep):
         admin_codes : Optional[Collection[GeonamesAdminCodes]]
     ) -> IndexSearchResult:
         entity_type = entity.entity_type
-        all_entity_types = list(GeographicalEntityType)
         if entity_type != GeographicalEntityType.Country and country_codes is None:
             country_codes = self.priority_countries
         index_matches = self.search_index.search(
@@ -939,37 +498,6 @@ class GeoDBSearch(LinkingStep):
             country_codes=country_codes,
             admin_codes=admin_codes
         )
-        # TODO If I comment this, levenshtein gives an error (????)
-        if len(index_matches.matches) == 0 and (
-                country_codes is not None or admin_codes is not None
-            ):
-            index_matches = self.search_index.search(
-                query_string=entity.raw_text,
-                distance_threshold=self.distance_threshold,
-                similarity_threshold=self.similarity_threshold,
-                limit=self.topk,
-                match_abbreviations=True,
-                entity_types=all_entity_types,
-                country_codes=country_codes,
-                admin_codes=admin_codes
-            )
-        if len(index_matches.matches) == 0:
-            index_matches = self.search_index.search(
-                query_string=entity.raw_text,
-                distance_threshold=self.distance_threshold,
-                similarity_threshold=self.similarity_threshold,
-                limit=self.topk,
-                match_abbreviations=True,
-                entity_types=all_entity_types
-            )
-        # if len(index_matches.matches) == 0:
-        #     index_matches = self.search_index.search(
-        #         query_string=entity.raw_text,
-        #         distance_threshold=self.distance_threshold,
-        #         similarity_threshold=self.similarity_threshold,
-        #         limit=self.topk,
-        #         match_abbreviations=True
-        #     )
         return index_matches
     
     def _parse_data(self, index_result : IndexSearchResult) -> Iterable[MatchedName]:
@@ -982,7 +510,9 @@ class GeoDBSearch(LinkingStep):
             clean_alt_name = None
             cleaned_edit_distance = None
             for query_string in index_result.query_strings:
-                query_edit_distance, query_similarity = similarity_and_distance(query_string, index_match.matched_key, self.distance_threshold)
+                try:
+                    query_edit_distance, query_similarity = similarity_and_distance(query_string, index_match.matched_key, self.distance_threshold)
+                except: raise RuntimeError(f"Error calculating similarity and distance between '{query_string}' and '{index_match.matched_key}'")
                 if query_similarity > max_clean_similarity:
                     max_clean_similarity = query_similarity
                     clean_alt_name = query_string
@@ -1027,267 +557,3 @@ class GeoDBSearch(LinkingStep):
                 matches=matched_names
             ))
         return dataclasses.replace(address, matched_entities=new_entities)
-
-
-def falling_query_list(
-        connection : duckdb.DuckDBPyConnection, 
-        queries : list[tuple[bool, str, list]]
-    ) -> tuple[pd.DataFrame, int]:
-    matches = None
-    query_idx = -1
-    for i, (use, query, params) in enumerate(queries):
-        if not use:
-            continue
-        matches = connection.execute(query, params).fetch_df()
-        query_idx = i
-        if len(matches) > 0: break
-    return matches, query_idx
-
-class GeonamesSearch(contextlib.AbstractContextManager):
-    def __init__(
-            self,
-            topk : int = 5,
-            threshold : int | float = 3,
-            search_cache_db : str | Literal[':memory:'] = "search_cache.duckdb"
-        ):
-        raise NotImplementedError("This class is being refactored and should not be used in its current state.")
-        self.connection = duckdb.connect(search_cache_db)
-        build_geonames_db.attach_or_init_duckdb(self.connection)
-        self.connection.execute(CANDIDATE_NAMES_INIT_QUERY)
-        self.topk = topk
-        self.threshold = threshold
-    
-    def search_entities(
-            self,
-        parts : list[str],
-        entity_type : Optional[GeographicalEntityType] = None,
-        country_hints : Optional[list[list[str]]] = None,
-        fall_to_all_entities : bool = False,
-    ) -> list[pd.DataFrame]:
-        """
-        Match extracted address parts of a given type to place entities on external knowledge graphs.
-        """
-        # convert in case it's a series
-        if not isinstance(parts, list):
-            parts = list(parts)
-        if country_hints is None:
-            country_hints = itertools.repeat(None, len(parts))
-        # No strip_accents in python. Additionally, using the exact same normalization function might avoid problems
-        cleaned_strings = self.connection.execute(
-            "SELECT [strip_accents(nfc_normalize(x)) FOR x IN $1] AS cleaned_parts",
-            [[p or "" for p in parts]]
-        ).fetchone()[0]
-        query = build_closest_matches_query(entity_type, self.topk, self.threshold)
-        reduced_query = build_closest_matches_query(entity_type, self.topk, self.threshold, table="reduced_candidate_names")
-        exact_query = build_closest_matches_query(entity_type, self.topk, 0, table="candidate_names")
-        exact_reduced_query = build_closest_matches_query(entity_type, self.topk, 0, table="reduced_candidate_names")
-        all_types_query = build_closest_matches_query(None, self.topk, self.threshold)
-        results = []
-        query_hits = defaultdict(int)
-        for part, cleaned, country_hint in zip(parts, cleaned_strings, country_hints):
-            if pd.isna(part) or part.strip() == "":
-                results.append(pd.DataFrame())
-                continue
-            abbreviation_regex = abbreviation_pattern_to_sql_regex(cleaned)
-            matches = []
-            start = time.monotonic()
-            matches, hit_query_idx = falling_query_list(
-                self.connection,
-                [
-                    (country_hint is not None, exact_query, [part, country_hint, abbreviation_regex]),
-                    (True, exact_query, [part, None, abbreviation_regex]),
-                    (entity_type != GeographicalEntityType.Country, exact_reduced_query, [part, None, abbreviation_regex]),
-                    (country_hint is not None, query, [part, country_hint, abbreviation_regex]),
-                    (entity_type != GeographicalEntityType.Country, reduced_query, [part, None, abbreviation_regex]),
-                    (True, query, [part, None, abbreviation_regex]),
-                    (fall_to_all_entities, all_types_query, [part, None, abbreviation_regex])
-                ]
-            )
-            end = time.monotonic()
-            assert isinstance(matches, pd.DataFrame)
-            query_hits[hit_query_idx] += 1
-            matches.insert(len(matches.columns), "search_time", end - start)
-            results.append(matches)
-        return results
-
-    def search_parsed_addresses(self, addresses : pd.DataFrame | list[dict]) -> pd.DataFrame:
-        """
-        Match parsed addresses to place entities on external knowledge graphs.
-        """
-        if not isinstance(addresses, pd.DataFrame):
-            addresses = pd.DataFrame(addresses)
-        else:
-            addresses = addresses.reset_index(drop=True)
-        addresses = addresses[[c for c in addresses.columns if c in GeographicalEntityType.__members__]]
-        matches = []
-        country_hints = {}
-        for entity_type in GeographicalEntityType:
-            if entity_type.name not in addresses.columns:
-                continue
-            target_cols = [entity_type.name, "Country"] if entity_type != GeographicalEntityType.Country else ["Country"]
-            targets = addresses[target_cols].reset_index(names="input_row").dropna(subset=[entity_type.name])
-            if len(targets) == 0:
-                continue
-            nodupes = targets.drop_duplicates(subset=target_cols)
-            nodupes['country_hints'] = pd.Series(country_hints.get(country) for country in nodupes["Country"])
-            print(f"Country hints set for {len(nodupes['country_hints'].dropna())} / {len(nodupes)} addresses for entity type {entity_type.name}")
-            nodupes = nodupes.fillna({"country_hints": None}).reset_index(drop=True)
-            print(f"Starting search for entity type {entity_type.name}")
-            start = time.monotonic()
-            entity_matches = self.search_entities(nodupes[entity_type.name], country_hints=nodupes["country_hints"], entity_type=entity_type)
-            end = time.monotonic()
-            print(f"Search for entity type {entity_type.name} took {utils.format_time(end - start)} and returned {sum(len(df) for df in entity_matches)} matches")
-            if entity_type == GeographicalEntityType.Country:
-                for idx, match in enumerate(entity_matches):
-                    if len(match) > 0 and not match["country_code"].isna().all():
-                        country = addresses.loc[nodupes.iloc[idx]["input_row"], "Country"]
-                        hints = country_hints.setdefault(country, [])
-                        hints.extend(match["country_code"].dropna().unique())
-                print(f"Country hints set for {len(country_hints)} countries")
-            reduped_entity_matches = []
-            for _, row in targets.iterrows():
-                deduped_idx = nodupes[(nodupes[target_cols].fillna("") == row[target_cols].fillna("")).all(axis=1)].index
-                if len(deduped_idx) != 1:
-                    warnings.warn(f"Expected exactly one deduplicated index for {entity_type.name}='{row[entity_type.name]}' and Country='{row['Country']}', but got {len(deduped_idx)}. This should not happen.")
-                row_matches = entity_matches[deduped_idx[0]].copy()
-                row_matches["input_row"] = row["input_row"]
-                reduped_entity_matches.append(row_matches)
-            assert all("input_row" in df.columns for df in reduped_entity_matches)
-            reduped_entity_matches = pd.concat(reduped_entity_matches)
-            reduped_entity_matches = reduped_entity_matches.drop(columns=["country_restriction"])
-            reduped_entity_matches["entity_type"] = entity_type.name
-            reduped_entity_matches.set_index(["input_row", "entity_type", "entity_rank", "geonameId"], inplace=True)
-            matches.append(reduped_entity_matches)
-        result = pd.concat(matches).sort_index()
-        return result
-
-    def find_parents(self, addr_matches : pd.DataFrame, match : pd.Series) -> list[pd.DataFrame]:
-        """
-        Finds parent matches according to geographical hierarchy for the given match.
-        """
-        # Method heavily refactored with GPT-5 mini
-        parents: list[pd.DataFrame] = []
-        if addr_matches is None or len(addr_matches) == 0:
-            return parents
-
-        # Exclude matches with the same entity type and the match itself
-        candidates = addr_matches[addr_matches["entity_type"] != match["entity_type"]].copy()
-        try:
-            candidates = candidates[candidates["geonameId"] != match["geonameId"]]
-        except Exception:
-            pass
-
-        # Admin code columns from country + admin1..admin5
-        admin_cols = ["country_code"] + [f"admin{n}_code" for n in range(1, 6)]
-
-        # Build masks for country and admin levels 1..5
-        admin_masks: list[pd.Series] = []
-        admin_masks.append(candidates["entity_type"] == "Country")
-        for n in range(1, 6):
-            mask = (
-                (candidates["feature_class"] == "A")
-                & candidates["feature_code"].str.startswith(f"ADM{n}", na=False)
-                & (candidates["entity_type"] != "Country")
-            )
-            admin_masks.append(mask)
-
-        # For each level, pick candidates whose admin codes match the match's codes up to that level
-        for i, level_mask in enumerate(admin_masks):
-            code_cols = admin_cols[: i + 1]
-            if len(code_cols) == 0:
-                continue
-            comp_mask = pd.Series(True, index=candidates.index)
-            for col in code_cols:
-                match_val = match.get(col, None)
-                match_str = "" if pd.isna(match_val) else str(match_val)
-                comp_mask &= candidates[col].fillna("").astype(str) == match_str
-            match_mask = level_mask & comp_mask
-            parents.append(candidates[match_mask])
-
-        # parentCityIds and parentRegionIds are expected to be native Python
-        # iterables (lists/tuples/sets) or absent. If present, match against them.
-        parent_city_ids = match.get("parentCityIds", None)
-        if parent_city_ids is not None and not (isinstance(parent_city_ids, float) and pd.isna(parent_city_ids)):
-            try:
-                ids = {str(x) for x in parent_city_ids}
-            except TypeError:
-                ids = {str(parent_city_ids)}
-            parents.append(candidates[candidates["geonameId"].astype(str).isin(ids)])
-
-        parent_region_ids = match.get("parentRegionIds", None)
-        if parent_region_ids is not None and not (isinstance(parent_region_ids, float) and pd.isna(parent_region_ids)):
-            try:
-                ids = {str(x) for x in parent_region_ids}
-            except TypeError:
-                ids = {str(parent_region_ids)}
-            parents.append(candidates[candidates["geonameId"].astype(str).isin(ids)])
-
-        return parents
-
-    def group_hierarchical_matches(self, matches : pd.DataFrame) -> pd.DataFrame:
-        return matches.groupby("input_row").apply(self.group_address_hierarchical_matches).reset_index(level=2, drop=True)
-
-    def group_address_hierarchical_matches(self, addr_matches : pd.DataFrame) -> pd.DataFrame:
-        """
-        Groups different matches of the same address for different entity types that are hierarchically dependent.
-        """
-        orig_index_levels = addr_matches.index.names
-        addr_matches = addr_matches.reset_index()
-        ungrouped_entities = set(addr_matches["geonameId"])
-        matched_entity_types = [GeographicalEntityType[entity_type] for entity_type in addr_matches["entity_type"].unique()]
-        matched_entity_types.sort(reverse=True)
-        grouped_matches : list[tuple[tuple[int, float], pd.DataFrame]] = []
-        for entity_type in matched_entity_types:
-            for _, match in addr_matches[addr_matches["entity_type"] == entity_type.entity_type].iterrows():
-                if match["geonameId"] not in ungrouped_entities:
-                    continue
-                ungrouped_entities.remove(match["geonameId"])
-                parents = self.find_parents(addr_matches, match)
-                for parent in parents:
-                    ungrouped_entities.difference_update(parent["geonameId"])
-                hierarchy_group = pd.concat([match.to_frame().T, *parents])
-                mean_rank = hierarchy_group["entity_rank"].mean()
-                grouped_matches.append(((-len(hierarchy_group), mean_rank), hierarchy_group))
-            if not ungrouped_entities:
-                break
-        grouped_matches.sort(key=lambda x: x[0])
-        groups = []
-        group_rank = 0
-        last_sort_key = None
-        for i, (sort_key, group) in enumerate(grouped_matches):
-            group.insert(0, "group_id", i)
-            if sort_key != last_sort_key:
-                group_rank = i + 1
-                last_sort_key = sort_key
-            group.insert(1, "group_rank", group_rank)
-            groups.append(group)
-        result = pd.concat(groups)
-        result.set_index(["group_id"] + orig_index_levels, inplace=True)
-        return result
-
-    def disambiguate(self, matches : pd.DataFrame, difference_threshold : float = 0) -> pd.DataFrame:
-        """
-        Returns the best match for each input row unless there are ties.
-        """
-        # TODO continue later
-        raise NotImplementedError()
-        if "group_id" in matches.index.names:
-            matches_per_input = matches.groupby("input_row")
-            best_per_input = matches_per_input.first()
-            unambiguous = matches_per_input.transform(
-                lambda group: group[(group["group_rank"] == 1) & ((group["cleaned_distance"].mean()))]
-            )
-            
-
-    def close(self):
-        self.connection.close()
-
-    def __enter__(self):
-        return super().__enter__()
-    
-    def __exit__(self, exc_type, exc_value, traceback):
-        self.close()
-        return super().__exit__(exc_type, exc_value, traceback)
-    
-    def __del__(self):
-        self.close()

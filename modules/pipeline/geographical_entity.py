@@ -24,10 +24,20 @@ class GeographicalEntityType(GeographicalEntityTypeProperties, Enum):
             return NotImplemented
         return self.hierarchy_level > other.hierarchy_level
     
+    def __ge__(self, other):
+        if not isinstance(other, GeographicalEntityType):
+            return NotImplemented
+        return self.hierarchy_level >= other.hierarchy_level
+
     def __lt__(self, other):
         if not isinstance(other, GeographicalEntityType):
             return NotImplemented
         return self.hierarchy_level < other.hierarchy_level
+    
+    def __le__(self, other):
+        if not isinstance(other, GeographicalEntityType):
+            return NotImplemented
+        return self.hierarchy_level <= other.hierarchy_level
 
 class GeographicalEntityProvider(str, Enum):
     #TODO check codes against actual URIs
@@ -130,13 +140,16 @@ class GeographicalEntity:
         country_data = data.pop("country", None)
         admin_codes_data = data.pop("admin_codes", None)
         coordinates = data.pop("coordinates", None)
+        possible_entity_types = data.pop("possible_entity_types", [])
+        possible_entity_types = [GeographicalEntityType[t] for t in possible_entity_types]
         provider = GeographicalEntityProvider.from_iri(data.get("iri"))
         return cls(
             **data,
             country=CountryData(**country_data) if country_data is not None else None,
             provider=provider,
             admin_codes=GeonamesAdminCodes(**admin_codes_data) if admin_codes_data is not None else GeonamesAdminCodes(None, None, None, None, None),
-            coordinates=Coordinates(**coordinates) if coordinates is not None else None
+            coordinates=Coordinates(**coordinates) if coordinates is not None else None,
+            possible_entity_types=possible_entity_types
         )
 
 @dataclass(frozen=True)

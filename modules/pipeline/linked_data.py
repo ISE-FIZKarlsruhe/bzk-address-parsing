@@ -69,22 +69,15 @@ class MatchedEntity:
     raw_text: str
     entity_type: GeographicalEntityType
     matches : Optional[list[MatchedName]] = None
+    linked_to : Optional[MatchedName] = None
     span : Optional[AddressSpan] = None
     nearby : bool = False # This entity is near the target address but the target may not be contained in it
-        
-    @property
-    def is_resolved(self) -> bool:
-        return self.linked_to is not None
-    
-    def __dict_encode__(self, default_encoder) -> dict:
-        return default_encoder(self).update({
-            "is_resolved": self.is_resolved
-        })
+
+
 
 @dataclass(frozen=True)
 class PossibleAddress:
-    main_entity : MatchedName
-    entities : list[MatchedName]
+    entities : list[MatchedEntity]
     score : float
     
 
