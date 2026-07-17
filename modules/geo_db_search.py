@@ -79,63 +79,8 @@ WHERE (
 ) AND len(entity.possible_entity_types) = 0
 """
 
-def abbreviation_pattern_to_sql_regex(part : str) -> str:
-    """
-    Converts an abbreviation pattern to a regex pattern that can be used in SQL.
-    """
-    #TODO delete?
-    initials = []
-    for char in part:
-        if char.isupper() and char.isalpha():
-            initials.append(char.lower())
-            #TODO arbitrary abbreviation size limit
-            # matches CSR and USSR, are there other important abbreviations that would be missed?
-            if len(initials) > 4:
-                initials = None
-                break
-        elif char == ".":
-            continue
-        else:
-            initials = None
-            break
-    if not initials and '.' in part:
-        initials = part.split(".")
-        if len(initials[-1]) == 0:
-            initials = initials[:-1]
-    if initials:
-        initials = [x.lower() for x in initials]
-        return "% ".join(initials) + "%"
-    else:
-        return None
-
-def abbreviation_pattern_to_regex(part : str) -> str:
-    """
-    Converts an abbreviation pattern to a regex pattern.
-    """
-    initials = []
-    for char in part:
-        if char.isupper() and char.isalpha():
-            initials.append(char.lower())
-            #TODO arbitrary abbreviation size limit
-            # matches CSR and USSR, are there other important abbreviations that would be missed?
-            if len(initials) > 4:
-                initials = None
-                break
-        elif char == ".":
-            continue
-        else:
-            initials = None
-            break
-    if not initials and '.' in part:
-        initials = part.split(".")
-        if len(initials[-1]) == 0:
-            initials = initials[:-1]
-    if initials:
-        initials = [x.lower() for x in initials]
-        return "[a-z]* ".join(initials) + "[a-z]*"
-    else:
-        return None
-
+# match periods follwoing an isolated letter
+_STRIP_PERIODS_ABBREV_REGEX = re.compile(r'((?<=\W\w)|(?<=^\w))\.')
 _STRIP_PUNCTUATION_REGEX = re.compile(r'[^\w\s]')
 _DEDUPE_WHITESPACE_REGEX = re.compile(r'\s+')
 
@@ -145,10 +90,14 @@ def ascii_normalize(nfc_string : str) -> str:
     This is used for matching against similarly normalized names in the database.
     """
     result = nfc_string.lower()
+    # Converts non ascii characters to ascii equivalents, e.g. "é" -> "e"
     result = unidecode.unidecode(result)
-    result = result.replace("-", " ")
-    result = _STRIP_PUNCTUATION_REGEX.sub('', result)
-    # TODO # result = _DEDUPE_WHITESPACE_REGEX.sub(' ', result).strip()
+    # strip periods to normalize abbreviations, e.g. "U.S.A." -> "USA"
+    result = _STRIP_PERIODS_ABBREV_REGEX.sub('', result)
+    # replace other punctuations with spaces eg. 
+    result = _STRIP_PUNCTUATION_REGEX.sub(' ', result)
+    result = _DEDUPE_WHITESPACE_REGEX.sub(' ', result)
+    result = result.strip()
     return result
 
 _GERMAN_NORMALIZATION_REPLACEMENTS = [
@@ -186,6 +135,20 @@ def normalized_search_strings(nfc_string : str) -> list[str]:
         return [basic_normalization]
     else:
         return [basic_normalization, german_normalization]
+    
+def abbreviation_pattern_to_regexes(part : str) -> str:
+    """
+    Converts an abbreviation pattern to a regex pattern.
+    """
+    prefixes = part.split(".")
+    if len(prefixes) == 1:
+        return None
+    ascii_regex_pattern = "[a-z]+ ".join([ascii_normalize(x) for x in prefixes]).strip()
+    german_regex_pattern = "[a-z]+ ".join([german_normalize(x) for x in prefixes]).strip()
+    if ascii_regex_pattern == german_regex_pattern:
+        return ascii_regex_pattern
+    else:
+        return f"({ascii_regex_pattern})|({german_regex_pattern})"
 
 class IndexSearchMatch(NamedTuple):
     score : float # score as returned by the the specific index search, meaning differs
@@ -206,7 +169,7 @@ class IndexSearchResult(NamedTuple):
 class GeoSearchIndex(ABC):
     index_descriptor : str
     @abstractmethod
-    def populate_index(self, geo_db_connection : duckdb.DuckDBPyConnection, sql_query : str, skip_if_exists=True):
+    def populate_index(self, row_retriever : Iterable[dict], skip_if_exists=True):
         pass
     @abstractmethod
     def search(
@@ -215,11 +178,11 @@ class GeoSearchIndex(ABC):
             distance_threshold : int, 
             similarity_threshold : float,
             limit : int = 10,
-            match_abbreviations : bool = True,
+            expand_abbreviations : bool = True,
             entity_types : Optional[Collection[GeographicalEntityType]] = None,
             country_codes : Optional[Collection[str]] = None,
             admin_codes : Optional[Collection[GeonamesAdminCodes]] = None
-        ):
+        ) -> IndexSearchResult:
         pass
 
 class TantivySearchIndex(GeoSearchIndex):
@@ -243,40 +206,31 @@ class TantivySearchIndex(GeoSearchIndex):
             ).build()
         )
 
-    def populate_index(self, geo_db_connection : duckdb.DuckDBPyConnection, sql_query : str, skip_if_exists=True):
+    def populate_index(self, row_retriever : Iterable[dict], skip_if_exists=True):
         if skip_if_exists and self.already_exists:
             self.index.reload()
             return
-        total_rows = geo_db_connection.execute("SELECT COUNT(*) FROM (" + sql_query + ")").fetchone()[0]
-        print(f"Populating Tantivy index with {total_rows} names from the geonames database...")
         with self.index.writer(num_threads=self.write_threads) as writer:
-            batch_iterator = geo_db_connection.execute(sql_query).to_arrow_reader(100_000)
-            pbar = tqdm(total=total_rows, desc="Populating Tantivy index")
-            for batch in batch_iterator:
-                columns = [col.to_pylist() for col in batch.columns]
-                for row_tuple in zip(*columns):
-                    row = {name : value for name, value in zip(batch.column_names, row_tuple)}
-                    nfc_name = unicodedata.normalize("NFC", row["name"])
-                    for search_key in normalized_search_strings(nfc_name):
-                        if search_key is None or search_key.strip() == "":
-                            continue
-                        doc = tantivy.Document()
-                        doc.add_text("nfc_name", nfc_name)
-                        doc.add_text("search_key", search_key)
-                        doc.add_bytes("name_data", json.dumps(row).encode("utf-8"))
+            for row in row_retriever:
+                nfc_name = unicodedata.normalize("NFC", row["name"])
+                for search_key in normalized_search_strings(nfc_name):
+                    if search_key is None or search_key.strip() == "":
+                        continue
+                    doc = tantivy.Document()
+                    doc.add_text("nfc_name", nfc_name)
+                    doc.add_text("search_key", search_key)
+                    doc.add_bytes("name_data", json.dumps(row).encode("utf-8"))
 
-                        # extra fields for search restriction
-                        entity_types = row["entity"].get("entity_types", [])
-                        for entity_type in GeographicalEntityType:
-                            doc.add_boolean(entity_type.entity_type, entity_type.entity_type in entity_types)
-                        doc.add_text("country_code", row["entity"]["country"]["iso_code"] or "")
-                        admin_codes = row["entity"].get("admin_codes", {})
-                        for admin_level in range(1, 6):
-                            admin_code = admin_codes.get(f"admin{admin_level}_code")
-                            doc.add_text(f"admin{admin_level}_code", admin_code or "")
-                        writer.add_document(doc)
-                        pbar.update(1)
-            pbar.close()
+                    # extra fields for search restriction
+                    entity_types = row["entity"].get("possible_entity_types", [])
+                    for entity_type in GeographicalEntityType:
+                        doc.add_boolean(entity_type.entity_type, entity_type.entity_type in entity_types)
+                    doc.add_text("country_code", row["entity"]["country"]["iso_code"] or "")
+                    admin_codes = row["entity"].get("admin_codes", {})
+                    for admin_level in range(1, 6):
+                        admin_code = admin_codes.get(f"admin{admin_level}_code")
+                        doc.add_text(f"admin{admin_level}_code", admin_code or "")
+                    writer.add_document(doc)
         self.index.reload()
 
     def create_schema(self):
@@ -289,7 +243,7 @@ class TantivySearchIndex(GeoSearchIndex):
         )
         # TODO make fields fast=True
         # search keys
-        schema_builder.add_text_field("search_key", stored=True, **text_field_options)
+        schema_builder.add_text_field("search_key", stored=True, fast=True, **text_field_options)
         # TODO schema_builder.add_text_field("search_key", stored=True, fast=True, tokenizer_name='whitespace')
         # json blob with the original data
         schema_builder.add_bytes_field("name_data", stored=True, indexed=False)
@@ -298,10 +252,10 @@ class TantivySearchIndex(GeoSearchIndex):
 
         # extra fields for search restriction
         for entity_type in GeographicalEntityType:
-            schema_builder.add_boolean_field(entity_type.entity_type, indexed=True)
-        schema_builder.add_text_field("country_code", **text_field_options)
+            schema_builder.add_boolean_field(entity_type.entity_type, fast=True, indexed=True)
+        schema_builder.add_text_field("country_code", fast=True, **text_field_options)
         for code in ["admin1_code", "admin2_code", "admin3_code", "admin4_code", "admin5_code"]:
-            schema_builder.add_text_field(code, **text_field_options)
+            schema_builder.add_text_field(code, fast=True, **text_field_options)
         return schema_builder.build()
 
     def _build_entity_type_restriction(
@@ -352,15 +306,14 @@ class TantivySearchIndex(GeoSearchIndex):
 
 
     def _search_inner(
-            self,  
-            query_strings : list[str], 
-            abbrev_pattern : Optional[str], 
-            restrictions : list[tuple[tantivy.Occur, tantivy.Query]], 
-            distance_threshold : int, 
-            similarity_threshold : float,
-            limit : int
+            self, 
+            limit : int,
+            query_strings : list[str] = [], 
+            abbrev_pattern : Optional[str] = None,
+            hints : list[tuple[tantivy.Occur, tantivy.Query]] = [],
+            distance_threshold : int = 0,
         ) -> list[IndexSearchMatch]:
-        if distance_threshold == 0 or similarity_threshold == 1.0:
+        if distance_threshold == 0:
             name_queries = [
                 tantivy.Query.term_query(self.schema, "search_key", query, index_option='basic')
                 for query in query_strings
@@ -375,9 +328,9 @@ class TantivySearchIndex(GeoSearchIndex):
         if abbrev_pattern:
             name_queries.append(tantivy.Query.regex_query(self.schema, "search_key", abbrev_pattern))
         final_name_query = tantivy.Query.disjunction_max_query(name_queries)
-        if len(restrictions) > 0:
+        if len(hints) > 0:
             final_query = tantivy.Query.boolean_query(
-                [(tantivy.Occur.Must, final_name_query)] + restrictions)
+                [(tantivy.Occur.Must, final_name_query)] + hints)
         else:
             final_query = final_name_query
         searcher = self.index.searcher()
@@ -399,35 +352,44 @@ class TantivySearchIndex(GeoSearchIndex):
             distance_threshold : int, 
             similarity_threshold : float,
             limit : int = 10,
-            match_abbreviations : bool = True,
+            expand_abbreviations : bool = True,
             entity_types : Optional[Collection[GeographicalEntityType]] = None,
             country_codes : Optional[Collection[str]] = None,
             admin_codes : Optional[Collection[GeonamesAdminCodes]] = None
         ):
+        if similarity_threshold == 1.0:
+            distance_threshold = 0
         nfc_query = unicodedata.normalize("NFC", query_string)
         query_strings = normalized_search_strings(nfc_query)
-        if match_abbreviations:
-            abbrev_pattern = abbreviation_pattern_to_regex(query_string)
+        if expand_abbreviations:
+            abbrev_pattern = abbreviation_pattern_to_regexes(nfc_query)
         else: abbrev_pattern = None
         
-        restrictions = []
+        hints = []
         if entity_types is not None:
-            restrictions.append((tantivy.Occur.Should, self._build_entity_type_restriction(entity_types)))
+            hints.append((tantivy.Occur.Should, self._build_entity_type_restriction(entity_types)))
         if country_codes is not None:
-            restrictions.append((tantivy.Occur.Should, self._build_country_code_restriction(country_codes)))
+            hints.append((tantivy.Occur.Should, self._build_country_code_restriction(country_codes)))
         if admin_codes is not None:
             admin_code_restriction = self._build_admin_code_restriction(admin_codes)
             if admin_code_restriction is not None:
-                restrictions.append((tantivy.Occur.Should, admin_code_restriction))
-        for i in range(0, distance_threshold + 1):
-            matches = self._search_inner(
-                query_strings=query_strings,
-                abbrev_pattern=abbrev_pattern,
-                restrictions=[], # TODO reatach restrictions,
-                distance_threshold=i,
-                similarity_threshold=similarity_threshold,
-                limit=limit
-            )
+                hints.append((tantivy.Occur.Should, admin_code_restriction))
+        def _falling_queries():
+            # exact matches first
+            other_params = dict(hints=hints, limit=limit)
+            yield self._search_inner(
+                query_strings=query_strings, distance_threshold=0, **other_params)
+            # abbreviation matches second
+            if abbrev_pattern is not None:
+                yield self._search_inner(
+                    abbrev_pattern=abbrev_pattern, distance_threshold=0, **other_params)
+            # fuzzy matches last
+            for i in range(0, distance_threshold + 1):
+                yield self._search_inner(
+                    query_strings=query_strings, distance_threshold=i, **other_params)
+
+        for query_result in _falling_queries():
+            matches = query_result
             if len(matches) > 0:
                 break
         return IndexSearchResult(
@@ -450,13 +412,22 @@ PRIORITY_COUNTRIES = [
     "RU", # Russia
 ]
 
+SEARCHABLE_ENTITY_TYPES = [
+    GeographicalEntityType.Country,
+    GeographicalEntityType.State,
+    GeographicalEntityType.Region ,
+    GeographicalEntityType.District,
+    GeographicalEntityType.City,
+    GeographicalEntityType.Neighborhood
+]
+
 class GeoDBSearch(LinkingStep):
     def __init__(
             self, search_cache_db, 
             search_index : GeoSearchIndex, materialize_table : bool = True,
             distance_threshold : int = 2,
             similarity_threshold : float = 0.8,
-            topk : int = 50,
+            topk : int = 20,
             priority_countries : Optional[list[str]] = PRIORITY_COUNTRIES,
             geo_db_path : str = "geo.duckdb"
         ):
@@ -472,7 +443,19 @@ class GeoDBSearch(LinkingStep):
     def initialize(self):
         self.connection = duckdb.connect(self.search_cache_db_path)
         self.connection.execute(f"ATTACH DATABASE '{self.geo_db_path}' AS geo_db (READ_ONLY)")
-        self.search_index.populate_index(self.connection, sql_query=POP_LANGUAGE_FILTERED_NAMES_SELECT, skip_if_exists=True)
+        def row_retriever(sql_query : str) -> Iterable[dict]:
+            total_rows = self.connection.execute("SELECT COUNT(*) FROM (" + sql_query + ")").fetchone()[0]
+            print(f"Populating {self.search_index.index_descriptor} index with {total_rows} names from the geo database...")
+            batch_iterator = self.connection.execute(sql_query).to_arrow_reader(10_000)
+            pbar = tqdm(total=total_rows, desc="Populating search index")
+            for batch in batch_iterator:
+                columns = [col.to_pylist() for col in batch.columns]
+                for row_tuple in zip(*columns):
+                    row = {name : value for name, value in zip(batch.column_names, row_tuple)}
+                    yield row
+                pbar.update(len(batch))
+            pbar.close()
+        self.search_index.populate_index(row_retriever(POP_LANGUAGE_FILTERED_NAMES_SELECT), skip_if_exists=True)
         return super().initialize()
     
     def finalize(self):
@@ -493,7 +476,7 @@ class GeoDBSearch(LinkingStep):
             distance_threshold=self.distance_threshold,
             similarity_threshold=self.similarity_threshold,
             limit=self.topk,
-            match_abbreviations=True,
+            expand_abbreviations=True,
             entity_types=[entity_type],
             country_codes=country_codes,
             admin_codes=admin_codes
@@ -542,6 +525,9 @@ class GeoDBSearch(LinkingStep):
         country_codes = set()
         admin_codes = set()
         for entity in sorted(address.matched_entities, key=lambda e: e.entity_type):
+            if entity.entity_type not in SEARCHABLE_ENTITY_TYPES:
+                new_entities.append(entity)
+                continue
             index_result = self._search_entity(
                 entity, 
                 country_codes=country_codes if len(country_codes) > 0 else None, 

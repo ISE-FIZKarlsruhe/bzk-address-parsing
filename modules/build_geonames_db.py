@@ -436,9 +436,9 @@ def populate_names_from_geonames(con: duckdb.DuckDBPyConnection):
             SELECT 
                 'https://sws.geonames.org/' || geonameId AS iri,
                 alternateName AS name,
-                isPreferredName AS is_preferred_name,
-                isShortName AS is_short_name,
-                isColloquial AS is_colloquial,
+                (isPreferredName = 1) AS is_preferred_name,
+                (isShortName = 1) AS is_short_name,
+                (isColloquial = 1) AS is_colloquial,
                 'https://sws.geonames.org/' AS name_provider,
                 CASE 
                     WHEN isolanguage IS NULL THEN ''
@@ -449,8 +449,8 @@ def populate_names_from_geonames(con: duckdb.DuckDBPyConnection):
                 columns = {
                     'alternateNameId': 'INTEGER', 'geonameId': 'INTEGER', 
                     'isolanguage': 'TEXT', 'alternateName': 'TEXT',
-                    'isPreferredName': 'BOOLEAN', 'isShortName': 'BOOLEAN', 'isColloquial': 'BOOLEAN',
-                    'isHistoric': 'BOOLEAN'
+                    'isPreferredName': 'INTEGER', 'isShortName': 'INTEGER', 'isColloquial': 'INTEGER',
+                    'isHistoric': 'INTEGER'
                 }
             )
             WHERE alternateName != '' AND alternateName IS NOT NULL
@@ -935,7 +935,7 @@ def init_duckdb(cleanup=True, update_sources : Optional[list[str]] = None, load_
     print("Creating and populating DuckDB database... (this may take up to 30 minutes)")
     if not update_sources:
         con.execute(_INIT_GEO_ENTITIES_TABLES_SQL)
-    update_sources = update_sources or []
+    update_sources = update_sources or ["geonames", "gnd", "wikidata"]
     if "geonames" in update_sources:
         populate_entities_from_geonames(con)
         populate_country_data(con)

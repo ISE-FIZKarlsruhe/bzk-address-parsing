@@ -1,4 +1,4 @@
-from modules.geo_db_search import GeoSearchIndex, IndexSearchMatch, IndexSearchResult, abbreviation_pattern_to_regex, normalized_search_strings
+from modules.geo_db_search import GeoSearchIndex, IndexSearchMatch, IndexSearchResult, abbreviation_pattern_to_regexes, normalized_search_strings
 from modules.pipeline.geographical_entity import GeographicalEntityType, GeonamesAdminCodes
 
 
@@ -8,7 +8,7 @@ from tqdm.auto import tqdm
 
 
 import unicodedata
-from typing import Collection
+from typing import Collection, Optional, Iterable
 
 
 class ElasticSearchClient(GeoSearchIndex):
@@ -93,7 +93,7 @@ class ElasticSearchClient(GeoSearchIndex):
     # Population
     # ------------------------------------------------------------------
 
-    def populate_index(self, geo_db_connection: duckdb.DuckDBPyConnection, sql_query: str, skip_if_exists=True):
+    def populate_index(self, row_retriever: Iterable[dict], skip_if_exists=True):
         if not self.es.ping():
             raise RuntimeError("Elasticsearch cluster is not reachable.")
 
@@ -110,47 +110,38 @@ class ElasticSearchClient(GeoSearchIndex):
             settings=self.create_settings(),
             mappings=self.create_mappings(),
         )
-
-        total_rows = geo_db_connection.execute("SELECT COUNT(*) FROM (" + sql_query + ")").fetchone()[0]
-        print(f"Populating Elasticsearch index with {total_rows} names from the geonames database...")
-
         def _actions():
-            batch_iterator = geo_db_connection.execute(sql_query).to_arrow_reader(100_000)
-            for batch in batch_iterator:
-                columns = [col.to_pylist() for col in batch.columns]
-                for row_tuple in zip(*columns):
-                    row = {name: value for name, value in zip(batch.column_names, row_tuple)}
-                    nfc_name = unicodedata.normalize("NFC", row["name"])
+            for row in row_retriever:
+                nfc_name = unicodedata.normalize("NFC", row["name"])
 
-                    search_keys = [
-                        search_key
-                        for search_key in normalized_search_strings(nfc_name)
-                        if search_key is not None and search_key.strip() != ""
-                    ]
-                    if not search_keys:
-                        continue
+                search_keys = [
+                    search_key
+                    for search_key in normalized_search_strings(nfc_name)
+                    if search_key is not None and search_key.strip() != ""
+                ]
+                if not search_keys:
+                    continue
 
-                    doc = {
-                        "nfc_name": nfc_name,
-                        # multivalued: ES indexes each entry as a separate term
-                        # occurrence in the same field, no array type needed
-                        "search_key": search_keys,
-                        "name_data": row,
-                        "country_code": row["entity"]["country"]["iso_code"] or "",
-                    }
+                doc = {
+                    "nfc_name": nfc_name,
+                    # multivalued: ES indexes each entry as a separate term
+                    # occurrence in the same field, no array type needed
+                    "search_key": search_keys,
+                    "name_data": row,
+                    "country_code": row["entity"]["country"]["iso_code"] or "",
+                }
 
-                    entity_types = row["entity"].get("entity_types", [])
-                    for entity_type in GeographicalEntityType:
-                        doc[entity_type.entity_type] = entity_type.entity_type in entity_types
+                entity_types = row["entity"].get("entity_types", [])
+                for entity_type in GeographicalEntityType:
+                    doc[entity_type.entity_type] = entity_type.entity_type in entity_types
 
-                    admin_codes = row["entity"].get("admin_codes", {})
-                    for admin_level in range(1, 6):
-                        admin_code = admin_codes.get(f"admin{admin_level}_code")
-                        doc[f"admin{admin_level}_code"] = admin_code or ""
+                admin_codes = row["entity"].get("admin_codes", {})
+                for admin_level in range(1, 6):
+                    admin_code = admin_codes.get(f"admin{admin_level}_code")
+                    doc[f"admin{admin_level}_code"] = admin_code or ""
 
-                    yield {"_index": self.index_name, "_source": doc}
+                yield {"_index": self.index_name, "_source": doc}
 
-        pbar = tqdm(total=total_rows, desc="Populating Elasticsearch index")
         success_count = 0
         for ok, item in helpers.streaming_bulk(
             self.es,
@@ -161,10 +152,8 @@ class ElasticSearchClient(GeoSearchIndex):
         ):
             if ok:
                 success_count += 1
-                pbar.update(1)
             else:
                 print(f"Failed to index document: {item}")
-        pbar.close()
 
         self.es.indices.refresh(index=self.index_name)
 
@@ -284,7 +273,7 @@ class ElasticSearchClient(GeoSearchIndex):
         nfc_query = unicodedata.normalize("NFC", query_string)
         query_strings = normalized_search_strings(nfc_query)
         if match_abbreviations:
-            abbrev_pattern = abbreviation_pattern_to_regex(query_string)
+            abbrev_pattern = abbreviation_pattern_to_regexes(query_string)
         else:
             abbrev_pattern = None
 

@@ -17,6 +17,12 @@ class BZKFieldName(str, Enum):
     VICTIM_BIRTH_PLACE = "VictimBirthPlace"
     VICTIM_DEATH_PLACE = "VictimDeathPlace"
 
+    def is_birthplace(self) -> bool:
+        return self == BZKFieldName.APPLICANT_BIRTH_PLACE or self == BZKFieldName.VICTIM_BIRTH_PLACE
+    
+    def is_current_address(self) -> bool:
+        return self == BZKFieldName.APPLICANT_CURRENT_ADDRESS or self == BZKFieldName.VICTIM_CURRENT_ADDRESS
+
 @dataclass(frozen=True)
 class MatchedName:
     geographical_name : GeographicalName
@@ -77,8 +83,10 @@ class MatchedEntity:
 
 @dataclass(frozen=True)
 class PossibleAddress:
+    reference_match : MatchedName
     entities : list[MatchedEntity]
     score : float
+    
     
 
 @dataclass(frozen=True)
@@ -88,4 +96,5 @@ class LinkedAddress:
     bzk_field_name: BZKFieldName
     matched_entities: list[MatchedEntity]
     possible_addresses: Optional[list[PossibleAddress]] = None
+    likely_addresses: Optional[list[PossibleAddress]] = None
     linked_to : Optional[PossibleAddress] = None
