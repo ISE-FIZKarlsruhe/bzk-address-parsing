@@ -1,5 +1,5 @@
-from dataclasses import dataclass
-from typing import Hashable, LiteralString, Optional, Callable, NamedTuple
+from dataclasses import dataclass, field
+from typing import Hashable, LiteralString, Optional, Callable, NamedTuple, Literal
 from enum import Enum
 from modules.pipeline.geographical_entity import (
     GeographicalEntityType,
@@ -8,6 +8,9 @@ from modules.pipeline.geographical_entity import (
 
 import pandas as pd
 from functools import cached_property
+import uuid
+
+from modules.pipeline.storage.frozendict import FrozenDict
 
 
 class BZKFieldName(str, Enum):
@@ -28,10 +31,11 @@ class MatchedName:
     geographical_name : GeographicalName
     nfc_query : str
     nfc_alt_name : str
-    cleaned_queries : list[str]
+    cleaned_query : str
     cleaned_alt_name : str
     cleaned_edit_distance : int
     matching_method : str
+    matching_score : float
     abbreviation_pattern : Optional[str]
     edit_distance : int
     is_abbreviation_match : bool
@@ -46,56 +50,115 @@ class MatchedName:
     
     @cached_property
     def cleaned_similarity(self) -> float:
-        max_sim = 0.0
-        for clean_query, clean_alt_name, clean_distance in zip(self.cleaned_queries, self.cleaned_alt_names, self.cleaned_edit_distances):
-            max_dist = max(len(clean_query), len(clean_alt_name))
-            if max_dist == 0:
-                return 1.0
-            else:
-                sim = 1 - clean_distance / max_dist
-                if sim == 1.0:
-                    return 1.0
-                if sim > max_sim:
-                    max_sim = sim
-        return max_sim
+        max_dist = max(len(self.cleaned_query), len(self.cleaned_alt_name))
+        if max_dist == 0:
+            return 1.0
+        else:
+            return 1 - self.cleaned_edit_distance / max_dist
             
     
     def __dict_encode__(self, default_encoder) -> dict:
-        return default_encoder(self).update({
+        data = default_encoder(self)
+        data.update({
             "raw_similarity": self.raw_similarity,
             "cleaned_similarity": self.cleaned_similarity
         })
+        return data
+    
 
 class AddressSpan(NamedTuple):
     start: int
     end: int
 
 @dataclass(frozen=True)
-class MatchedEntity:
+class RawEntity:
+    address_entity_id: str
     raw_text: str
     entity_type: GeographicalEntityType
-    matches : Optional[list[MatchedName]] = None
-    linked_to : Optional[MatchedName] = None
-    span : Optional[AddressSpan] = None
-    nearby : bool = False # This entity is near the target address but the target may not be contained in it
+    span : Optional[AddressSpan]
+    nearby : Optional[str | Literal['unspecified']] # This entity is near the target address but the target may not be contained in it
 
+    @classmethod
+    def with_parsed(cls, raw_text: str, entity_type: GeographicalEntityType | str, span: Optional[AddressSpan] = None, nearby: Optional[str | Literal['unspecified']] = None) -> 'RawEntity':
+        if isinstance(entity_type, str):
+            entity_type = GeographicalEntityType[entity_type]
+        return cls(
+            address_entity_id=str(uuid.uuid4()),
+            raw_text=raw_text,
+            entity_type=entity_type,
+            span=span,
+            nearby=nearby
+        )
 
+    def with_matches(self, matches: tuple[MatchedName, ...]) -> 'MatchedEntity':
+        return MatchedEntity(
+            address_entity_id=self.address_entity_id,
+            raw_text=self.raw_text,
+            entity_type=self.entity_type,
+            span=self.span,
+            nearby=self.nearby,
+            matches=matches
+        )
+    
+    def link_to(self, matched_name: MatchedName, scores: FrozenDict | dict[str, float]) -> 'LinkedEntity':
+        if isinstance(scores, dict):
+            scores = FrozenDict(scores)
+        return LinkedEntity(
+            address_entity_id=self.address_entity_id,
+            raw_text=self.raw_text,
+            entity_type=self.entity_type,
+            span=self.span,
+            nearby=self.nearby,
+            linked_to=matched_name,
+            scores=scores
+        )
+    
+    @classmethod
+    def __dict_decode__(cls, data: dict, targs, default_decoder):
+        if "matches" in data:
+            return default_decoder(data, MatchedEntity)
+        elif "linked_to" in data:
+            return default_decoder(data, LinkedEntity)
+        else:
+            return default_decoder(data, cls)
 
 @dataclass(frozen=True)
-class PossibleAddress:
-    reference_match : MatchedName
-    entities : list[MatchedEntity]
-    score : float
-    
-    
+class MatchedEntity(RawEntity):
+    matches : tuple[MatchedName, ...]
+
+class AnnotatedScore(NamedTuple):
+    score : int | float
+    comment : Optional[str] = None
+
+    @classmethod
+    def from_bool(cls, value : bool, negate : bool = False) -> "AnnotatedScore":
+        comment = "True" if value else "False"
+        score = 1.0 if value else 0.0
+        if negate:
+            score = 1.0 - score
+        return cls(score, comment)
+
+@dataclass(frozen=True)
+class LinkedEntity(RawEntity):
+    linked_to : MatchedName
+    scores : FrozenDict[str, AnnotatedScore]
 
 @dataclass(frozen=True)
 class LinkedAddress:
+    reference_entity : LinkedEntity
+    entities : tuple[LinkedEntity, ...]
+    scores : FrozenDict[str, float]
+    
+    
+
+@dataclass(frozen=True)
+class AddressProcessingData:
     card_id : str
     id : str
     full_address: str
     bzk_field_name: BZKFieldName
-    matched_entities: list[MatchedEntity]
-    possible_addresses: Optional[list[PossibleAddress]] = None
-    likely_addresses: Optional[list[PossibleAddress]] = None
-    linked_to : Optional[PossibleAddress] = None
+    entities: list[RawEntity]
+    possible_links: Optional[tuple[LinkedAddress, ...]] = None
+    likely_links: Optional[tuple[LinkedAddress, ...]] = None
+    linked_to : Optional[LinkedAddress] = None
+

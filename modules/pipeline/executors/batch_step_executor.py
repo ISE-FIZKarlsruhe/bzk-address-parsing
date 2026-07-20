@@ -2,7 +2,7 @@
 from typing import Optional
 
 from modules.pipeline.executors.executor_context import ExecutorContext
-from modules.pipeline.linked_data import LinkedAddress
+from modules.pipeline.linked_data import AddressProcessingData
 from dataclasses import dataclass
 import threading
 import queue
@@ -13,8 +13,8 @@ import time
 
 @dataclass
 class Job:
-    input_data : LinkedAddress
-    result : Optional[tuple[LinkedAddress, LinkingStepResult]] = None
+    input_data : AddressProcessingData
+    result : Optional[tuple[AddressProcessingData, LinkingStepResult]] = None
     finished : asyncio.Event
 
 # TODO correct this whole logic to use asyncio properly
@@ -43,7 +43,7 @@ class BatchGatheringThread:
         # Set to stop gathering thread
         self.killed = threading.Event()
 
-    def _gather_batch(self) -> tuple[list[Job], list[LinkedAddress]]:
+    def _gather_batch(self) -> tuple[list[Job], list[AddressProcessingData]]:
         jobs = []
         batch = []
         batch_gathering_deadline = time.monotonic() + self.batch_gathering_patience
@@ -139,7 +139,7 @@ class BatchStepExecutor(StepExecutor):
     def get_rate(self) -> float:
         return self.rate
 
-    async def apply(self, address : LinkedAddress) -> tuple[LinkedAddress, LinkingStepResult]:
+    async def apply(self, address : AddressProcessingData) -> tuple[AddressProcessingData, LinkingStepResult]:
         job = Job(input_data=address, finished=asyncio.Event())
         start = time.monotonic()
         await self.gathering_thread.submit_job(job)

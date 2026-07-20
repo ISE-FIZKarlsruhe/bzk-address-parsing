@@ -1,4 +1,4 @@
-from modules.pipeline.linked_data import LinkedAddress
+from modules.pipeline.linked_data import AddressProcessingData
 from modules.pipeline.linking_steps import LinkingStepResult, LinkingStep
 from modules.pipeline.executors.step_executor import StepExecutor
 from concurrent.futures import ThreadPoolExecutor
@@ -33,7 +33,7 @@ class MutexStepExecutor(StepExecutor):
     def get_rate(self) -> float:
         return self.rate
 
-    async def apply(self, address : LinkedAddress) -> tuple[LinkedAddress, LinkingStepResult]:
+    async def apply(self, address : AddressProcessingData) -> tuple[AddressProcessingData, LinkingStepResult]:
         loop = asyncio.get_running_loop()
         self._pending_count += 1
         start = time.monotonic()

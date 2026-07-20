@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from modules.pipeline.executors.executor_context import ExecutorContext
-from modules.pipeline.linked_data import LinkedAddress
+from modules.pipeline.linked_data import AddressProcessingData
 from modules.pipeline.linking_steps import LinkingStepResult
 from typing import Optional
 
@@ -27,7 +27,7 @@ class StepExecutor(ABC):
         self.executor_context = executor_context
 
     @abstractmethod
-    async def apply(self, address : LinkedAddress) -> tuple[LinkedAddress, LinkingStepResult]:
+    async def apply(self, address : AddressProcessingData) -> tuple[AddressProcessingData, LinkingStepResult]:
         pass
     
     @abstractmethod

@@ -5,9 +5,11 @@ import pprint
 from typing import Literal, Optional, NamedTuple
 
 from modules.pipeline.geographical_entity import GeographicalEntityType
-from modules.pipeline.linked_data import BZKFieldName, LinkedAddress, MatchedEntity, MatchedName, PossibleAddress
+from modules.pipeline.linked_data import BZKFieldName, AddressProcessingData, MatchedEntity, MatchedName, LinkedAddress
 import dataclasses
 from collections import defaultdict
+from modules.pipeline.linked_data import AnnotatedScore
+from modules.pipeline.storage.frozendict import FrozenDict
 
 
 def _is_admin_code_null(code : Optional[str]) -> bool:
@@ -33,35 +35,23 @@ def _tuple_abs_diff(t1 : tuple, t2 : tuple) -> float:
             return abs(a - b)
     return 0.0
 
-class Score(NamedTuple):
-    score : int | float
-    comment : Optional[str] = None
-
-    @classmethod
-    def from_bool(cls, value : bool, negate : bool = False) -> "Score":
-        comment = "True" if value else "False"
-        score = 1.0 if value else 0.0
-        if negate:
-            score = 1.0 - score
-        return cls(score, comment)
-
-NA_SCORE = Score(0.0, "Not applicable")
+NA_SCORE = AnnotatedScore(0.0, "Not applicable")
 
 class ScoredMatch(NamedTuple):
     match: MatchedName
-    scores: dict[str, Score]
+    scores: dict[str, AnnotatedScore]
 
-def _score_dict_to_tuple(scores : dict[str, Score | float], priority : list[str]) -> tuple:
+def _score_dict_to_tuple(scores : dict[str, AnnotatedScore | float], priority : list[str]) -> tuple:
     if isinstance(scores, ScoredMatch):
         scores = scores.scores
-    def floatify(score : Score | float) -> float:
-        if isinstance(score, Score):
+    def floatify(score : AnnotatedScore | float) -> float:
+        if isinstance(score, AnnotatedScore):
             return score.score
         else:
             return score
     return tuple(floatify(scores.get(factor, 0.0)) for factor in priority)
 
-def _score_abs_diff(s1 : dict[str, Score | float], s2 : dict[str, Score | float], priority : list[str]) -> float:
+def _score_abs_diff(s1 : dict[str, AnnotatedScore | float], s2 : dict[str, AnnotatedScore | float], priority : list[str]) -> float:
     """
     Absolute difference between two score dictionaries lexicographically.
     """
@@ -105,12 +95,12 @@ class Disambiguator:
             unique_matches.append(match)
         return unique_matches
 
-    def _score_individual_match(self, address : LinkedAddress, entity: MatchedEntity, name: MatchedName) -> ScoredMatch:
+    def _score_individual_match(self, address : AddressProcessingData, entity: MatchedEntity, name: MatchedName) -> ScoredMatch:
         scores = dict()
-        scores["entity_types_matching"] = Score.from_bool(
+        scores["entity_types_matching"] = AnnotatedScore.from_bool(
             entity.entity_type in name.geographical_name.entity.possible_entity_types)
-        scores["is_preferred_name"] = Score.from_bool(name.geographical_name.is_preferred_name)
-        scores["fuzzy_similarity_score"] = Score(name.raw_similarity)
+        scores["is_preferred_name"] = AnnotatedScore.from_bool(name.geographical_name.is_preferred_name)
+        scores["fuzzy_similarity_score"] = AnnotatedScore(name.raw_similarity)
         
         # if address.bzk_field_name.is_birthplace():
             # if name.geographical_name.entity.country.iso_code == "DE":
@@ -121,23 +111,23 @@ class Disambiguator:
                 # scores["birthplace_country"] = Score(1, "Europe")
 
         if name.geographical_name.entity.country.iso_code == "DE":
-            scores["country_likelihood_rank"] = Score(3, "Germany")
+            scores["country_likelihood_rank"] = AnnotatedScore(3, "Germany")
         elif name.geographical_name.entity.country.iso_code == "PL":
-            scores["country_likelihood_rank"] = Score(3, "Poland")
+            scores["country_likelihood_rank"] = AnnotatedScore(3, "Poland")
         elif name.geographical_name.entity.country.continent == "EU":
-            scores["country_likelihood_rank"] = Score(2, "Europe")
+            scores["country_likelihood_rank"] = AnnotatedScore(2, "Europe")
         elif name.geographical_name.entity.country.iso_code == "IL":
-            scores["country_likelihood_rank"] = Score(1, "Israel")
+            scores["country_likelihood_rank"] = AnnotatedScore(1, "Israel")
         elif name.geographical_name.entity.country.iso_code == "US":
-            scores["country_likelihood_rank"] = Score(1, "USA")
+            scores["country_likelihood_rank"] = AnnotatedScore(1, "USA")
         
         if name.geographical_name.entity.population is None:
-            scores["population_count"] = Score(1, "Unknown")
+            scores["population_count"] = AnnotatedScore(1, "Unknown")
         else:
-            scores["population_count"] = Score(float(name.geographical_name.entity.population / self.population_rounding_factor))
+            scores["population_count"] = AnnotatedScore(float(name.geographical_name.entity.population / self.population_rounding_factor))
         return ScoredMatch(name, scores)
 
-    def _score_parent_child(self, parent: MatchedName, child: MatchedName) -> Score:
+    def _score_parent_child(self, parent: MatchedName, child: MatchedName) -> AnnotatedScore:
         """
         Heuristically estimate the probability that a child entity is a child of a parent entity.
 
@@ -150,28 +140,28 @@ class Disambiguator:
         parent_entity = parent.geographical_name.entity
         child_entity = child.geographical_name.entity
         if parent_entity.iri in child_entity.other_parent_iris:
-            return Score(1, "Informal relationship")
+            return AnnotatedScore(1, "Informal relationship")
         if min(parent_entity.possible_entity_types) <= max(child_entity.possible_entity_types):
             not_null_codes = 1
             if parent_entity.country.iso_code == child_entity.country.iso_code:
                 codes_in_common = 1 
             else:
-                return Score(0, "Different countries")
+                return AnnotatedScore(0, "Different countries")
             for parent_code, child_code in zip(parent_entity.admin_codes, child_entity.admin_codes):
                 if _is_admin_code_null(parent_code):
                     break
                 not_null_codes += 1
                 if parent_code == child_code:
                     codes_in_common += 1
-            return Score(codes_in_common / not_null_codes, "Administrative Code match ratio")
+            return AnnotatedScore(codes_in_common / not_null_codes, "Administrative Code match ratio")
         else:
-            return Score(0, "Entity type mismatch")
+            return AnnotatedScore(0, "Entity type mismatch")
 
     def _score_ambiguous_matches(
         self,
-        address : LinkedAddress, 
+        address : AddressProcessingData, 
         entity : MatchedEntity
-        ) -> list[PossibleAddress]:
+        ) -> list[LinkedAddress]:
         """
         Group possible addresses by parent entity.
 
@@ -183,38 +173,37 @@ class Disambiguator:
         """
         
         possible_addresses = []
-        if len(address.matched_entities) == 0:
+        if len(address.entities) == 0:
             return possible_addresses
         for match in entity.matches:
-            matched = {id(e): ScoredMatch(None, {}) for e in address.matched_entities}
+            matched = {id(e): ScoredMatch(None, {}) for e in address.entities}
             matched[id(entity)] = self._score_individual_match(address, entity, match)
-            matched[id(entity)].scores["child_parent_likelihood"] = Score(1.0, "Reference match")
-            for other_entity in address.matched_entities:
-                if other_entity is entity or other_entity.matches is None or len(other_entity.matches) == 0:
+            matched[id(entity)].scores["child_parent_likelihood"] = AnnotatedScore(1.0, "Reference match")
+            for other_entity in address.entities:
+                if other_entity is entity or not isinstance(other_entity, MatchedEntity) or other_entity.matches is None or len(other_entity.matches) == 0:
                     continue
                 best_other_entity_score = ScoredMatch(None, {})
                 for other_match in other_entity.matches:
-                    score = self._score_individual_match(address, other_entity, other_match)
-                    score.scores["child_parent_likelihood"] = self._score_parent_child(other_match, match)
+                    scores = self._score_individual_match(address, other_entity, other_match)
+                    scores.scores["child_parent_likelihood"] = self._score_parent_child(other_match, match)
                     old_scores = best_other_entity_score.scores
-                    if _score_dict_to_tuple(score, self.priority) > _score_dict_to_tuple(old_scores, self.priority):
-                        best_other_entity_score = ScoredMatch(other_match, score.scores)
+                    if _score_dict_to_tuple(scores, self.priority) > _score_dict_to_tuple(old_scores, self.priority):
+                        best_other_entity_score = ScoredMatch(other_match, scores.scores)
                 matched[id(other_entity)] = best_other_entity_score
-            score = _average_scores([s for s in matched.values() if s.match is not None])
-            # TODO metadata in named tuple score is not actually used yet...
-            possible_addresses.append(PossibleAddress(
-                reference_match=match,
-                entities=[
-                    dataclasses.replace(e, linked_to=matched[id(e)])
-                    for e in address.matched_entities
-                ],
-                score=score
+            scores = FrozenDict(_average_scores([s for s in matched.values() if s.match is not None]))
+            possible_addresses.append(LinkedAddress(
+                reference_entity=entity.link_to(match, matched[id(entity)].scores),
+                entities=tuple(
+                    e.link_to(matched[id(e)].match, matched[id(e)].scores) if matched[id(e)].match is not None else e
+                    for e in address.entities
+                ),
+                scores=scores
             ))
-        return sorted(possible_addresses, key=lambda a: _score_dict_to_tuple(a.score, self.priority), reverse=True)
+        return sorted(possible_addresses, key=lambda a: _score_dict_to_tuple(a.scores, self.priority), reverse=True)
         
 
 
-    def disambiguate(self, address : LinkedAddress) -> LinkedAddress:
+    def disambiguate(self, address : AddressProcessingData) -> AddressProcessingData:
         """
         Disambiguate a linked address using the Tantivy search index and the database connection.
 
@@ -227,37 +216,40 @@ class Disambiguator:
             LinkedAddress: The disambiguated linked address.
         """
         unduped_entities = []
-        for entity in address.matched_entities:
-            unduped_entities.append(dataclasses.replace(entity, matches=self._collapse_duplicates(entity.matches)))
-        address = dataclasses.replace(address, matched_entities=unduped_entities)
+        for entity in address.entities:
+            if isinstance(entity, MatchedEntity) and entity.matches is not None and len(entity.matches) > 0:
+                unduped_entities.append(dataclasses.replace(entity, matches=self._collapse_duplicates(entity.matches)))
+            else:
+                unduped_entities.append(entity)
+        address = dataclasses.replace(address, entities=unduped_entities)
 
         possible_addresses = []
-        for entity in sorted(address.matched_entities, key=lambda e: e.entity_type, reverse=True):
-            if entity.matches is None or len(entity.matches) == 0:
+        for entity in sorted(address.entities, key=lambda e: e.entity_type, reverse=True):
+            if not isinstance(entity, MatchedEntity) or entity.matches is None or len(entity.matches) == 0:
                 continue
             possible_addresses = self._score_ambiguous_matches(address, entity)
             if len(possible_addresses) > 0:
                 best_address = possible_addresses[0]
                 reference_iris = set()
-                reference_iris.add(best_address.reference_match.geographical_name.entity.iri)
+                reference_iris.add(best_address.reference_entity.linked_to.geographical_name.entity.iri)
                 likely_addresses = [best_address]
                 for other_address in possible_addresses[1:]:
-                    if _score_abs_diff(best_address.score, other_address.score, self.priority) <= self.score_threshold:
-                        if not other_address.reference_match.geographical_name.entity.iri in reference_iris:
-                            reference_iris.add(other_address.reference_match.geographical_name.entity.iri)
+                    if _score_abs_diff(best_address.scores, other_address.scores, self.priority) <= self.score_threshold:
+                        if not other_address.reference_entity.linked_to.geographical_name.entity.iri in reference_iris:
+                            reference_iris.add(other_address.reference_entity.linked_to.geographical_name.entity.iri)
                             likely_addresses.append(other_address)
                 
                 if len(reference_iris) > 1:
                     best_address = None
 
                 return dataclasses.replace(address,
-                    possible_addresses=possible_addresses,
-                    likely_addresses=likely_addresses,
+                    possible_links=possible_addresses,
+                    likely_links=likely_addresses,
                     linked_to=best_address
                 )
         return dataclasses.replace(address,
-            possible_addresses=[],
-            likely_addresses=[],
+            possible_links=tuple(),
+            likely_links=tuple(),
         )
     
     

@@ -7,7 +7,7 @@ import requests
 from typing import Callable, Optional, Literal
 import json
 
-from modules.pipeline.linked_data import LinkedAddress
+from modules.pipeline.linked_data import AddressProcessingData
 from modules.pipeline.storage.encoding_util import PipelineDataEncoderDecoder
 from modules.pipeline.linking_steps import (
     LinkingStep, ParallelizationType, BatchLinkingStep, LinkingStepResult
@@ -53,7 +53,7 @@ def start_as_http_server(
                 try:
                     with self.rfile as f:
                         request_data = json.load(f)
-                    linking_address = pipeline_data_endec.decode_from_dict(request_data["address"], LinkedAddress)
+                    linking_address = pipeline_data_endec.decode_from_dict(request_data["address"], AddressProcessingData)
                 except json.JSONDecodeError:
                     self.send_response(400)
                     self.end_headers()
@@ -72,7 +72,7 @@ def start_as_http_server(
                 try:
                     with self.rfile as f:
                         request_data = json.load(f)
-                    linking_addresses = [pipeline_data_endec.decode_from_dict(addr, LinkedAddress) for addr in request_data]
+                    linking_addresses = [pipeline_data_endec.decode_from_dict(addr, AddressProcessingData) for addr in request_data]
                 except json.JSONDecodeError:
                     self.send_response(400)
                     self.end_headers()
@@ -133,14 +133,14 @@ def start_as_http_client(
                     if status.get("batch_size") != processing_step.batch_size:
                         raise ValueError(f"Processing step batch size mismatch in server {server}: expected {processing_step.batch_size}, got {status.get('batch_size')}")
                     
-            def batch_apply(self, addresses: list[LinkedAddress]) -> list[tuple[LinkedAddress, LinkingStepResult]]:
+            def batch_apply(self, addresses: list[AddressProcessingData]) -> list[tuple[AddressProcessingData, LinkingStepResult]]:
                 request_data = [pipeline_data_endec.encode_as_dict(addr) for addr in addresses]
                 response = requests.post(f"http://{server_address}/apply_batch", json=request_data)
                 if response.status_code == 200:
                     response_data = response.json()
                     results = []
                     for item in response_data:
-                        processed_address = pipeline_data_endec.decode_from_dict(item["address"], LinkedAddress)
+                        processed_address = pipeline_data_endec.decode_from_dict(item["address"], AddressProcessingData)
                         step_result = pipeline_data_endec.decode_from_dict(item["result"], LinkingStepResult)
                         results.append((processed_address, step_result))
                     return results
@@ -149,14 +149,14 @@ def start_as_http_client(
     else:
         class ProcessingStepHTTPClient(LinkingStep):
             name = processing_step.name
-            def apply(self, address: LinkedAddress) -> tuple[LinkedAddress, LinkingStepResult]:
+            def apply(self, address: AddressProcessingData) -> tuple[AddressProcessingData, LinkingStepResult]:
                 request_data = {
                     "address": pipeline_data_endec.encode_as_dict(address)
                 }
                 response = requests.post(f"http://{server_address}/apply", json=request_data)
                 if response.status_code == 200:
                     response_data = response.json()
-                    processed_address = pipeline_data_endec.decode_from_dict(response_data["address"], LinkedAddress)
+                    processed_address = pipeline_data_endec.decode_from_dict(response_data["address"], AddressProcessingData)
                     step_result = pipeline_data_endec.decode_from_dict(response_data["result"], LinkingStepResult)
                     return processed_address, step_result
                 else:

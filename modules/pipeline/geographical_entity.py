@@ -73,6 +73,15 @@ class GeographicalEntityProvider(str, Enum):
             if parsed_namespace.netloc == parsed_provider.netloc:
                 return provider
         raise ValueError(f"Unknown provider for namespace: {namespace}")
+    
+    @classmethod
+    def __dict_decode__(cls, data, targs, default_decoder):
+        if not isinstance(data, str):
+            raise TypeError(f"Expected string serialization for GeographicalEntityProvider, got {type(data)}")
+        try:
+            return cls[data]
+        except KeyError:
+            return cls.from_iri(data)
 
 class GeonamesAdminCodes(NamedTuple):
     admin1_code : Optional[str]
@@ -102,8 +111,8 @@ class GeonamesClassification(NamedTuple):
 class CountryData:
     iso_code : str
     country_name : str
-    iso_languages : list[str]
-    neighboring_countries_iso_codes : list[str]
+    iso_languages : tuple[str, ...]
+    neighboring_countries_iso_codes : tuple[str, ...]
     continent : str
     geonames_id : int
 
@@ -115,22 +124,22 @@ class GeographicalEntity:
     name : str
     asciiname : Optional[str]
     classification : Optional[str]
-    possible_entity_types : list[GeographicalEntityType]
+    possible_entity_types : tuple[GeographicalEntityType, ...]
     coordinates : Optional[Coordinates]
     population : Optional[int]
     geonames_id : Optional[int]
     closest_geonames_id : int
     country : Optional[CountryData]
-    alternate_iso_country_codes : list[str]
+    alternate_iso_country_codes : tuple[str, ...]
     admin_codes : GeonamesAdminCodes
-    other_parent_iris : list[str]
+    other_parent_iris : tuple[str, ...]
 
     @property
     def all_country_iso_codes(self) -> list[str]:
         if self.country is not None:
-            return [self.country.iso_code] + self.alternate_iso_country_codes
+            return [self.country.iso_code, *self.alternate_iso_country_codes]
         else:
-            return self.alternate_iso_country_codes
+            return list(self.alternate_iso_country_codes)
 
     @classmethod
     def from_dict(cls, data: dict) -> "GeographicalEntity":
@@ -151,13 +160,20 @@ class GeographicalEntity:
             coordinates=Coordinates(**coordinates) if coordinates is not None else None,
             possible_entity_types=possible_entity_types
         )
+    
+    @classmethod
+    def __dict_decode__(cls, data: dict, targs, default_decoder):
+        if 'provider' not in data:
+            data = data.copy()
+            data['provider'] = GeographicalEntityProvider.from_iri(data.get('iri'))
+        return default_decoder(data, cls)
 
 @dataclass(frozen=True)
 class GeographicalName:
     name_id : int
     name : str
     entity : GeographicalEntity
-    is_preferred_name: bool
+    is_preferred_name: Optional[bool]
     is_short_name: Optional[bool]
     is_colloquial : Optional[bool]
     name_provider : Optional[GeographicalEntityProvider]

@@ -1,5 +1,5 @@
 
-from modules.pipeline.linked_data import LinkedAddress
+from modules.pipeline.linked_data import AddressProcessingData
 from modules.pipeline.linking_steps import LinkingStepResult
 from modules.pipeline.linking_steps import LinkingStepResult
 from modules.pipeline.executors.executor_context import registered_multiprocessing_resources
@@ -8,7 +8,7 @@ from modules.pipeline.executors.executor_context import ExecutorContext
 import asyncio
 import time
 
-def _worker_process_apply(step_id : int, address : LinkedAddress) -> tuple[LinkedAddress, LinkingStepResult]:
+def _worker_process_apply(step_id : int, address : AddressProcessingData) -> tuple[AddressProcessingData, LinkingStepResult]:
     global registered_multiprocessing_resources
     step = registered_multiprocessing_resources[step_id]
     return step.apply(address)
@@ -31,7 +31,7 @@ class MultiprocessingStepExecutor(StepExecutor):
     def get_rate(self) -> float:
         return self.rate
 
-    async def apply(self, address : LinkedAddress) -> tuple[LinkedAddress, LinkingStepResult]:
+    async def apply(self, address : AddressProcessingData) -> tuple[AddressProcessingData, LinkingStepResult]:
         self._pending_count += 1
         step_id = id(self.step)
         pool = self.context.multiprocessing_pool

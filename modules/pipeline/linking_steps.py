@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from typing import Optional
-from modules.pipeline.linked_data import LinkedAddress
+from modules.pipeline.linked_data import AddressProcessingData
 from datetime import datetime
 
 
@@ -16,14 +16,14 @@ class LinkingStepResult(ABC):
             "status" : self.__class__.__name__
         })
 
-    def __dict_decode__(cls, data : dict) -> 'LinkingStepResult':
+    def __dict_decode__(cls, data : dict, targs, default_decoder) -> 'LinkingStepResult':
         status = data.pop("status")
         if status == "Success":
-            return Success(**data)
+            return default_decoder(data, Success)
         elif status == "Unresolved":
-            return Unresolved(**data)
+            return default_decoder(data, Unresolved)
         elif status == "Failed":
-            return Failed(**data)
+            return default_decoder(data, Failed)
         else:
             raise ValueError(f"Unknown LinkingStepResult status: {status}")
 
@@ -69,7 +69,7 @@ class LinkingStep(ABC):
         pass
 
     @abstractmethod
-    def apply(self, address : LinkedAddress) -> tuple[LinkedAddress, LinkingStepResult]:
+    def apply(self, address : AddressProcessingData) -> tuple[AddressProcessingData, LinkingStepResult]:
         pass
 
     def finalize(self):
@@ -88,7 +88,7 @@ class BatchLinkingStep(LinkingStep):
         return self.batch_apply([address])[0]
 
     @abstractmethod
-    def batch_apply(self, addresses : list[LinkedAddress]) -> list[tuple[LinkedAddress, LinkingStepResult]]:
+    def batch_apply(self, addresses : list[AddressProcessingData]) -> list[tuple[AddressProcessingData, LinkingStepResult]]:
         pass
 
 class CardLinkingStep(LinkingStep):

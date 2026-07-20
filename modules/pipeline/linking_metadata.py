@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from modules.pipeline.linked_data import LinkedAddress
+from modules.pipeline.linked_data import AddressProcessingData
 from modules.pipeline.linking_steps import LinkingStepResult, Success
 from datetime import datetime
 
@@ -16,7 +16,7 @@ class LinkingStepMetadata:
 
 @dataclass(frozen=True)
 class AddressLinkingMetadata:
-    address : LinkedAddress
+    address : AddressProcessingData
     applied_steps : list[LinkingStepMetadata]
     finished : bool
 
@@ -30,7 +30,7 @@ class AddressLinkingMetadata:
         it may be desirable to drop them after disambiguation
         """
         minimized_entities = []
-        for entity in self.address.matched_entities:
+        for entity in self.address.entities:
             minimized_entities.append(entity.minimize())
         minimized_address = self.address.copy(update={"entities": minimized_entities})
         return AddressLinkingMetadata(

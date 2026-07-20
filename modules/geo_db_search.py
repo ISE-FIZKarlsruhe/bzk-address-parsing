@@ -34,6 +34,7 @@ import pyarrow
 import unidecode
 import math
 from abc import ABC, abstractmethod
+from modules.pipeline.storage.encoding_util import decode_from_dict
 
 
 def levenshtein(a : str, b : str, max_distance : int) -> int:
@@ -490,7 +491,7 @@ class GeoDBSearch(LinkingStep):
                is_abreviation_match = re.fullmatch(index_result.abbreviation_pattern, index_match.matched_key) is not None
 
             max_clean_similarity = 0.0
-            clean_alt_name = None
+            clean_query = None
             cleaned_edit_distance = None
             for query_string in index_result.query_strings:
                 try:
@@ -498,24 +499,25 @@ class GeoDBSearch(LinkingStep):
                 except: raise RuntimeError(f"Error calculating similarity and distance between '{query_string}' and '{index_match.matched_key}'")
                 if query_similarity > max_clean_similarity:
                     max_clean_similarity = query_similarity
-                    clean_alt_name = query_string
+                    clean_query = query_string
                     cleaned_edit_distance = query_edit_distance
             if (max_clean_similarity < self.similarity_threshold or cleaned_edit_distance > self.distance_threshold) and not is_abreviation_match:
                 continue
 
-            geographical_name=GeographicalName.from_dict(index_match.retrieved_data)
+            geographical_name=decode_from_dict(index_match.retrieved_data, GeographicalName)
             nfc_alt_name = unicodedata.normalize("NFC", geographical_name.name)
             matched_name = MatchedName(
                 geographical_name=geographical_name,
                 nfc_query=index_result.nfc_query,
                 nfc_alt_name=nfc_alt_name,
-                cleaned_queries=index_result.query_strings,
-                cleaned_alt_name=clean_alt_name,
+                cleaned_query=clean_query,
+                cleaned_alt_name=index_match.matched_key,
                 cleaned_edit_distance=cleaned_edit_distance,
                 edit_distance = levenshtein(index_result.nfc_query, nfc_alt_name, self.distance_threshold),
                 abbreviation_pattern=index_result.abbreviation_pattern,
                 is_abbreviation_match=is_abreviation_match,
-                matching_method=self.search_index.index_descriptor
+                matching_method=self.search_index.index_descriptor,
+                matching_score=index_match.score
             )
             yield matched_name
         
@@ -524,7 +526,7 @@ class GeoDBSearch(LinkingStep):
         new_entities = []
         country_codes = set()
         admin_codes = set()
-        for entity in sorted(address.matched_entities, key=lambda e: e.entity_type):
+        for entity in sorted(address.entities, key=lambda e: e.entity_type):
             if entity.entity_type not in SEARCHABLE_ENTITY_TYPES:
                 new_entities.append(entity)
                 continue
@@ -533,13 +535,10 @@ class GeoDBSearch(LinkingStep):
                 country_codes=country_codes if len(country_codes) > 0 else None, 
                 admin_codes=admin_codes if len(admin_codes) > 0 else None
             )
-            matched_names = list(self._parse_data(index_result))
+            matched_names = tuple(self._parse_data(index_result))
             for matched_name in matched_names:
                 country_codes.update(matched_name.geographical_name.entity.all_country_iso_codes)
                 if matched_name.geographical_name.entity.admin_codes:
                     admin_codes.add(matched_name.geographical_name.entity.admin_codes)
-            new_entities.append(dataclasses.replace(
-                entity,
-                matches=matched_names
-            ))
-        return dataclasses.replace(address, matched_entities=new_entities)
+            new_entities.append(entity.with_matches(matched_names))
+        return dataclasses.replace(address, entities=tuple(new_entities))

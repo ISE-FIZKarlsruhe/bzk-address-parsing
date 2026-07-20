@@ -1,4 +1,4 @@
-from modules.pipeline.linked_data import LinkedAddress
+from modules.pipeline.linked_data import AddressProcessingData
 from modules.pipeline.linking_steps import LinkingStepResult
 from modules.pipeline.executors.step_executor import StepExecutor
 import time
@@ -24,7 +24,7 @@ class RoundRobinExecutor(StepExecutor):
             executor.initialize(executor_context)
     
     
-    async def apply(self, address : LinkedAddress) -> tuple[LinkedAddress, LinkingStepResult]:
+    async def apply(self, address : AddressProcessingData) -> tuple[AddressProcessingData, LinkingStepResult]:
         executor = self.executors[self._next_executor_index]
         self._next_executor_index = (self._next_executor_index + 1) % len(self.executors)
         start = time.monotonic()
