@@ -91,6 +91,7 @@ class PossibleAddress:
 
 @dataclass(frozen=True)
 class LinkedAddress:
+    card_id : str
     id : str
     full_address: str
     bzk_field_name: BZKFieldName
