@@ -50,11 +50,14 @@ class MatchedName:
     
     @cached_property
     def cleaned_similarity(self) -> float:
-        max_dist = max(len(self.cleaned_query), len(self.cleaned_alt_name))
+        cleaned_query = self.cleaned_query or ""
+        cleaned_alt_name = self.cleaned_alt_name or ""
+        cleaned_edit_distance = self.cleaned_edit_distance or 0
+        max_dist = max(len(cleaned_query), len(cleaned_alt_name))
         if max_dist == 0:
             return 1.0
         else:
-            return 1 - self.cleaned_edit_distance / max_dist
+            return 1 - cleaned_edit_distance / max_dist
             
     
     def __dict_encode__(self, default_encoder) -> dict:
@@ -145,6 +148,7 @@ class LinkedEntity(RawEntity):
 
 @dataclass(frozen=True)
 class LinkedAddress:
+    finest_grain_entity : LinkedEntity
     reference_entity : LinkedEntity
     entities : tuple[LinkedEntity, ...]
     scores : FrozenDict[str, float]

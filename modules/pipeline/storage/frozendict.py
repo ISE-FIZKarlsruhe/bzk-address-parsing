@@ -32,6 +32,9 @@ class FrozenDict[K, V](Mapping[K, V]):
     def __repr__(self):
         return f"FrozenDict({self._dict})"
     
+    def __str__(self):
+        return str(self._dict)
+    
     def __dict_encode__(self, default_encoder):
         return default_encoder(self._dict.copy())
 

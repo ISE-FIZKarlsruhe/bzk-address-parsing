@@ -19,7 +19,7 @@ import itertools
 import time
 from collections import defaultdict
 from modules.pipeline.geographical_entity import CountryData, GeographicalEntity, GeographicalEntityType, GeographicalName, GeonamesAdminCodes
-from modules.pipeline.linked_data import MatchedEntity, MatchedName
+from modules.pipeline.linked_data import MatchedEntity, MatchedName, RawEntity
 from modules.pipeline.linking_steps import LinkingStep
 import tantivy
 from tqdm.auto import tqdm
@@ -58,7 +58,6 @@ POP_LANGUAGE_FILTERED_NAMES_SELECT = """
 SELECT *
 FROM geo_db.geographical_names_with_entities
 WHERE (
-    is_preferred_name IS TRUE OR
     isolanguage == '' OR
     isolanguage LIKE 'en%' OR
     isolanguage LIKE 'de%' OR
@@ -71,7 +70,6 @@ OTHER_LANGUAGE_FILTERED_NAMES_SELECT = """
 SELECT *
 FROM geo_db.geographical_names_with_entities
 WHERE (
-    is_preferred_name IS TRUE OR
     isolanguage == '' OR
     isolanguage LIKE 'en%' OR
     isolanguage LIKE 'de%' OR
@@ -144,6 +142,9 @@ def abbreviation_pattern_to_regexes(part : str) -> str:
     prefixes = part.split(".")
     if len(prefixes) == 1:
         return None
+    if all(len(p.strip()) <= 1 for p in prefixes):
+        # Likely a standard abbreviation for exact match: e.g. "U.S.A.", "N.Y."
+        return None
     ascii_regex_pattern = "[a-z]+ ".join([ascii_normalize(x) for x in prefixes]).strip()
     german_regex_pattern = "[a-z]+ ".join([german_normalize(x) for x in prefixes]).strip()
     if ascii_regex_pattern == german_regex_pattern:
@@ -182,6 +183,7 @@ class GeoSearchIndex(ABC):
             expand_abbreviations : bool = True,
             entity_types : Optional[Collection[GeographicalEntityType]] = None,
             country_codes : Optional[Collection[str]] = None,
+            strict_country_filtering : bool = False,
             admin_codes : Optional[Collection[GeonamesAdminCodes]] = None
         ) -> IndexSearchResult:
         pass
@@ -355,7 +357,9 @@ class TantivySearchIndex(GeoSearchIndex):
             limit : int = 10,
             expand_abbreviations : bool = True,
             entity_types : Optional[Collection[GeographicalEntityType]] = None,
+            strict_entity_type_filtering : bool = False,
             country_codes : Optional[Collection[str]] = None,
+            strict_country_filtering : bool = False,
             admin_codes : Optional[Collection[GeonamesAdminCodes]] = None
         ):
         if similarity_threshold == 1.0:
@@ -368,24 +372,26 @@ class TantivySearchIndex(GeoSearchIndex):
         
         hints = []
         if entity_types is not None:
-            hints.append((tantivy.Occur.Should, self._build_entity_type_restriction(entity_types)))
+            strictness = tantivy.Occur.Should
+            if strict_entity_type_filtering:
+                strictness = tantivy.Occur.Must
+            hints.append((strictness, self._build_entity_type_restriction(entity_types)))
         if country_codes is not None:
-            hints.append((tantivy.Occur.Should, self._build_country_code_restriction(country_codes)))
+            strictness = tantivy.Occur.Should
+            if strict_country_filtering:
+                strictness = tantivy.Occur.Must
+            hints.append((strictness, self._build_country_code_restriction(country_codes)))
         if admin_codes is not None:
             admin_code_restriction = self._build_admin_code_restriction(admin_codes)
             if admin_code_restriction is not None:
                 hints.append((tantivy.Occur.Should, admin_code_restriction))
         def _falling_queries():
-            # exact matches first
             other_params = dict(hints=hints, limit=limit)
+            # exact/abbrev matches first
             yield self._search_inner(
-                query_strings=query_strings, distance_threshold=0, **other_params)
-            # abbreviation matches second
-            if abbrev_pattern is not None:
-                yield self._search_inner(
-                    abbrev_pattern=abbrev_pattern, distance_threshold=0, **other_params)
-            # fuzzy matches last
-            for i in range(0, distance_threshold + 1):
+                abbrev_pattern=abbrev_pattern, query_strings=query_strings, distance_threshold=0, **other_params)
+            # then fuzzy matches
+            for i in range(1, distance_threshold + 1):
                 yield self._search_inner(
                     query_strings=query_strings, distance_threshold=i, **other_params)
 
@@ -447,7 +453,7 @@ class GeoDBSearch(LinkingStep):
         def row_retriever(sql_query : str) -> Iterable[dict]:
             total_rows = self.connection.execute("SELECT COUNT(*) FROM (" + sql_query + ")").fetchone()[0]
             print(f"Populating {self.search_index.index_descriptor} index with {total_rows} names from the geo database...")
-            batch_iterator = self.connection.execute(sql_query).to_arrow_reader(10_000)
+            batch_iterator = self.connection.execute(sql_query).to_arrow_reader(5_000)
             pbar = tqdm(total=total_rows, desc="Populating search index")
             for batch in batch_iterator:
                 columns = [col.to_pylist() for col in batch.columns]
@@ -470,8 +476,12 @@ class GeoDBSearch(LinkingStep):
         admin_codes : Optional[Collection[GeonamesAdminCodes]]
     ) -> IndexSearchResult:
         entity_type = entity.entity_type
+        country_strict = False
         if entity_type != GeographicalEntityType.Country and country_codes is None:
             country_codes = self.priority_countries
+        elif country_codes is not None:
+            country_strict = True
+
         index_matches = self.search_index.search(
             query_string=entity.raw_text,
             distance_threshold=self.distance_threshold,
@@ -480,6 +490,7 @@ class GeoDBSearch(LinkingStep):
             expand_abbreviations=True,
             entity_types=[entity_type],
             country_codes=country_codes,
+            strict_country_filtering=country_strict,
             admin_codes=admin_codes
         )
         return index_matches
@@ -522,6 +533,14 @@ class GeoDBSearch(LinkingStep):
             yield matched_name
         
 
+    def _prune_search_match(self, entity : RawEntity, match : MatchedName) -> bool:
+        """
+        Prune a match if it is unlikely to be the correct match for the given address and entity.
+        """
+        if entity.entity_type == GeographicalEntityType.Country and GeographicalEntityType.Country not in match.geographical_name.entity.possible_entity_types:
+            return True
+        return False
+
     def apply(self, address):
         new_entities = []
         country_codes = set()
@@ -535,7 +554,7 @@ class GeoDBSearch(LinkingStep):
                 country_codes=country_codes if len(country_codes) > 0 else None, 
                 admin_codes=admin_codes if len(admin_codes) > 0 else None
             )
-            matched_names = tuple(self._parse_data(index_result))
+            matched_names = tuple(m for m in self._parse_data(index_result) if not self._prune_search_match(entity, m))
             for matched_name in matched_names:
                 country_codes.update(matched_name.geographical_name.entity.all_country_iso_codes)
                 if matched_name.geographical_name.entity.admin_codes:
