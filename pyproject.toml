@@ -65,6 +65,7 @@ dependencies = [
     "editdistpy==0.2.0",
     "elasticsearch>=8.0.0",
     "podman-compose>=1.0.0",
+    "openai>=1.0.0",
 ]
 
 [project.optional-dependencies]

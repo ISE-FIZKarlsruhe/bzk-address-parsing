@@ -4,13 +4,18 @@ Utility classes and functions for use with MLLMs for parsing addresses.
 import json
 import re
 from abc import ABC, abstractmethod
+from concurrent.futures import ThreadPoolExecutor
+import time
 from modules.utils import ParsedAddressResultBuilder
 import transformers
 import sentence_transformers
+import openai
 import pandas as pd
 from collections import OrderedDict
 from typing import Any
 import re
+import itertools
+
 
 _STREET_SUFFIX_RE = re.compile(
     r'^(straße|strasse|gasse|weg|allee|platz|ring|damm|chaussee|steig|stieg|'
@@ -678,6 +683,121 @@ class LLMAddressParsingModel:
             for r, addr, example_metadata in zip(result, addresses, bulk_examples_metadata)]
         return responses
     
+class RemoteAddressParsingModel:
+    """Address parsing model that invokes an OpenAI-compatible inference server
+    instead of running the LLM locally.
+
+    Mirrors the interface of LLMAddressParsingModel, but replaces the local
+    transformers pipeline with calls to a remote chat-completions endpoint.
+    URL and access token are loaded from a JSON credentials file (see
+    `example_api_credentials.json`).
+
+    Made by Claude AI
+    """
+
+    def __init__(self,
+                 model_name,
+                 prompt : PromptTemplate,
+                 example_strategy : ExampleMatchingStrategy | dict,
+                 credentials_path : str = "ai_api_credentials.json",
+                 *,
+                 max_new_tokens=512,
+                 temperature=None,
+                 max_workers=10,
+                 extra_client_kwargs : dict | None = None):
+        with open(credentials_path, "r", encoding="utf-8") as f:
+            credentials = json.load(f)
+        self.client = openai.OpenAI(
+            base_url=credentials["url"],
+            api_key=credentials["access_token"],
+            **(extra_client_kwargs or {}),
+        )
+        self.model_name = model_name
+        self.max_new_tokens = max_new_tokens
+        self.temperature = temperature
+        self.max_workers = max_workers
+        self.example_strategy : ExampleMatchingStrategy
+        # TODO dynamic rate limits
+        if isinstance(example_strategy, dict):
+            self.example_strategy = example_strategy["factory"](
+                *example_strategy.get("factory_args", []),
+                **example_strategy.get("factory_kargs", {})
+            )
+        else:
+            self.example_strategy = example_strategy
+        self.prompt = prompt
+
+    @staticmethod
+    def _strip_thinking(text: str) -> str:
+        """Remove <think>...</think> blocks emitted by reasoning models"""
+        return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+
+    def _parse_output(self, conversation, original_address: str, example_metadata=None):
+        model_response = None
+        output_dict = None
+        try:
+            model_response = self._get_response(conversation)
+            model_response = self._strip_thinking(model_response)
+            parsed = self.prompt.parse_output(model_response, original_address=original_address)
+            parsed["fullConversation"] = json.dumps(conversation, ensure_ascii=False)
+            output_dict = parsed
+        except Exception as e:
+            print(f"Error parsing model output for address '{original_address}': {e}\n"
+                  f"Full Conversation: {conversation}\n"
+                  f"Model response: {repr(model_response)}")
+            output_dict = {"error": str(e), "fullConversation": json.dumps(conversation)}
+        if example_metadata is not None:
+            output_dict["___example_metadata"] = example_metadata
+        return output_dict
+
+    @classmethod
+    def _get_response(cls, conversation):
+        return conversation[-1]["content"]
+
+    def _make_conversation(self, address: str, examples : list[tuple[str, dict]]):
+        return [
+            {
+                "role": "user",
+                "content": self.prompt.make_prompt(address, examples)
+            }
+        ]
+
+    def _invoke_one(self, conversation):
+        kwargs = dict(
+            model=self.model_name,
+            messages=conversation,
+            max_tokens=self.max_new_tokens,
+        )
+        if self.temperature is not None:
+            kwargs["temperature"] = self.temperature
+        completion = self.client.chat.completions.create(**kwargs)
+        response_text = completion.choices[0].message.content
+        return conversation + [{"role": "assistant", "content": response_text}]
+
+    def _invoke_model(self, conversations):
+        jobs = []
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            for chunk in itertools.batched(conversations, 10):
+                start = time.monotonic()
+                for conversation in chunk:
+                    jobs.append(executor.submit(self._invoke_one, conversation))
+                time.sleep(60 - (time.monotonic() - start))  # rate limit: 10 requests per minute # TODO dynamic rate limits
+            return [job.result() for job in jobs]
+
+    def parse_addresses(self, addresses : list[str]) -> list[dict[str, str]]:
+        bulk_examples = self.example_strategy.bulk_find_examples(addresses)
+        conversations = [
+            self._make_conversation(address, address_examples)
+            for address, (address_examples, _) in zip(addresses, bulk_examples)
+        ]
+        bulk_examples_metadata = [metadata for _, metadata in bulk_examples]
+        results = self._invoke_model(conversations)
+        responses = [
+            self._parse_output(r, original_address=addr, example_metadata=example_metadata)
+            for r, addr, example_metadata in zip(results, addresses, bulk_examples_metadata)]
+        return responses
+
+
 class LlamaAddressParsingModel(LLMAddressParsingModel):
     pass
 

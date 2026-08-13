@@ -15,3 +15,5 @@ search_cache.duckdb
 search_cache.duckdb.wal
 .geo_db_search_index/
 geo.duckdb
+*credentials*.json
+!example_api_credentials.json
