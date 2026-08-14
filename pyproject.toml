@@ -66,6 +66,7 @@ dependencies = [
     "elasticsearch>=8.0.0",
     "podman-compose>=1.0.0",
     "openai>=1.0.0",
+    "jupyterlab>=4.0.0",
 ]
 
 [project.optional-dependencies]

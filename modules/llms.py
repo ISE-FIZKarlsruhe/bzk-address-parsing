@@ -6,6 +6,7 @@ import re
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 import time
+import traceback
 from modules.utils import ParsedAddressResultBuilder
 import transformers
 import sentence_transformers
@@ -15,6 +16,7 @@ from collections import OrderedDict
 from typing import Any
 import re
 import itertools
+from io import StringIO
 
 
 _STREET_SUFFIX_RE = re.compile(
@@ -699,6 +701,7 @@ class RemoteAddressParsingModel:
                  model_name,
                  prompt : PromptTemplate,
                  example_strategy : ExampleMatchingStrategy | dict,
+                 rate_limit_keeper,
                  credentials_path : str = "ai_api_credentials.json",
                  *,
                  max_new_tokens=512,
@@ -726,6 +729,7 @@ class RemoteAddressParsingModel:
         else:
             self.example_strategy = example_strategy
         self.prompt = prompt
+        self.rate_limit_keeper = rate_limit_keeper
 
     @staticmethod
     def _strip_thinking(text: str) -> str:
@@ -735,17 +739,20 @@ class RemoteAddressParsingModel:
     def _parse_output(self, conversation, original_address: str, example_metadata=None):
         model_response = None
         output_dict = None
-        try:
-            model_response = self._get_response(conversation)
-            model_response = self._strip_thinking(model_response)
-            parsed = self.prompt.parse_output(model_response, original_address=original_address)
-            parsed["fullConversation"] = json.dumps(conversation, ensure_ascii=False)
-            output_dict = parsed
-        except Exception as e:
-            print(f"Error parsing model output for address '{original_address}': {e}\n"
-                  f"Full Conversation: {conversation}\n"
-                  f"Model response: {repr(model_response)}")
-            output_dict = {"error": str(e), "fullConversation": json.dumps(conversation)}
+        if "error" in conversation:
+            output_dict = {"error": conversation["error"], "fullConversation": json.dumps(conversation)}
+        else:
+            try:
+                model_response = self._get_response(conversation)
+                model_response = self._strip_thinking(model_response)
+                parsed = self.prompt.parse_output(model_response, original_address=original_address)
+                parsed["fullConversation"] = json.dumps(conversation, ensure_ascii=False)
+                output_dict = parsed
+            except Exception as e:
+                print(f"Error parsing model output for address '{original_address}': {e}\n"
+                    f"Full Conversation: {conversation}\n"
+                    f"Model response: {repr(model_response)}")
+                output_dict = {"error": str(e), "fullConversation": json.dumps(conversation)}
         if example_metadata is not None:
             output_dict["___example_metadata"] = example_metadata
         return output_dict
@@ -763,25 +770,31 @@ class RemoteAddressParsingModel:
         ]
 
     def _invoke_one(self, conversation):
-        kwargs = dict(
-            model=self.model_name,
-            messages=conversation,
-            max_tokens=self.max_new_tokens,
-        )
-        if self.temperature is not None:
-            kwargs["temperature"] = self.temperature
-        completion = self.client.chat.completions.create(**kwargs)
-        response_text = completion.choices[0].message.content
-        return conversation + [{"role": "assistant", "content": response_text}]
+        try:
+            kwargs = dict(
+                model=self.model_name,
+                messages=conversation,
+                max_tokens=self.max_new_tokens,
+            )
+            if self.temperature is not None:
+                kwargs["temperature"] = self.temperature
+            completion = self.client.chat.completions.create(**kwargs)
+            response_text = completion.choices[0].message.content
+            return conversation + [{"role": "assistant", "content": response_text}]
+        except Exception as e:
+            print(f"Error occurred while invoking API for model {self.model_name}: {e}")
+            string_io = StringIO()
+            traceback.print_exception(type(e), e, e.__traceback__, file=string_io)
+            exception_str = string_io.getvalue()
+            print(exception_str)
+            return {"error": exception_str, "conversation": conversation}
 
     def _invoke_model(self, conversations):
         jobs = []
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            for chunk in itertools.batched(conversations, 10):
-                start = time.monotonic()
-                for conversation in chunk:
-                    jobs.append(executor.submit(self._invoke_one, conversation))
-                time.sleep(60 - (time.monotonic() - start))  # rate limit: 10 requests per minute # TODO dynamic rate limits
+            for conversation in conversations:
+                self.rate_limit_keeper.rate_limit_call()
+                jobs.append(executor.submit(self._invoke_one, conversation))
             return [job.result() for job in jobs]
 
     def parse_addresses(self, addresses : list[str]) -> list[dict[str, str]]:

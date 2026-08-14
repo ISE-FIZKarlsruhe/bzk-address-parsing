@@ -321,6 +321,8 @@ def partial_levenshtein(key: str, query: str, case_insensitive=True) -> tuple[in
     return distance, span
 
 def format_time(seconds, round_to_seconds=True):
+    if seconds is None:
+        return "N/A"
     seconds = round(seconds) if round_to_seconds else seconds
     timedelta = datetime.timedelta(seconds=seconds)
     days = timedelta.days
