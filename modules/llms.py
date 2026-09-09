@@ -1,10 +1,10 @@
 """
 Utility classes and functions for use with MLLMs for parsing addresses.
 """
+import asyncio
 import json
 import re
 from abc import ABC, abstractmethod
-from concurrent.futures import ThreadPoolExecutor
 import time
 import traceback
 from modules.utils import ParsedAddressResultBuilder
@@ -684,7 +684,12 @@ class LLMAddressParsingModel:
             self._parse_output(r, original_address=addr, example_metadata=example_metadata)
             for r, addr, example_metadata in zip(result, addresses, bulk_examples_metadata)]
         return responses
-    
+
+class _NoRateLimitKeeper:
+    def rate_limit_call(self):
+        pass
+NO_RATE_LIMIT = _NoRateLimitKeeper()
+
 class RemoteAddressParsingModel:
     """Address parsing model that invokes an OpenAI-compatible inference server
     instead of running the LLM locally.
@@ -701,24 +706,24 @@ class RemoteAddressParsingModel:
                  model_name,
                  prompt : PromptTemplate,
                  example_strategy : ExampleMatchingStrategy | dict,
-                 rate_limit_keeper,
+                 rate_limit_keeper = NO_RATE_LIMIT,
                  credentials_path : str = "ai_api_credentials.json",
                  *,
-                 max_new_tokens=512,
+                 max_new_tokens=32_768 // 4,
                  temperature=None,
-                 max_workers=10,
+                 max_concurrent_requests=128,
                  extra_client_kwargs : dict | None = None):
         with open(credentials_path, "r", encoding="utf-8") as f:
             credentials = json.load(f)
-        self.client = openai.OpenAI(
+        self.client = openai.AsyncOpenAI(
             base_url=credentials["url"],
-            api_key=credentials["access_token"],
+            api_key=credentials.get("access_token", "no_token"),
             **(extra_client_kwargs or {}),
         )
         self.model_name = model_name
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
-        self.max_workers = max_workers
+        self.max_workers = max_concurrent_requests
         self.example_strategy : ExampleMatchingStrategy
         # TODO dynamic rate limits
         if isinstance(example_strategy, dict):
@@ -769,42 +774,53 @@ class RemoteAddressParsingModel:
             }
         ]
 
-    def _invoke_one(self, conversation):
-        try:
-            kwargs = dict(
-                model=self.model_name,
-                messages=conversation,
-                max_tokens=self.max_new_tokens,
-            )
-            if self.temperature is not None:
-                kwargs["temperature"] = self.temperature
-            completion = self.client.chat.completions.create(**kwargs)
-            response_text = completion.choices[0].message.content
-            return conversation + [{"role": "assistant", "content": response_text}]
-        except Exception as e:
-            print(f"Error occurred while invoking API for model {self.model_name}: {e}")
-            string_io = StringIO()
-            traceback.print_exception(type(e), e, e.__traceback__, file=string_io)
-            exception_str = string_io.getvalue()
-            print(exception_str)
-            return {"error": exception_str, "conversation": conversation}
+    async def _invoke_one(self, conversation, semaphore : asyncio.Semaphore):
+        async with semaphore:
+            try:
+                kwargs = dict(
+                    model=self.model_name,
+                    messages=conversation,
+                    max_tokens=self.max_new_tokens,
+                    temperature=0.7,
+                    top_p=0.8,
+                    presence_penalty=1.5,
+                    extra_body={
+                        "top_k": 20,
+                        "chat_template_kwargs": {"enable_thinking": False},
+                    }
+                )
+                if self.temperature is not None:
+                    kwargs["temperature"] = self.temperature
+                completion = await self.client.chat.completions.create(**kwargs)
+                response_text = completion.choices[0].message.content
+                return conversation + [{"role": "assistant", "content": response_text}]
+            except Exception as e:
+                print(f"Error occurred while invoking API for model {self.model_name}: {e}")
+                string_io = StringIO()
+                traceback.print_exception(type(e), e, e.__traceback__, file=string_io)
+                exception_str = string_io.getvalue()
+                print(exception_str)
+                return {"error": exception_str, "conversation": conversation}
 
-    def _invoke_model(self, conversations):
-        jobs = []
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            for conversation in conversations:
-                self.rate_limit_keeper.rate_limit_call()
-                jobs.append(executor.submit(self._invoke_one, conversation))
-            return [job.result() for job in jobs]
+    async def _invoke_model(self, conversations):
+        # A semaphore bounds how many requests are in flight at once (in place
+        # of the ThreadPoolExecutor's max_workers), while a single event loop
+        # multiplexes the actual waiting on the network I/O.
+        semaphore = asyncio.Semaphore(self.max_workers)
+        tasks = []
+        for conversation in conversations:
+            self.rate_limit_keeper.rate_limit_call()
+            tasks.append(self._invoke_one(conversation, semaphore))
+        return await asyncio.gather(*tasks)
 
-    def parse_addresses(self, addresses : list[str]) -> list[dict[str, str]]:
+    async def parse_addresses(self, addresses : list[str]) -> list[dict[str, str]]:
         bulk_examples = self.example_strategy.bulk_find_examples(addresses)
         conversations = [
             self._make_conversation(address, address_examples)
             for address, (address_examples, _) in zip(addresses, bulk_examples)
         ]
         bulk_examples_metadata = [metadata for _, metadata in bulk_examples]
-        results = self._invoke_model(conversations)
+        results = await self._invoke_model(conversations)
         responses = [
             self._parse_output(r, original_address=addr, example_metadata=example_metadata)
             for r, addr, example_metadata in zip(results, addresses, bulk_examples_metadata)]
