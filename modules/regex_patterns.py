@@ -1,7 +1,7 @@
 import re
 from typing import Optional, TypedDict, Literal, NamedTuple, NotRequired
-
-type EntityType = Literal['City', 'Country', 'State', 'District', 'Neighborhood']
+import textwrap
+type EntityType = Literal['City', 'Country', 'State', 'District', 'Neighborhood', 'Uncertain', 'AboveCity']
 
 class SimplifiedEntity(NamedTuple):
     entity_type : EntityType
@@ -67,12 +67,64 @@ ROMAN_NUMERAL_PATTERN = r'(?i:(XC|XL|L?X{0,3})(IX|IV|V?I{0,3}))'
 # matches "digit sequence followed by a single letter or a roman numeral"
 HOUSE_NR_PATTERN = fr'\d+\W*(([a-zA-Z]|{ROMAN_NUMERAL_PATTERN})(?:\W+|$))?'
 
-# TODO use? Frankfurt am Main is already in the common names but this might catch other cases
-CITY_WITH_REGION_REGEX = re.compile(r"(?i:(?P<City>[^\d\W]+)\W+((am?|in?|b(ei)?)\W+)?((?P<Region>[^\d\W])|(?P<Region_2874265>M(a(in?)?)?)|(?P<Region_2748179>R(h(e(in?)?)?)?))\W+)", re.IGNORECASE)
+# Regions proposed by CLAUDE AI
+REGIONS = r"""(?:
+    [^\d\W_](\.\b|\b)|
+    main|rhein|neckar|elbe|oder|saale|spree|ruhr|weser|
+    mosel|lahn|isar|inn|donau|havel|fulda|werra|nahe|
+    regnitz|pegnitz|enz|kocher|jagst|tauber|wupper|
+    sieg|ahr|nidda|leine|aller|ems|lippe|erft|
+    schwarzwasser|
+    oberlausitz|niederlausitz|lausitz|
+    bergisches?\s*land|
+    bergstra(?:ß|ss)e|
+    breisgau|pfalz|holstein|allgäu|taunus|
+    spreewald|fläming|vogtland|odenwald|spessart|
+    hunsrück|eifel|westerwald|uckermark|altmark|
+    prignitz|harz|
+    bodensee|chiemsee|ammersee|starnberger\s*see|
+    tegernsee
+)"""
 
-SAINT_CITY_REGEX = re.compile(r"(?:\W|^)(?P<City>(St?\.|Saint|San(ta)?|S[ãa]o)\s+[^\d\W]+)(?:\W|$)")
-LOS_CITY_REGEX = re.compile(r"(?:\W|^)(?P<City>L[ao]s?\s+[^\d\W]+)(?:\W|$)")
-NEW_CITY_REGEX = re.compile(r"(?:\W|^)(?P<City>New\s+[^\d\W]+)(?:\W|$)")
+# Built with Claude support
+CITY_NEARBY_FEATURE_GERMAN_REGEX_TEMPLATE = re.compile(
+    r"""(?ix)
+    \b
+    (?P<City>
+        [^\d\W_][^\d\W_]+
+        \s*
+        (?:
+            # Frankfurt/Main, Frankfurt/M.
+            /\s*""" + REGIONS + r"""
+            |
+            # Frankfurt (Oder), Wetter (Ruhr)
+            \(\s*""" + REGIONS + r"""\s*\)
+            |
+            (?:
+                a\.?\s*m\.?         # am, a.M., a. M.
+              | a\.?\s*d\.?         # a.d.
+              | an\s+der
+              | an\s+dem
+              | i\.?\s*m\.?         # im, i.M.
+              | i\.?\s*d\.?         # i.d.
+              | in\s+der
+              | in\s+dem
+              | ob\s+der            # Rothenburg ob der Tauber
+              | b\.?                # b., bei
+              | bei
+            )
+            \s*
+            """ + REGIONS + r"""
+        )
+    )
+    """
+)
+
+
+# NOTE: Disabled, brings false positives (churches, private propeties, etc.)
+# SAINT_CITY_REGEX = re.compile(r"(?:\W|^)(?P<City>(St?\.|Saint|San(ta)?|S[ãa]o)\s+[^\d\W]+)(?:\W|$)")
+# LOS_CITY_REGEX = re.compile(r"(?:\W|^)(?P<City>L[ao]s?\s+[^\d\W]+)(?:\W|$)")
+# NEW_CITY_REGEX = re.compile(r"(?:\W|^)(?P<City>New\s+[^\d\W]+)(?:\W|$)")
 
 # TODO use? It does not necessarily provide something useful
 # 657 E 7th Street
@@ -82,7 +134,7 @@ CARDINAL_NUMBER_STREET_PATTERN = re.compile(r"(?P<HouseNumber>\d{1,4})\s+(?i:(?P
 
 CITY_KREIS_DIRSTRICT_REGEX = re.compile(fr"^(?P<City>[^\d\W]+)\W*{DISTRICT_KEYWORD_PATTERN}(?P<District>[^\d\W]+)?$", re.IGNORECASE)
 
-CITY_COUNTRY_REGEX = re.compile(r"^(?P<City>[^\d\W]+)(\s*/\s*(?P<Country>[^\d\W]+))?$")
+CITY_SOMETHING_REGEX = re.compile(r"^(?P<City>[^\d\W]+)(\s*[/,]\(?\s*(?P<AboveCity>[^\d\W]+))?\s*\)?$")
 
 CONCETRATION_CAMP_PATTERN = re.compile(r"^K\.?\s*Z\.?\s*(?P<Compound>[\w\s]+)$", re.IGNORECASE)
 SUFFIX_CONCETRATION_CAMP_PATTERN = re.compile(r"^(?P<Compound>[\w\s]+)\s*K\.?\s*Z\.?$", re.IGNORECASE)
@@ -95,18 +147,17 @@ STREET_NUMBER_POSTAL_CITY_REGEX = re.compile(fr"^(?P<StreetName>{STREET_PATTERN}
 
 DEPORTATION_PATTERN = re.compile(r"(?P<Deportation>^(?:(in|der)\s+)*Deport(ation|iert))$", re.IGNORECASE)
 MISSING_PERSON_PATTERN = re.compile(r"(?P<Missing>^(Verschollen|Verschwunden)$)", re.IGNORECASE)
-UNKNOWN_PATTERN = re.compile(r"(?P<Unknown>^\W*$)")
+UNKNOWN_PATTERN = re.compile(r"(?P<Unknown>^\W*$|^\s*unbekannt\s*$)", re.IGNORECASE)
 
+# NOTE: Disabled, brings false positives
 PARTIAL_REGEX_LIST = [
-    SAINT_CITY_REGEX,
-    LOS_CITY_REGEX,
-    NEW_CITY_REGEX
+    CITY_NEARBY_FEATURE_GERMAN_REGEX_TEMPLATE
 ]
 
 GLOBAL_REGEX_LIST = [
     CONCETRATION_CAMP_PATTERN,
     SUFFIX_CONCETRATION_CAMP_PATTERN,
-    CITY_COUNTRY_REGEX,
+    CITY_SOMETHING_REGEX,
     CITY_KREIS_DIRSTRICT_REGEX,
     STREET_NUMBER_REGEX,
     CITY_STREET_NUMBER_REGEX,
@@ -157,6 +208,7 @@ def regex_parse(address : str) -> dict[str, Match|str]:
     if address is None or address == "" or not isinstance(address, str):
         return {}
     results = {}
+    status = "unparsed"
 
     for name_pattern, match_candidates in compiled_common_names:
         pattern_match = name_pattern.search(address)
@@ -173,8 +225,9 @@ def regex_parse(address : str) -> dict[str, Match|str]:
                 geonames_id=direct_match.geonames_id,
                 start=pattern_match.start("Match"),
                 end=pattern_match.end("Match"),
-                special_regex=name_pattern.pattern
+                special_regex=name_pattern.pattern.replace('\n', ' ')
             )
+            status = "partially_parsed"
 
     for partial_regex in PARTIAL_REGEX_LIST:
         pattern_match = partial_regex.search(address)
@@ -191,9 +244,9 @@ def regex_parse(address : str) -> dict[str, Match|str]:
                     text=address[pattern_match.start(group_name):pattern_match.end(group_name)],
                     start=pattern_match.start(group_name),
                     end=pattern_match.end(group_name),
-                    special_regex=partial_regex.pattern
+                    special_regex=partial_regex.pattern.replace('\n', ' ')
                 )
-                
+                status = "partially_parsed"
 
 
     still_unparsed_chars = list(address)
@@ -209,6 +262,7 @@ def regex_parse(address : str) -> dict[str, Match|str]:
 
     words_left = get_words_left(address, still_unparsed)
     if len(words_left) == 0:
+        results["status"] = "fully_parsed"
         return results
     elif len(words_left) == 1 and 'City' not in results:
         results['City'] = Match(
@@ -216,13 +270,15 @@ def regex_parse(address : str) -> dict[str, Match|str]:
             start=address.find(words_left[0]),
             end=address.find(words_left[0]) + len(words_left[0])
         )
+        results["status"] = "fully_parsed"
         return results
     
     enhanced_str = ''.join(still_unparsed_chars)
-    if not any(still_unparsed):
+    if not any(still_unparsed): # TODO seems redundant with len(words_left) == 0
+        results["status"] = "fully_parsed"
         return results
     for regex in GLOBAL_REGEX_LIST:
-        pattern_match = regex.search(enhanced_str)
+        pattern_match = regex.fullmatch(enhanced_str)
         if pattern_match:
             for group_name, group_value in pattern_match.groupdict().items():
                 already_matched = results.get(group_name)
@@ -236,7 +292,9 @@ def regex_parse(address : str) -> dict[str, Match|str]:
                         start=start,
                         end=end
                     )
-            results['global_regex'] = regex.pattern
+            results['global_regex'] = regex.pattern.replace('\n', ' ')
+            results["status"] = "fully_parsed"
             return results
-
+    
+    results["status"] = status
     return results

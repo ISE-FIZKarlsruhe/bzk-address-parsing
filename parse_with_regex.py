@@ -29,6 +29,7 @@ class Stats:
         self.total_empty_count = 0
         self.has_match_count = 0
         self.has_link_count = 0
+        self.status_counts = defaultdict(int)
         self.entity_linked_count = defaultdict(int)
         self.entity_matched_count = defaultdict(int)
         self.global_patterns_matches = defaultdict(int)
@@ -46,6 +47,8 @@ class Stats:
                 continue
             elif col == "raw":
                 continue
+            elif col == "status":
+                continue
             parts = col.split('.')
             entity_type = parts[0]
             if parts[1] == 'text':
@@ -61,6 +64,9 @@ class Stats:
         self.has_link_count += has_link.sum()
         for pattern in results.get('global_patterns', []):
             self.global_patterns_matches[pattern] += 1
+        status_counts = results.get('status', pd.Series()).value_counts()
+        for status, count in status_counts.items():
+            self.status_counts[status] += count
 
     def __add__(self, other):
         if not isinstance(other, Stats):
@@ -78,6 +84,8 @@ class Stats:
             result.global_patterns_matches[key] = self.global_patterns_matches[key] + other.global_patterns_matches[key]
         for key in set(self.special_patterns_matches.keys()).union(other.special_patterns_matches.keys()):
             result.special_patterns_matches[key] = self.special_patterns_matches[key] + other.special_patterns_matches[key]
+        for key in set(self.status_counts.keys()).union(other.status_counts.keys()):
+            result.status_counts[key] = self.status_counts[key] + other.status_counts[key]
         return result
 
     def summary(self) -> pd.DataFrame:
@@ -92,6 +100,8 @@ class Stats:
             pd.Series({ "Total": self.has_link_count, "Ratio" : self.has_link_count / addresses_with_values if addresses_with_values > 0 else pd.NA }, name="Linked"),
             pd.Series({ "Total": self.has_match_count, "Ratio" : self.has_match_count / addresses_with_values if addresses_with_values > 0 else pd.NA }, name="Matched"),
         ]
+        for status, count in self.status_counts.items():
+            data.append(pd.Series({ "Total": count, "Ratio" : count / addresses_with_values if addresses_with_values > 0 else pd.NA }, name=f"Status: {status}"))
         for entity_type in set(self.entity_linked_count.keys()).union(self.entity_matched_count.keys()):
             data.append(pd.Series({ "Total": self.entity_linked_count[entity_type], "Ratio" : self.entity_linked_count[entity_type] / addresses_with_values if addresses_with_values > 0 else pd.NA }, name=f"Linked {entity_type}"))
             data.append(pd.Series({ "Total": self.entity_matched_count[entity_type], "Ratio" : self.entity_matched_count[entity_type] / addresses_with_values if addresses_with_values > 0 else pd.NA }, name=f"Matched {entity_type}"))
@@ -181,6 +191,24 @@ def parse(
     
     return result_dfs
 
+def _count_lines(path: Path) -> int:
+    """Count the number of lines (already-written records) in a jsonl file."""
+    if not path.exists():
+        return 0
+    with path.open("r") as f:
+        return sum(1 for _ in f)
+
+def _truncate_to_lines(path: Path, n: int):
+    """Truncate a jsonl file to its first n lines, dropping any incomplete trailing chunk."""
+    if n <= 0:
+        if path.exists():
+            path.unlink()
+        return
+    with path.open("r") as f:
+        lines = f.readlines()
+    with path.open("w") as f:
+        f.writelines(lines[:n])
+
 def main(argv=None):
     arg_parser = argparse.ArgumentParser()
     arg_parser.add_argument("input_file_directory", type=str)
@@ -212,30 +240,68 @@ def main(argv=None):
         ]
     )
     
-    # Output files for each location field
-    output_files = {
-        prefix: output_dir / f"{prefix}_locations.jsonl"
-        for prefix in PLACE_COLS_PREFIX.values()
-    }
+    # One output directory per location field
+    field_dirs = {}
+    for prefix in PLACE_COLS_PREFIX.values():
+        field_dir = output_dir / prefix
+        field_dir.mkdir(parents=True, exist_ok=True)
+        field_dirs[prefix] = field_dir
 
     stats = AggregateStats()
-    
+
     with tqdm(total=total_rows, desc="Processing rows") as pbar, mp.Pool() as pool:
         for i, file in enumerate(files):
+            # One output file per input file, per field, named after the input file
+            output_paths = {
+                prefix: field_dir / file.name
+                for prefix, field_dir in field_dirs.items()
+            }
+
+            # Resume support: figure out how many rows of this file were already
+            # fully processed (consistently across all field output files) and
+            # discard any incomplete trailing chunk left behind by a previous run.
+            existing_counts = {prefix: _count_lines(path) for prefix, path in output_paths.items()}
+            resume_count = min(existing_counts.values())
+            for prefix, path in output_paths.items():
+                if existing_counts[prefix] > resume_count:
+                    _truncate_to_lines(path, resume_count)
+
+            if resume_count >= row_counts[i]:
+                logging.info(f"Skipping {file}, already fully processed.")
+                pbar.update(row_counts[i])
+                continue
+            if resume_count > 0:
+                logging.info(f"Resuming {file} from row {resume_count}.")
+
             try:
                 logging.info(f"Processing {file} with {row_counts[i]} rows.")
+                rows_seen = 0
                 for df in pd.read_json(file, lines=True, chunksize=args.input_chunk_size):
+                    chunk_len = len(df)
+                    if rows_seen + chunk_len <= resume_count:
+                        # Entire chunk was already processed in a previous run
+                        rows_seen += chunk_len
+                        pbar.update(chunk_len)
+                        continue
+                    if rows_seen < resume_count:
+                        # Previous run stopped partway through this chunk
+                        offset = resume_count - rows_seen
+                        df = df.iloc[offset:]
+                        pbar.update(offset)
+                        rows_seen = resume_count
+
                     result_dfs = parse(df, pool, stats)
                     pbar.update(len(df))
-                    # Write each field's results to its respective output file
+                    rows_seen += len(df)
+                    # Write each field's results to its own file for this input file
                     for prefix, result_df in result_dfs.items():
-                        result_df.to_json(output_files[prefix], orient="records", lines=True, mode="a")
+                        result_df.to_json(output_paths[prefix], orient="records", lines=True, mode="a")
                 logging.info(f"Finished processing {file}.")
                 logging.info(f"Current statistics:\n{stats.summary_str()}")
             except Exception as e:
                 if str(e) == "Query interrupted": raise
                 logging.exception(f"Error processing {file}: {e}")
-                try: pbar.update(row_counts[i])
+                try: pbar.update(row_counts[i] - rows_seen)
                 except: pass
     
     # Log final statistics
