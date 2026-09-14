@@ -120,7 +120,7 @@ class SimilarExamples(ExampleMatchingStrategy):
             self.model = embedding_model
         self.similarity_threshold = similarity_threshold
         self.try_match_order = try_match_order
-        self.example_embeddings = self.model.encode(self.example_addresses, convert_to_tensor=True)
+        self.example_embeddings = self.model.encode(self.example_addresses, convert_to_tensor=True, show_progress_bar=False)
         self.example_embeddings = self.example_embeddings.to(device)
         self.example_embeddings = sentence_transformers.util.normalize_embeddings(self.example_embeddings)
 
@@ -142,7 +142,7 @@ class SimilarExamples(ExampleMatchingStrategy):
         return True
 
     def bulk_find_examples(self, addresses):
-        address_embeddings = self.model.encode(addresses, convert_to_tensor=True)
+        address_embeddings = self.model.encode(addresses, convert_to_tensor=True, show_progress_bar=False)
         address_embeddings = address_embeddings.to(self.device)
         address_embeddings = sentence_transformers.util.normalize_embeddings(address_embeddings)
         bulk_hits = sentence_transformers.util.semantic_search(
