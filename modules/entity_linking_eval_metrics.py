@@ -11,7 +11,7 @@ MetricFn = Callable[[ConfusionMatrix], float]
 _METRIC_REGISTRY: dict[str, MetricFn] = {}
 
 
-def _normalize_iri(iri: Optional[str]) -> Optional[str]:
+def normalize_iri(iri: Optional[str]) -> Optional[str]:
     """Normalize an IRI to a canonical form (https scheme, no trailing slash).
 
     IRIs come from different sources that disagree on scheme and trailing
@@ -42,7 +42,8 @@ def register_metric(name: str) -> Callable[[MetricFn], MetricFn]:
 
 
 def eval_entity_linking(
-    predicted_iris: Sequence[Optional[str]], 
+    predicted_iris: Sequence[Optional[str]],
+    predicted_entity_types: Sequence[Optional[str]],
     ground_truth: pd.DataFrame, 
     iri_column: str = "iri",
     full_hierarchy_columns : str = "full_hierarchy"
@@ -63,15 +64,17 @@ def eval_entity_linking(
     """
     if len(predicted_iris) != len(ground_truth):
         raise ValueError("predicted_iris and ground_truth must have the same length")
-
-    true_iris = ground_truth[iri_column]
-    full_hierarchies = ground_truth[full_hierarchy_columns]
     tp = fp = fn = tn = 0
     granularity_loss_counts = defaultdict(int)
+    partial_link_counts = defaultdict(int)
     granularity_score = 0.0
-    for pred, true, hierarchy in zip(predicted_iris, true_iris, full_hierarchies):
-        pred = _normalize_iri(pred)
-        true = None if pd.isna(true) else _normalize_iri(true)
+    full_granularity_loss = 0
+    some_granularity_loss = 0
+    for pred, pred_entity_type, (_, true_row) in zip(predicted_iris, predicted_entity_types, ground_truth.iterrows()):
+        pred = normalize_iri(pred)
+        true = true_row[iri_column]
+        hierarchy = true_row[full_hierarchy_columns]
+        true = None if pd.isna(true) else normalize_iri(true)
         if pred is not None:
             if pred == true:
                 tp += 1
@@ -83,13 +86,21 @@ def eval_entity_linking(
             else:
                 tn += 1
         if isinstance(hierarchy, list):
-            normalized_hierarchy = [_normalize_iri(h) for h in hierarchy]
+            normalized_hierarchy = [normalize_iri(h) for h in hierarchy]
+            partial_link = False
             try:
                 granularity_loss = normalized_hierarchy.index(pred)
+                if granularity_loss > 0:
+                    partial_link = True
+                    some_granularity_loss += 1
             except ValueError:
                 granularity_loss = len(normalized_hierarchy) # pred not in hierarchy
+                full_granularity_loss += 1
             granularity_score += (len(normalized_hierarchy) - granularity_loss) / len(normalized_hierarchy)
             granularity_loss_counts[granularity_loss] += 1
+            if partial_link and pred_entity_type is not None:
+                partial_link_counts[pred_entity_type] += 1
+
 
 
 
@@ -105,6 +116,10 @@ def eval_entity_linking(
         metrics[name] = metric_fn(metrics)
     for loss, count in granularity_loss_counts.items():
         metrics[f"granularity_loss_of_{loss}"] = count
+    metrics["full_granularity_loss"] = full_granularity_loss
+    metrics["some_granularity_loss"] = some_granularity_loss
+    for entity_type, count in partial_link_counts.items():
+        metrics[f"partial_link_to_{entity_type}"] = count
     metrics["granularity_score"] = granularity_score / total_gt_with_values if total_gt_with_values > 0 else float("nan")
     return metrics
 
