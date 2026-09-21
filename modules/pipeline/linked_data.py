@@ -36,17 +36,11 @@ class MatchedName:
     cleaned_edit_distance : int
     matching_method : str
     matching_score : float
+    fuzzy_score : float
     abbreviation_pattern : Optional[str]
     edit_distance : int
     is_abbreviation_match : bool
-
-    @cached_property
-    def raw_similarity(self) -> float:
-        max_dist = max(len(self.nfc_query), len(self.nfc_alt_name))
-        if max_dist == 0:
-            return 1.0
-        else:
-            return 1 - self.edit_distance / max_dist
+    is_phonetic_match : bool
     
     @cached_property
     def cleaned_similarity(self) -> float:
@@ -63,7 +57,6 @@ class MatchedName:
     def __dict_encode__(self, default_encoder) -> dict:
         data = default_encoder(self)
         data.update({
-            "raw_similarity": self.raw_similarity,
             "cleaned_similarity": self.cleaned_similarity
         })
         return data

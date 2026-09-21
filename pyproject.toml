@@ -67,6 +67,7 @@ dependencies = [
     "podman-compose>=1.0.0",
     "openai>=1.0.0",
     "jupyterlab>=4.0.0",
+    "cologne_phonetics>=2.0.0"
 ]
 
 [project.optional-dependencies]

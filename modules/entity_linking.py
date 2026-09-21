@@ -107,7 +107,7 @@ def _geonames_iri(geonames_id) -> Optional[str]:
     geonames_id = str(geonames_id).strip()
     if geonames_id == "":
         return None
-    return f"https://sws.geonames.org/{geonames_id}"
+    return f"http://sws.geonames.org/{geonames_id}"
 
 
 def _extract_entity_texts(row, prefix: str) -> dict[str, Optional[str]]:
@@ -192,7 +192,8 @@ def _matching_metadata(matched_name: MatchedName) -> dict:
         "edit_distance": matched_name.edit_distance,
         "cleaned_edit_distance": matched_name.cleaned_edit_distance,
         "is_abbreviation_match": matched_name.is_abbreviation_match,
-        "raw_similarity": matched_name.raw_similarity,
+        "is_phonetic_match": matched_name.is_phonetic_match,
+        "fuzzy_score": matched_name.fuzzy_score,
         "cleaned_similarity": matched_name.cleaned_similarity,
     }
 

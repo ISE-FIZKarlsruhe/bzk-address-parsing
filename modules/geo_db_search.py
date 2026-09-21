@@ -33,6 +33,7 @@ import json
 import pyarrow
 import unidecode
 import math
+import cologne_phonetics
 from abc import ABC, abstractmethod
 from modules.pipeline.storage.encoding_util import decode_from_dict
 
@@ -45,10 +46,12 @@ def levenshtein(a : str, b : str, max_distance : int) -> int:
     # wrapper method to correct logic
     dist = editdistpy.levenshtein.distance(a, b, max_distance=max_distance)
     if dist < 0:
-        return sys.maxsize
+        return max(len(a), len(b))
     return dist
 
 def similarity_and_distance(a : str, b : str, max_distance : int, distance_function : Callable[[str, str, int], int] = levenshtein):
+    if len(a) == 0 and len(b) == 0:
+        return 0, 1.0
     edit_distance = distance_function(a, b, max_distance)
     similarity = 1 - (edit_distance / max(len(a), len(b)))
     return edit_distance, similarity
@@ -106,9 +109,29 @@ _GERMAN_NORMALIZATION_REPLACEMENTS = [
     ("ß", "ss")
 ]
 
+_GERMAN_DIACRITICS = set(unicodedata.normalize('NFC', "äöüßÄÖÜ"))
+
+def normalize_for_scoring(name : str) -> str:
+    """
+    Normalize a name for calculating edit score for the purpose of disambiguation.
+    This means that if there are only german diacritics (ä, ö, ü, ß), 
+    the string is preserved. Otherwise, all diacritics are
+    removed.
+
+    Casing is also preserved.
+    """
+    nfc = unicodedata.normalize('NFC', name)
+    if all(c in _GERMAN_DIACRITICS or c.isascii() for c in nfc):
+        return nfc
+    return unidecode.unidecode_expect_nonascii(name)
+
 # ensure the replacement keys are NFC normalized themselves
 for i, (key, value) in enumerate(_GERMAN_NORMALIZATION_REPLACEMENTS):
     _GERMAN_NORMALIZATION_REPLACEMENTS[i] = (unicodedata.normalize("NFC", key), value)
+
+def cologne_phonetic_normalize(nfc_string : str) -> str:
+    encoded = cologne_phonetics.encode(nfc_string)
+    return " ".join(b for a, b in encoded)
 
 def german_normalize(nfc_string : str) -> str:
     """
@@ -159,6 +182,8 @@ class IndexSearchMatch(NamedTuple):
     levenshtein_distance: Optional[int] = None,
     retrieved_data : Optional[dict] = None
     metadata : Optional[dict] = None
+    # True if this match was only found through the (lower priority) phonetic search key
+    is_phonetic_match : bool = False
 
 
 class IndexSearchResult(NamedTuple):
@@ -213,27 +238,41 @@ class TantivySearchIndex(GeoSearchIndex):
         if skip_if_exists and self.already_exists:
             self.index.reload()
             return
+        # Group all entities sharing the same (NFC normalized) name together, so that
+        # a single document maps a name to every entity known under that name.
+        entities_by_name : dict[str, list[dict]] = defaultdict(list)
+        for row in row_retriever:
+            nfc_name = unicodedata.normalize("NFC", row["name"])
+            entities_by_name[nfc_name].append(row)
         with self.index.writer(num_threads=self.write_threads) as writer:
-            for row in row_retriever:
-                nfc_name = unicodedata.normalize("NFC", row["name"])
+            for nfc_name, rows in tqdm(entities_by_name.items(), desc="Writing search index"):
+                doc = tantivy.Document()
+                doc.add_text("nfc_name", nfc_name)
                 for search_key in normalized_search_strings(nfc_name):
                     if search_key is None or search_key.strip() == "":
                         continue
-                    doc = tantivy.Document()
-                    doc.add_text("nfc_name", nfc_name)
                     doc.add_text("search_key", search_key)
-                    doc.add_bytes("name_data", json.dumps(row).encode("utf-8"))
+                phonetic_key = cologne_phonetic_normalize(nfc_name)
+                if phonetic_key.strip() != "":
+                    doc.add_text("phonetic_key", phonetic_key)
+                # blob with the complete data of every entity known under this name; not indexed
+                doc.add_bytes("name_data", json.dumps(rows).encode("utf-8"))
 
-                    # extra fields for search restriction
+                # extra fields for search restriction, aggregated over all entities sharing this name
+                for row in rows:
                     entity_types = row["entity"].get("possible_entity_types", [])
                     for entity_type in GeographicalEntityType:
-                        doc.add_boolean(entity_type.entity_type, entity_type.entity_type in entity_types)
-                    doc.add_text("country_code", row["entity"]["country"]["iso_code"] or "")
+                        if entity_type.entity_type in entity_types:
+                            doc.add_boolean(entity_type.entity_type, True)
+                    country_code = row["entity"]["country"]["iso_code"]
+                    if country_code:
+                        doc.add_text("country_code", country_code)
                     admin_codes = row["entity"].get("admin_codes", {})
                     for admin_level in range(1, 6):
                         admin_code = admin_codes.get(f"admin{admin_level}_code")
-                        doc.add_text(f"admin{admin_level}_code", admin_code or "")
-                    writer.add_document(doc)
+                        if admin_code:
+                            doc.add_text(f"admin{admin_level}_code", admin_code)
+                writer.add_document(doc)
         self.index.reload()
 
     def create_schema(self):
@@ -248,7 +287,9 @@ class TantivySearchIndex(GeoSearchIndex):
         # search keys
         schema_builder.add_text_field("search_key", stored=True, fast=True, **text_field_options)
         # TODO schema_builder.add_text_field("search_key", stored=True, fast=True, tokenizer_name='whitespace')
-        # json blob with the original data
+        # cologne phonetic search key, lower priority fallback used when the regular search keys find nothing
+        schema_builder.add_text_field("phonetic_key", stored=True, fast=True, **text_field_options)
+        # json blob with a list of the complete data of every entity sharing this name; not indexed
         schema_builder.add_bytes_field("name_data", stored=True, indexed=False)
         # nfc name, no char stripping
         schema_builder.add_text_field("nfc_name", stored=True, **text_field_options)
@@ -309,27 +350,29 @@ class TantivySearchIndex(GeoSearchIndex):
 
 
     def _search_inner(
-            self, 
+            self,
             limit : int,
-            query_strings : list[str] = [], 
+            query_strings : list[str] = [],
             abbrev_pattern : Optional[str] = None,
             hints : list[tuple[tantivy.Occur, tantivy.Query]] = [],
             distance_threshold : int = 0,
+            field : str = "search_key",
+            is_phonetic : bool = False,
         ) -> list[IndexSearchMatch]:
         if distance_threshold == 0:
             name_queries = [
-                tantivy.Query.term_query(self.schema, "search_key", query, index_option='basic')
+                tantivy.Query.term_query(self.schema, field, query, index_option='basic')
                 for query in query_strings
             ]
         else:
-            
+
             name_queries = [
                 tantivy.Query.fuzzy_term_query(self.schema,
-                    "search_key", query, distance=distance_threshold)
+                    field, query, distance=distance_threshold)
                 for query in query_strings
             ]
         if abbrev_pattern:
-            name_queries.append(tantivy.Query.regex_query(self.schema, "search_key", abbrev_pattern))
+            name_queries.append(tantivy.Query.regex_query(self.schema, field, abbrev_pattern))
         final_name_query = tantivy.Query.disjunction_max_query(name_queries)
         if len(hints) > 0:
             final_query = tantivy.Query.boolean_query(
@@ -337,16 +380,23 @@ class TantivySearchIndex(GeoSearchIndex):
         else:
             final_query = final_name_query
         searcher = self.index.searcher()
+        # limit applies to the retrieved name documents; since each one expands into every
+        # entity known under that name, the number of resulting matches may exceed it
         search_results = searcher.search(final_query, limit=limit)
         matches = []
         for score, doc_address in search_results.hits:
             doc = searcher.doc(doc_address)
-            matches.append(IndexSearchMatch(
-                score=score,
-                matched_key=doc.get_first("search_key"),
-                nfc_name=doc.get_first("nfc_name"),
-                retrieved_data=json.loads(doc.get_first("name_data").decode("utf-8"))
-            ))
+            matched_key = doc.get_first(field)
+            nfc_name = doc.get_first("nfc_name")
+            entities_data = json.loads(doc.get_first("name_data").decode("utf-8"))
+            for entity_data in entities_data:
+                matches.append(IndexSearchMatch(
+                    score=score,
+                    matched_key=matched_key,
+                    nfc_name=nfc_name,
+                    retrieved_data=entity_data,
+                    is_phonetic_match=is_phonetic
+                ))
         return matches
 
     def search(
@@ -366,6 +416,7 @@ class TantivySearchIndex(GeoSearchIndex):
             distance_threshold = 0
         nfc_query = unicodedata.normalize("NFC", query_string)
         query_strings = normalized_search_strings(nfc_query)
+        phonetic_query_string = cologne_phonetic_normalize(nfc_query)
         if expand_abbreviations:
             abbrev_pattern = abbreviation_pattern_to_regexes(nfc_query)
         else: abbrev_pattern = None
@@ -394,6 +445,12 @@ class TantivySearchIndex(GeoSearchIndex):
             for i in range(1, distance_threshold + 1):
                 yield self._search_inner(
                     query_strings=query_strings, distance_threshold=i, **other_params)
+            # phonetic matches last: lowest priority, only tried once every name-based
+            # search key (exact, abbreviation and fuzzy) has failed to find anything
+            if phonetic_query_string.strip() != "":
+                yield self._search_inner(
+                    query_strings=[phonetic_query_string], distance_threshold=0,
+                    field="phonetic_key", is_phonetic=True, **other_params)
 
         for query_result in _falling_queries():
             matches = query_result
@@ -494,7 +551,7 @@ class GeoDBSearch(LinkingStep):
             admin_codes=admin_codes
         )
         return index_matches
-    
+        
     def _parse_data(self, index_result : IndexSearchResult) -> Iterable[MatchedName]:
         for index_match in index_result.matches:
             is_abreviation_match = False
@@ -512,11 +569,20 @@ class GeoDBSearch(LinkingStep):
                     max_clean_similarity = query_similarity
                     clean_query = query_string
                     cleaned_edit_distance = query_edit_distance
-            if (max_clean_similarity < self.similarity_threshold or cleaned_edit_distance > self.distance_threshold) and not is_abreviation_match:
+            if (
+                (max_clean_similarity < self.similarity_threshold or cleaned_edit_distance > self.distance_threshold)
+                and not is_abreviation_match
+                # the phonetic key is not a spelling of the name, so edit distance/similarity
+                # against it is meaningless; a phonetic match is trusted on its own
+                and not index_match.is_phonetic_match
+            ):
                 continue
 
             geographical_name=decode_from_dict(index_match.retrieved_data, GeographicalName)
             nfc_alt_name = unicodedata.normalize("NFC", geographical_name.name)
+            query_for_scoring = normalize_for_scoring(index_result.nfc_query)
+            alt_name_for_scoring = normalize_for_scoring(nfc_alt_name)
+            edit_distance, fuzzy_score = similarity_and_distance(query_for_scoring, alt_name_for_scoring, 10)
             matched_name = MatchedName(
                 geographical_name=geographical_name,
                 nfc_query=index_result.nfc_query,
@@ -524,20 +590,36 @@ class GeoDBSearch(LinkingStep):
                 cleaned_query=clean_query,
                 cleaned_alt_name=index_match.matched_key,
                 cleaned_edit_distance=cleaned_edit_distance,
-                edit_distance = levenshtein(index_result.nfc_query, nfc_alt_name, self.distance_threshold),
+                edit_distance = edit_distance,
+                fuzzy_score = fuzzy_score,
                 abbreviation_pattern=index_result.abbreviation_pattern,
                 is_abbreviation_match=is_abreviation_match,
+                is_phonetic_match=index_match.is_phonetic_match,
                 matching_method=self.search_index.index_descriptor,
                 matching_score=index_match.score
             )
+
             yield matched_name
         
 
-    def _prune_search_match(self, entity : RawEntity, match : MatchedName) -> bool:
+    def _prune_search_match(self, entity : RawEntity, match : MatchedName, country_codes : set) -> bool:
         """
         Prune a match if it is unlikely to be the correct match for the given address and entity.
         """
+        country_is_unlikely = (
+            match.geographical_name.entity.country.iso_code not in ("IL", "US") and 
+            match.geographical_name.entity.country.continent != "EU"
+        )
         if entity.entity_type == GeographicalEntityType.Country and GeographicalEntityType.Country not in match.geographical_name.entity.possible_entity_types:
+            return True
+        elif (
+            len(country_codes) == 0 and 
+            country_is_unlikely and 
+            (
+                match.is_phonetic_match or
+                match.fuzzy_score < 0.95
+            )
+        ):
             return True
         return False
 
@@ -554,7 +636,7 @@ class GeoDBSearch(LinkingStep):
                 country_codes=country_codes if len(country_codes) > 0 else None, 
                 admin_codes=admin_codes if len(admin_codes) > 0 else None
             )
-            matched_names = tuple(m for m in self._parse_data(index_result) if not self._prune_search_match(entity, m))
+            matched_names = tuple(m for m in self._parse_data(index_result) if not self._prune_search_match(entity, m, country_codes))
             for matched_name in matched_names:
                 country_codes.update(matched_name.geographical_name.entity.all_country_iso_codes)
                 if matched_name.geographical_name.entity.admin_codes:

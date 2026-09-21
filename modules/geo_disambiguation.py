@@ -10,18 +10,20 @@ import dataclasses
 from collections import defaultdict
 from modules.pipeline.linked_data import AnnotatedScore
 from modules.pipeline.storage.frozendict import FrozenDict
-
+import math
 
 def _is_admin_code_null(code : Optional[str]) -> bool:
     # TODO 0+ always none?
     return code is None or code == "" or all(c == "0" for c in code)
 
+
 DISAMBIGUATION_FACTOR_PRIORITY = [
     "fuzzy_similarity_score",
     "child_parent_likelihood",
     "entity_types_matching",
+    "population_order_of_magnitude",
     "country_likelihood_rank", # general rank of country likelihood based on observation
-    #"is_preferred_name",
+    "is_preferred_name",
     "population_count"
 ]
 
@@ -82,7 +84,7 @@ class Disambiguator:
         self.population_rounding_factor = population_rounding_factor
         
 
-    def _drop_duplicates(self, entity : MatchedEntity, matches: list[MatchedName]) -> list[MatchedName]:
+    def _drop_duplicates(self, entity : MatchedEntity, matches: list[MatchedName], bzk_field: BZKFieldName) -> list[MatchedName]:
         """
         Collapse duplicate matches that refer to the same geographical entity, keeping the one with the highest similarity score.
         """
@@ -91,7 +93,7 @@ class Disambiguator:
         already_seen = set()
         matches = sorted(
             matches, 
-            key=lambda m : _score_dict_to_tuple(self._score_individual_match(entity, m), self.priority), 
+            key=lambda m : _score_dict_to_tuple(self._score_individual_match(entity, m, bzk_field), self.priority), 
             reverse=True
         )
         unique_matches = []
@@ -103,7 +105,7 @@ class Disambiguator:
             unique_matches.append(match)
         return unique_matches
 
-    def _score_individual_match(self, entity: MatchedEntity, name: MatchedName) -> ScoredMatch:
+    def _score_individual_match(self, entity: MatchedEntity, name: MatchedName, bzk_field : BZKFieldName) -> ScoredMatch:
         scores = dict()
         scores["entity_types_matching"] = AnnotatedScore.from_bool(
             entity.entity_type in name.geographical_name.entity.possible_entity_types)
@@ -111,23 +113,26 @@ class Disambiguator:
         if name.is_abbreviation_match:
             scores["fuzzy_similarity_score"] = AnnotatedScore(1.0, "Abbreviation match")
         else:
-            scores["fuzzy_similarity_score"] = AnnotatedScore(name.raw_similarity, "Fuzzy similarity score")
+            scores["fuzzy_similarity_score"] = AnnotatedScore(name.fuzzy_score, "Fuzzy similarity score")
 
         if name.geographical_name.entity.country.iso_code == "DE":
             scores["country_likelihood_rank"] = AnnotatedScore(3, "Germany")
         elif name.geographical_name.entity.country.iso_code == "PL":
             scores["country_likelihood_rank"] = AnnotatedScore(3, "Poland")
+        elif name.geographical_name.entity.country.iso_code == "IL" and bzk_field != BZKFieldName.VICTIM_BIRTH_PLACE:
+                    scores["country_likelihood_rank"] = AnnotatedScore(3, "Israel")
         elif name.geographical_name.entity.country.continent == "EU":
             scores["country_likelihood_rank"] = AnnotatedScore(2, "Europe")
-        elif name.geographical_name.entity.country.iso_code == "IL":
-            scores["country_likelihood_rank"] = AnnotatedScore(1, "Israel")
-        elif name.geographical_name.entity.country.iso_code == "US":
+        elif name.geographical_name.entity.country.iso_code == "US" and bzk_field != BZKFieldName.VICTIM_BIRTH_PLACE:
             scores["country_likelihood_rank"] = AnnotatedScore(1, "USA")
         
         if name.geographical_name.entity.population is None:
             scores["population_count"] = AnnotatedScore(1, "Unknown")
+            scores["population_order_of_magnitude"] = AnnotatedScore(0, "Unknown")
         else:
-            scores["population_count"] = AnnotatedScore(float(name.geographical_name.entity.population / self.population_rounding_factor))
+            scores["population_count"] = AnnotatedScore(round(name.geographical_name.entity.population / self.population_rounding_factor))
+            order_of_magnitude = round(math.log10(name.geographical_name.entity.population)) if name.geographical_name.entity.population > 0 else 0
+            scores["population_order_of_magnitude"] = AnnotatedScore(order_of_magnitude, "Population order of magnitude")
         return ScoredMatch(name, scores)
 
     def _score_parent_child(self, parent: MatchedName, child: MatchedName) -> AnnotatedScore:
@@ -188,7 +193,8 @@ class Disambiguator:
     def _score_ambiguous_matches(
         self,
         address : AddressProcessingData, 
-        entity : MatchedEntity
+        entity : MatchedEntity,
+        bzk_field : BZKFieldName
         ) -> list[LinkedAddress]:
         """
         Group possible addresses by parent entity.
@@ -205,7 +211,7 @@ class Disambiguator:
             return possible_addresses
         for match in entity.matches:
             matched = {id(e): ScoredMatch(None, {}) for e in address.entities if e.entity_type in [GeographicalEntityType.Neighborhood, GeographicalEntityType.City, GeographicalEntityType.Region, GeographicalEntityType.State, GeographicalEntityType.Country]}
-            matched[id(entity)] = self._score_individual_match(entity, match)
+            matched[id(entity)] = self._score_individual_match(entity, match, bzk_field)
             matched[id(entity)].scores["child_parent_likelihood"] = AnnotatedScore(1.0, "Reference match")
             finest_entity = entity
             for other_entity in address.entities:
@@ -213,7 +219,7 @@ class Disambiguator:
                     continue
                 best_other_match_scored = ScoredMatch(None, {})
                 for other_match in other_entity.matches:
-                    scored_match = self._score_individual_match(other_entity, other_match)
+                    scored_match = self._score_individual_match(other_entity, other_match, bzk_field)
                     if entity.entity_type < other_entity.entity_type:
                         scored_match.scores["child_parent_likelihood"] = self._score_parent_child(match, other_match)
                     else:
@@ -255,7 +261,7 @@ class Disambiguator:
         unduped_entities = []
         for entity in address.entities:
             if isinstance(entity, MatchedEntity) and entity.matches is not None and len(entity.matches) > 0:
-                unduped_entities.append(dataclasses.replace(entity, matches=self._drop_duplicates(entity, entity.matches)))
+                unduped_entities.append(dataclasses.replace(entity, matches=self._drop_duplicates(entity, entity.matches, bzk_field=address.bzk_field_name)))
             else:
                 unduped_entities.append(entity)
         address = dataclasses.replace(address, entities=unduped_entities)
@@ -265,7 +271,7 @@ class Disambiguator:
         for entity in sorted(address.entities, key=lambda e: (1 if e.entity_type == GeographicalEntityType.City else 0, e.entity_type), reverse=True):
             if not isinstance(entity, MatchedEntity) or entity.matches is None or len(entity.matches) == 0:
                 continue
-            possible_addresses.extend(self._score_ambiguous_matches(address, entity))
+            possible_addresses.extend(self._score_ambiguous_matches(address, entity, address.bzk_field_name))
             if len(possible_addresses) > 0:
                 best_address = possible_addresses[0]
                 reference_iris = set()

@@ -365,6 +365,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "accelerate" },
+    { name = "cologne-phonetics" },
     { name = "datasets" },
     { name = "de-core-news-sm" },
     { name = "deepparse" },
@@ -412,6 +413,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "accelerate", specifier = ">=0.20.0" },
+    { name = "cologne-phonetics", specifier = ">=2.0.0" },
     { name = "datasets", specifier = ">=4.7.0" },
     { name = "de-core-news-sm", url = "https://github.com/explosion/spacy-models/releases/download/de_core_news_sm-3.8.0/de_core_news_sm-3.8.0-py3-none-any.whl" },
     { name = "deepparse", specifier = ">=0.9.0" },
@@ -559,6 +561,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/27/fb/576f067976d320f5f0114a8d9fa1215425441bb35627b1993e5afd8111e5/cloudpickle-3.1.2.tar.gz", hash = "sha256:7fda9eb655c9c230dab534f1983763de5835249750e85fbcef43aaa30a9a2414", size = 22330, upload-time = "2025-11-03T09:25:26.604Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/88/39/799be3f2f0f38cc727ee3b4f1445fe6d5e4133064ec2e4115069418a5bb6/cloudpickle-3.1.2-py3-none-any.whl", hash = "sha256:9acb47f6afd73f60dc1df93bb801b472f05ff42fa6c84167d25cb206be1fbf4a", size = 22228, upload-time = "2025-11-03T09:25:25.534Z" },
+]
+
+[[package]]
+name = "cologne-phonetics"
+version = "2.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/0d/a4/f0ff7bacaecb1b5e489e8b61677a036a54efc1f700230b29e0f83e50e9a6/cologne_phonetics-2.0.0.tar.gz", hash = "sha256:f7379dc2c78116d2c9b4f2122a2a93e9cf4c04360831a6968f6ffc1b7eb6c097", size = 5986, upload-time = "2024-01-14T09:46:53.067Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5d/f8/eee21372300aac4b656b725efb99b7a06846a5454c6c5be991a8576ffbdb/cologne_phonetics-2.0.0-py3-none-any.whl", hash = "sha256:8512deca088454c5a538bcdc93370d5c1059ab69afa8ea198bef6cc107cf8244", size = 6612, upload-time = "2024-01-14T09:46:50.043Z" },
 ]
 
 [[package]]
