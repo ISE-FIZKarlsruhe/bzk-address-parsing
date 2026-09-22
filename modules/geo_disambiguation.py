@@ -20,9 +20,10 @@ def _is_admin_code_null(code : Optional[str]) -> bool:
 DISAMBIGUATION_FACTOR_PRIORITY = [
     "fuzzy_similarity_score",
     "child_parent_likelihood",
-    "entity_types_matching",
+    "entity_types_matching_fuzzy",
     "population_order_of_magnitude",
     "country_likelihood_rank", # general rank of country likelihood based on observation
+    "entity_types_matching",
     "is_preferred_name",
     "population_count"
 ]
@@ -107,9 +108,19 @@ class Disambiguator:
 
     def _score_individual_match(self, entity: MatchedEntity, name: MatchedName, bzk_field : BZKFieldName) -> ScoredMatch:
         scores = dict()
-        scores["entity_types_matching"] = AnnotatedScore.from_bool(
-            entity.entity_type in name.geographical_name.entity.possible_entity_types)
-        #scores["is_preferred_name"] = AnnotatedScore.from_bool(name.geographical_name.is_preferred_name)
+        if entity.entity_type in name.geographical_name.entity.possible_entity_types:
+            scores["entity_types_matching_fuzzy"] = AnnotatedScore(1.0, "Entity type matches")
+            scores["entity_types_matching"] = AnnotatedScore(1.0, "Entity type matches")
+        else:
+            scores["entity_types_matching"] = AnnotatedScore(0.0, "Entity type does not match")
+            if entity.entity_type == GeographicalEntityType.Neighborhood and GeographicalEntityType.City in name.geographical_name.entity.possible_entity_types:
+                scores["entity_types_matching_fuzzy"] = AnnotatedScore(1.0, "City instead of neighborhood match")
+            elif entity.entity_type == GeographicalEntityType.City and GeographicalEntityType.Neighborhood in name.geographical_name.entity.possible_entity_types:
+                scores["entity_types_matching_fuzzy"] = AnnotatedScore(1.0, "Neighborhood instead of city match")
+            else:
+                scores["entity_types_matching_fuzzy"] = AnnotatedScore(0.0, "Entity type does not match")
+            
+        scores["is_preferred_name"] = AnnotatedScore.from_bool(name.geographical_name.is_preferred_name)
         if name.is_abbreviation_match:
             scores["fuzzy_similarity_score"] = AnnotatedScore(1.0, "Abbreviation match")
         else:
@@ -131,8 +142,11 @@ class Disambiguator:
             scores["population_order_of_magnitude"] = AnnotatedScore(0, "Unknown")
         else:
             scores["population_count"] = AnnotatedScore(round(name.geographical_name.entity.population / self.population_rounding_factor))
-            order_of_magnitude = round(math.log10(name.geographical_name.entity.population)) if name.geographical_name.entity.population > 0 else 0
-            scores["population_order_of_magnitude"] = AnnotatedScore(order_of_magnitude, "Population order of magnitude")
+            if name.geographical_name.entity.population < 10_000:
+                scores["population_order_of_magnitude"] = AnnotatedScore(0, "Population under minimum threshold")
+            else:
+                order_of_magnitude = round(math.log10(name.geographical_name.entity.population)) if name.geographical_name.entity.population > 0 else 0
+                scores["population_order_of_magnitude"] = AnnotatedScore(order_of_magnitude, "Population order of magnitude")
         return ScoredMatch(name, scores)
 
     def _score_parent_child(self, parent: MatchedName, child: MatchedName) -> AnnotatedScore:

@@ -613,7 +613,7 @@ class GeoDBSearch(LinkingStep):
         if entity.entity_type == GeographicalEntityType.Country and GeographicalEntityType.Country not in match.geographical_name.entity.possible_entity_types:
             return True
         elif (
-            len(country_codes) == 0 and 
+            match.geographical_name.entity.country.iso_code not in country_codes and 
             country_is_unlikely and 
             (
                 match.is_phonetic_match or
