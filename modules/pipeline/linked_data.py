@@ -41,6 +41,7 @@ class MatchedName:
     edit_distance : int
     is_abbreviation_match : bool
     is_phonetic_match : bool
+    is_partial_word_match : bool
     
     @cached_property
     def cleaned_similarity(self) -> float:

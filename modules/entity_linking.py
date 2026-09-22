@@ -46,7 +46,7 @@ from tqdm.auto import tqdm
 from modules.address_tagging import tag_address
 from modules.camp_search import DEFAULT_CAMPS_REFERENCE_PATH, CampReferenceMatcher
 from modules.geo_db_search import GeoDBSearch, TantivySearchIndex
-from modules.geo_disambiguation import Disambiguator
+from modules.geo_disambiguation import DISAMBIGUATION_FACTOR_PRIORITY, Disambiguator
 from modules.entity_linking_eval_metrics import normalize_iri
 from modules.pipeline.geographical_entity import GeographicalEntityType
 from modules.pipeline.linked_data import AddressProcessingData, BZKFieldName, LinkedAddress, MatchedEntity, MatchedName, RawEntity
@@ -71,10 +71,20 @@ class SearchStatus:
     Describes which method was used (or why none was) to find candidates for
     an address field.
     """
+    PRE_LINKED_DURING_PARSING="PRE_LINKED_DURING_PARSING"
     CAMP_REFERENCE = "CAMP_AND_GHETTO_REFERENCE"
     NO_ENTITIES = "EMPTY_PARSING_RESULT"
     NO_LOCATION = "TAGGED_NOT_A_LOCATION"
-    GEO_DB = "GEO_DB_SEARCH"
+    # GeoDBSearch found no candidates at all for the address.
+    GEO_DB_NO_CANDIDATES = "GEO_DB_NO_CANDIDATES"
+    # GeoDBSearch found candidates and one was linked; the suffix says which
+    # of the progressively looser levels tried by TantivySearchIndex.search
+    # produced the winning match for the finest-grain linked entity.
+    GEO_DB_EXACT_MATCH = "GEO_DB_EXACT_MATCH"
+    GEO_DB_ABBREVIATION_MATCH = "GEO_DB_ABBREVIATION_MATCH"
+    GEO_DB_PHONETIC_MATCH = "GEO_DB_PHONETIC_MATCH"
+    GEO_DB_FUZZY_MATCH = "GEO_DB_FUZZY_MATCH"
+    GEO_DB_PARTIAL_WORD_MATCH = "GEO_DB_PARTIAL_WORD_MATCH"
 
 
 class DisambiguationStatus:
@@ -83,9 +93,62 @@ class DisambiguationStatus:
     """
     PRE_LINKED_DURING_PARSING = "PRE_LINKED_DURING_PARSING"
     NOT_APPLICABLE = "NOT_APPLICABLE"
-    RESOLVED = "RESOLVED"
+    # No disambiguation was needed in the first place since there was only one candidate.
+    UNAMBIGUOUS = "UNAMBIGUOUS"
+    # There were several candidates, but disambiguation could settle on one
+    # using only the entity type and matching with other entities in the same address.
+    DISAMBIGUATED_BY_CONTEXT = "DISAMBIGUATED_BY_CONTEXT"
+    # There were several candidates, and disambiguation could settle on one
+    # only by using the remaining criteria, e.g. population, country, ...;
+    # this is the most error-prone case.
+    DISAMBIGUATED_HEURISTICALLY = "DISAMBIGUATED_HEURISTICALLY"
+
     AMBIGUOUS = "AMBIGUOUS"
     NO_CANDIDATES = "NO_CANDIDATES"
+
+
+# DISAMBIGUATION_FACTOR_PRIORITY factors that reflect the entity's own type
+# match or agreement with sibling entities in the same address, as opposed to
+# generic ranking criteria (population, country, preferred name, ...).
+_CONTEXT_DISAMBIGUATION_FACTORS = {
+    "child_parent_likelihood",
+    "entity_types_matching_fuzzy",
+    "entity_types_matching",
+}
+
+
+def _resolved_disambiguation_status(address: AddressProcessingData) -> str:
+    """
+    Distinguish why disambiguation was able to settle on a single candidate:
+    see DisambiguationStatus.UNAMBIGUOUS/DISAMBIGUATED_BY_CONTEXT/DISAMBIGUATED_HEURISTICALLY.
+    Only meaningful when address.linked_to is not None.
+    """
+    possible_links = address.possible_links or ()
+    if len(possible_links) <= 1:
+        return DisambiguationStatus.UNAMBIGUOUS
+    # possible_links is sorted best-first; since address.linked_to is not
+    # None, the best candidate is not tied with the runner-up (see
+    # Disambiguator.disambiguate), so they differ on some factor. The first
+    # (highest-priority) factor where they differ is what the choice hinged on.
+    best, runner_up = possible_links[0].scores, possible_links[1].scores
+    for factor in DISAMBIGUATION_FACTOR_PRIORITY:
+        if best.get(factor, 0.0) != runner_up.get(factor, 0.0):
+            if factor in _CONTEXT_DISAMBIGUATION_FACTORS:
+                return DisambiguationStatus.DISAMBIGUATED_BY_CONTEXT
+            return DisambiguationStatus.DISAMBIGUATED_HEURISTICALLY
+    return DisambiguationStatus.DISAMBIGUATED_HEURISTICALLY
+
+
+def _geo_db_search_status(matched_name: MatchedName) -> str:
+    if matched_name.is_abbreviation_match:
+        return SearchStatus.GEO_DB_ABBREVIATION_MATCH
+    if matched_name.is_phonetic_match:
+        return SearchStatus.GEO_DB_PHONETIC_MATCH
+    if matched_name.is_partial_word_match:
+        return SearchStatus.GEO_DB_PARTIAL_WORD_MATCH
+    if matched_name.cleaned_edit_distance == 0:
+        return SearchStatus.GEO_DB_EXACT_MATCH
+    return SearchStatus.GEO_DB_FUZZY_MATCH
 
 
 def _clean_optional_str(value) -> Optional[str]:
@@ -135,6 +198,7 @@ def _build_entities(entity_texts: dict[str, Optional[str]], above_city_text: Opt
         # AboveCity (e.g. "Danzig" in "Putzig (Danzig)") has no dedicated
         # entity type; it names a broader place around the target, so it is
         # treated as a Region-level hint for disambiguation purposes.
+        # TODO it should be setup with a special value to signal search to use a multivalue disjunctive mask instead.
         entities.append(RawEntity.with_parsed(entity_type=GeographicalEntityType.Region, raw_text=above_city_text))
     return entities
 
@@ -193,6 +257,7 @@ def _matching_metadata(matched_name: MatchedName) -> dict:
         "cleaned_edit_distance": matched_name.cleaned_edit_distance,
         "is_abbreviation_match": matched_name.is_abbreviation_match,
         "is_phonetic_match": matched_name.is_phonetic_match,
+        "is_partial_word_match": matched_name.is_partial_word_match,
         "fuzzy_score": matched_name.fuzzy_score,
         "cleaned_similarity": matched_name.cleaned_similarity,
     }
@@ -231,6 +296,15 @@ def link_field(
     """
     raw_address = _clean_optional_str(row.get(f"{prefix}.raw"))
     entity_texts = _extract_entity_texts(row, prefix)
+    above_city_text = _clean_optional_str(row.get(f"{prefix}.AboveCity.text"))
+    entities = _build_entities(entity_texts, above_city_text)
+    address = AddressProcessingData(
+        card_id=row.get("card_id"),
+        id=str(row.get("address_id", row.get("filename"))),
+        full_address=raw_address,
+        bzk_field_name=FIELD_PREFIXES[prefix],
+        entities=entities,
+    )
 
     pre_linked = _pre_linked_entity(row, prefix)
     if pre_linked is not None:
@@ -246,7 +320,7 @@ def link_field(
     # a "KZ "/"Ghetto " prefix (e.g. "KZ Auschwitz" is itself a known label);
     # the parsed city name is tried too since it may already have been
     # cleaned of surrounding words (e.g. "deportiert nach Auschwitz").
-    camp_match = camp_matcher.match(raw_address)
+    camp_match = camp_matcher.match(address)
     if camp_match is not None:
         return LinkingOutcome(
             iri=camp_match.iri, entity_type="Camp", tags=tuple(sorted(camp_match.tags)),
@@ -267,9 +341,6 @@ def link_field(
     # "displaced_persons_camp" for "DP-Lager Foehrenwald"); carried over
     # regardless of how the rest of the pipeline resolves the location.
     extra_tags = tuple(sorted(address_tags))
-
-    above_city_text = _clean_optional_str(row.get(f"{prefix}.AboveCity.text"))
-    entities = _build_entities(entity_texts, above_city_text)
     if len(entities) == 0:
         return LinkingOutcome(
             iri=None, entity_type=None, tags=("unresolved", *extra_tags),
@@ -303,8 +374,8 @@ def link_field(
             iri=finest_iri,
             entity_type=finest_type,
             tags=extra_tags,
-            search_status=SearchStatus.GEO_DB,
-            disambiguation_status=DisambiguationStatus.RESOLVED,
+            search_status=_geo_db_search_status(linked_address.finest_grain_entity.linked_to),
+            disambiguation_status=_resolved_disambiguation_status(address),
             linked_entities=linked_entities,
             possible_links_count=possible_links_count,
             likely_links_count=likely_links_count,
@@ -320,7 +391,7 @@ def link_field(
             iri=None,
             entity_type=first_candidate.finest_grain_entity.entity_type.name,
             tags=("unresolved", *extra_tags),
-            search_status=SearchStatus.GEO_DB,
+            search_status=_geo_db_search_status(first_candidate.finest_grain_entity.linked_to),
             disambiguation_status=DisambiguationStatus.AMBIGUOUS,
             linked_entities=_linked_entities_metadata(first_candidate, search_candidate_counts),
             ambiguous_iris=ambiguous_iris,
@@ -330,7 +401,7 @@ def link_field(
         )
     return LinkingOutcome(
         iri=None, entity_type=None, tags=("unresolved", *extra_tags),
-        search_status=SearchStatus.GEO_DB,
+        search_status=SearchStatus.GEO_DB_NO_CANDIDATES,
         disambiguation_status=DisambiguationStatus.NO_CANDIDATES,
         possible_links_count=possible_links_count, likely_links_count=likely_links_count,
     )

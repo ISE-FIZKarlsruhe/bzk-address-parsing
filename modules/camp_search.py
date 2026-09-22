@@ -3,6 +3,7 @@ Matches full addresses against a reference list of concentration camps and
 ghettos retrieved from wikidata (reference_data/wikidata_camps_and_ghettos.csv).
 """
 
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -10,7 +11,9 @@ import re
 
 import pandas as pd
 
-from modules.geo_db_search import ascii_normalize, german_normalize
+from modules.address_tagging import GHETTO_TERM_PATTERN
+from modules.geo_db_search import ascii_normalize, german_normalize, similarity_and_distance
+from modules.pipeline.linked_data import AddressProcessingData
 
 DEFAULT_CAMPS_REFERENCE_PATH = Path("reference_data/wikidata_camps_and_ghettos.csv")
 
@@ -43,6 +46,11 @@ class CampMatch:
     wikidata_iri: str
     # "concentration_camp" and/or "ghetto", per _HIGHER_CLASS_TAGS.
     tags: frozenset[str] = frozenset()
+    # GND (Gemeinsame Normdatei) iri, when wikidata links one for this place.
+    # Kept as an extra field alongside `iri` rather than as a fallback for it,
+    # since `iri` already falls back to the wikidata iri when no geonames id
+    # is available.
+    gnd_iri: Optional[str] = None
 
 
 class CampReferenceMatcher:
@@ -55,11 +63,20 @@ class CampReferenceMatcher:
     def __init__(self, csv_path: Path | str = DEFAULT_CAMPS_REFERENCE_PATH):
         self.csv_path = Path(csv_path)
         self._index: dict[str, CampMatch] = {}
+        self._keys_by_length: dict[int, list[str]] = defaultdict(list)
 
     # Preferred languages for the human-readable label kept in CampMatch.label,
     # when a normalized key is shared by several label translations of the
     # same camp/ghetto.
     _LABEL_LANG_PRIORITY = {"de": 0, "en": 1}
+
+    # Bounds for the fuzzy fallback in match(): only tolerate a single-character
+    # edit (typo/OCR error), and only on keys long enough that a one-character
+    # difference is unlikely to turn one place into another unrelated one.
+    # Kept deliberately conservative since a wrong camp/ghetto match is worse
+    # than a missed one.
+    _FUZZY_MAX_DISTANCE = 1
+    _FUZZY_MIN_KEY_LENGTH = 6
 
     def initialize(self):
         df = pd.read_csv(self.csv_path, dtype=str)
@@ -89,6 +106,7 @@ class CampReferenceMatcher:
         ambiguous_keys = set()
         for place_iri, group in grouped:
             preferred_iri = self._preferred_iri(place_iri, resolved_geoname)
+            gnd_iri = self._gnd_iri(group)
             tags = frozenset(
                 _HIGHER_CLASS_TAGS[higher_class]
                 for higher_class in group["higherClass"].dropna().unique()
@@ -99,7 +117,7 @@ class CampReferenceMatcher:
             for label in labels["label"]:
                 if label.strip() == "":
                     continue
-                match = CampMatch(iri=preferred_iri, label=label, wikidata_iri=place_iri, tags=tags)
+                match = CampMatch(iri=preferred_iri, label=label, wikidata_iri=place_iri, tags=tags, gnd_iri=gnd_iri)
                 for key in self._normalized_keys(label):
                     if key in ambiguous_keys:
                         continue
@@ -123,6 +141,9 @@ class CampReferenceMatcher:
                         # else: keep the already-indexed, higher-priority label
                         continue
                     self._index[key] = match
+
+        for key in self._index:
+            self._keys_by_length[len(key)].append(key)
 
     @staticmethod
     def _propagate_geoname_ids(parent_of: dict[str, set[str]], own_geoname: dict[str, str]) -> dict[str, str]:
@@ -182,13 +203,14 @@ class CampReferenceMatcher:
         geoname_id = resolved_geoname.get(place_iri)
         if geoname_id is not None:
             return f"https://sws.geonames.org/{geoname_id}"
-        # TODO let's use the wikidata id as the fallback
-        # Maybe the gnd iri when available should be included as an extra field
-        #
-        # gnd_ids = group["gnd"].dropna()
-        # if len(gnd_ids) > 0:
-        #     return f"https://d-nb.info/gnd/{gnd_ids.iloc[0]}"
         return place_iri
+
+    @staticmethod
+    def _gnd_iri(group: pd.DataFrame) -> Optional[str]:
+        gnd_ids = group["gnd"].dropna()
+        if len(gnd_ids) > 0:
+            return f"https://d-nb.info/gnd/{gnd_ids.iloc[0]}"
+        return None
 
     @staticmethod
     def _normalized_keys(label: str) -> set[str]:
@@ -205,11 +227,60 @@ class CampReferenceMatcher:
         keys = {key for key in keys if key not in NAME_EXCLUDE_LIST}
         return keys
 
-    def match(self, full_address: Optional[str]) -> Optional[CampMatch]:
-        if not full_address:
-            return None
-        for key in self._normalized_keys(full_address):
-            match = self._index.get(key)
+    @staticmethod
+    def _is_acceptable(match: CampMatch, full_address: str) -> bool:
+        """
+        A ghetto is usually a specific district of an otherwise ordinary
+        town, so its reference-list entry is often keyed on that town's bare
+        name (e.g. "Litzmannstadt"/"Lodz"); matching that name alone is not
+        enough evidence that the address is about the ghetto rather than an
+        unrelated mention of the same town. Requiring the address to also use
+        the word "Ghetto"/"Getto" itself corroborates the match.
+        Concentration camps are not affected: their names are their own, not
+        shared with an ordinary place with unrelated mentions.
+        """
+        if "ghetto" not in match.tags:
+            return True
+        return GHETTO_TERM_PATTERN.search(full_address) is not None
+
+    def match(self, address: AddressProcessingData) -> Optional[CampMatch]:
+        queries = [address.full_address]
+        for entity in address.entities:
+            if entity.entity_type == "City":
+                queries.append(entity.raw_text)
+                break
+        for query in queries:
+            if not query:
+                continue
+            keys = self._normalized_keys(query)
+            for key in keys:
+                match = self._index.get(key)
+                if match is not None and self._is_acceptable(match, query):
+                    return match
+            # Exact match misses small typos/OCR errors, so fall back to a bounded
+            # fuzzy match. The reference list is small enough (a few thousand
+            # unique keys) that a length-bucketed scan is cheap, so this doesn't
+            # need a dedicated search index the way GeoDBSearch's much larger
+            # geonames data does.
+            match = self._fuzzy_match(keys, query)
             if match is not None:
                 return match
         return None
+
+    def _fuzzy_match(self, keys: set[str], full_address: str) -> Optional[CampMatch]:
+        best_match = None
+        best_similarity = -1.0
+        for key in keys:
+            if len(key) < self._FUZZY_MIN_KEY_LENGTH:
+                continue
+            for length in range(len(key) - self._FUZZY_MAX_DISTANCE, len(key) + self._FUZZY_MAX_DISTANCE + 1):
+                for candidate_key in self._keys_by_length.get(length, ()):
+                    candidate_match = self._index[candidate_key]
+                    if not self._is_acceptable(candidate_match, full_address):
+                        continue
+                    edit_distance, similarity = similarity_and_distance(
+                        key, candidate_key, self._FUZZY_MAX_DISTANCE)
+                    if edit_distance <= self._FUZZY_MAX_DISTANCE and similarity > best_similarity:
+                        best_similarity = similarity
+                        best_match = candidate_match
+        return best_match

@@ -13,7 +13,6 @@ from modules.pipeline.storage.frozendict import FrozenDict
 import math
 
 def _is_admin_code_null(code : Optional[str]) -> bool:
-    # TODO 0+ always none?
     return code is None or code == "" or all(c == "0" for c in code)
 
 
