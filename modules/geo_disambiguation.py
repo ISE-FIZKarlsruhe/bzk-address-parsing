@@ -27,15 +27,6 @@ DISAMBIGUATION_FACTOR_PRIORITY = [
     "population_count"
 ]
 
-def _tuple_abs_diff(t1 : tuple, t2 : tuple) -> float:
-    """
-    Absolute difference between two tuples lexicographically.
-    """
-    for a, b in zip(t1, t2):
-        if a != b:
-            return abs(a - b)
-    return 0.0
-
 NA_SCORE = AnnotatedScore(0.0, "Not applicable")
 
 class ScoredMatch(NamedTuple):
@@ -52,16 +43,21 @@ def _score_dict_to_tuple(scores : dict[str, AnnotatedScore | float], priority : 
             return score
     return tuple(floatify(scores.get(factor, 0.0)) for factor in priority)
 
-def _score_abs_diff(s1 : dict[str, AnnotatedScore | float], s2 : dict[str, AnnotatedScore | float], priority : list[str]) -> float:
+def _compare_scores(
+        s1 : dict[str, AnnotatedScore | float], 
+        s2 : dict[str, AnnotatedScore | float], 
+        priority : list[str],
+        threshold : float = 0.0
+    ) -> float:
     """
-    Absolute difference between two score dictionaries lexicographically.
+    Returns true if the difference between the two score dictionaries is under the given threshold.
     """
     # TODO this logic does not work:
     #   - If a higher priority factor differs it is returned even if under the threshold
     #   - If instead we skip this factor, we may encounter a higher score on lower priority factors, which is not handled
     t1 = _score_dict_to_tuple(s1, priority)
     t2 = _score_dict_to_tuple(s2, priority)
-    return _tuple_abs_diff(t1, t2)
+    return all(abs(a - b) <= threshold for a, b in zip(t1, t2))
 
 def _average_scores(scored_matches : list[ScoredMatch]) -> dict[str, float]:
     scores = defaultdict(lambda: 0.0)
@@ -76,13 +72,14 @@ class Disambiguator:
             score_diff_threshold: float = 0.0, 
             priority: list[str] = DISAMBIGUATION_FACTOR_PRIORITY,
             population_rounding_factor: int = 10_000,
+            score_prune_thresholds : dict[str, float] = defaultdict(float)
         ):
         if score_diff_threshold != 0.0:
             raise NotImplementedError("Non-zero score difference threshold is not currently working.")
         self.score_threshold = score_diff_threshold
         self.priority = priority
         self.population_rounding_factor = population_rounding_factor
-        
+        self.score_prune_thresholds = score_prune_thresholds
 
     def _drop_duplicates(self, entity : MatchedEntity, matches: list[MatchedName], bzk_field: BZKFieldName) -> list[MatchedName]:
         """
@@ -257,7 +254,19 @@ class Disambiguator:
             ))
         return sorted(possible_addresses, key=lambda a: _score_dict_to_tuple(a.scores, self.priority), reverse=True)
     
+    def _prune(self, score_dict : dict[str, float]) -> bool:
+        """
+        Prune possible addresses based on score thresholds.
 
+        Args:
+            score_dict (dict[str, float]): The dictionary of scores to check.
+        Returns:
+            bool: True if the scores should be pruned, False otherwise.
+        """
+        for factor, threshold in self.score_prune_thresholds.items():
+            if score_dict.get(factor, 0.0) < threshold:
+                return True
+        return False
 
     def disambiguate(self, address : AddressProcessingData) -> AddressProcessingData:
         """
@@ -287,11 +296,17 @@ class Disambiguator:
             possible_addresses.extend(self._score_ambiguous_matches(address, entity, address.bzk_field_name))
             if len(possible_addresses) > 0:
                 best_address = possible_addresses[0]
+                if self._prune(best_address.scores):
+                    return dataclasses.replace(address,
+                        possible_links=possible_addresses,
+                        likely_links=tuple(),
+                        linked_to=None
+                    )
                 reference_iris = set()
                 reference_iris.add(best_address.finest_grain_entity.linked_to.geographical_name.entity.iri)
                 likely_addresses = [best_address]
                 for other_address in possible_addresses[1:]:
-                    if _score_abs_diff(best_address.scores, other_address.scores, self.priority) <= self.score_threshold:
+                    if _compare_scores(best_address.scores, other_address.scores, self.priority, self.score_threshold):
                         if not other_address.finest_grain_entity.linked_to.geographical_name.entity.iri in reference_iris:
                             reference_iris.add(other_address.finest_grain_entity.linked_to.geographical_name.entity.iri)
                             likely_addresses.append(other_address)
