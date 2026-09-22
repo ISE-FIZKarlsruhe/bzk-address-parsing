@@ -62,7 +62,7 @@ dependencies = [
     "tantivy>=0.26.0",
     "unidecode>=1.4.0",
     "symspellpy>=0.2.0",
-    "editdistpy==0.2.0",
+    "editdistpy==0.4.0",
     "elasticsearch>=8.0.0",
     "podman-compose>=1.0.0",
     "openai>=1.0.0",

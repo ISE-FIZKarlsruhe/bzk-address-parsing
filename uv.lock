@@ -418,7 +418,7 @@ requires-dist = [
     { name = "de-core-news-sm", url = "https://github.com/explosion/spacy-models/releases/download/de_core_news_sm-3.8.0/de_core_news_sm-3.8.0-py3-none-any.whl" },
     { name = "deepparse", specifier = ">=0.9.0" },
     { name = "duckdb", specifier = ">=1.0.0" },
-    { name = "editdistpy", specifier = "==0.2.0" },
+    { name = "editdistpy", specifier = "==0.4.0" },
     { name = "elasticsearch", specifier = ">=8.0.0" },
     { name = "flash-linear-attention" },
     { name = "huggingface-hub", specifier = ">=0.20.0" },
@@ -872,16 +872,18 @@ wheels = [
 
 [[package]]
 name = "editdistpy"
-version = "0.2.0"
+version = "0.4.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/5e/16/20f22c305c9108f7b3f1dc30f1e1c24a9adad9b78442866e422a20a087cb/editdistpy-0.2.0.tar.gz", hash = "sha256:6cd95c61687a2681b11e28c914a90c2d73a771dea3d38473dc94cc8c64563ed1", size = 125413, upload-time = "2026-02-13T12:30:12.724Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/84/12/cd926c3774da2ccad90099b4a9de16246cb3a4508ca93ac72df78539f17c/editdistpy-0.4.0.tar.gz", hash = "sha256:bc64c0d0c4fe23a09e4b02693c5591a01d2ede7001bc55fcf92c117f68cd0896", size = 40357, upload-time = "2026-07-12T11:24:16.056Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d6/4c/a53ff8ae2f53aa7bc18dea410c4baa052218f2f8afd98abea8c5c8d4c7ae/editdistpy-0.2.0-cp313-cp313-macosx_10_13_x86_64.whl", hash = "sha256:78d508610df1207b430ac9ad1f88726afa2d1269f6f0cc182d994a2f7c8e778b", size = 168537, upload-time = "2026-02-13T12:29:54.89Z" },
-    { url = "https://files.pythonhosted.org/packages/42/c3/e18259cb58a910f108661727756082a9cd728cca8c91ac959dc5141e003b/editdistpy-0.2.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:bba9e4a002324109fec475b9a9362688b87fdb9b31ded908ff78b7a6a25cf4a1", size = 169739, upload-time = "2026-02-13T12:29:56.191Z" },
-    { url = "https://files.pythonhosted.org/packages/56/5e/ec47add106db6d0ffd8ffc1dfa86d4f9bfb9cae1461a3d27e2743b2282ac/editdistpy-0.2.0-cp313-cp313-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:a10b30674e8d68e81b3be8588a7502bc31e901886d5cd4f351ea515e49d314ed", size = 167556, upload-time = "2026-02-13T12:29:57.867Z" },
-    { url = "https://files.pythonhosted.org/packages/30/8e/e3ec63e997ab7b7f707840985f5067efd4236c763835eb28ec265148d12b/editdistpy-0.2.0-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:b475f127dc16737ae36c5673a447992801ce118e4b96c4e0fd73cea92e037f8f", size = 168367, upload-time = "2026-02-13T12:29:59.076Z" },
-    { url = "https://files.pythonhosted.org/packages/cb/e8/de585ede37cdcc03eefc80bbf023ac8bf8b94ac3295c552f12a57da03494/editdistpy-0.2.0-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:5161bbe021f84632ecfe55f2e0e4aec512add3dab57a1c55460b60ebba3dd5b7", size = 1200475, upload-time = "2026-02-13T12:30:01.041Z" },
-    { url = "https://files.pythonhosted.org/packages/e7/8f/17172d6a45157c1d3f2953f11d67683adaf9ca9a3ac40c0df138dd2267d1/editdistpy-0.2.0-cp313-cp313-win_amd64.whl", hash = "sha256:0079918a9dca01289ebd7a0c09c9e19697cf5994f47ac500d601fc61c1923469", size = 169387, upload-time = "2026-02-13T12:30:02.372Z" },
+    { url = "https://files.pythonhosted.org/packages/8e/e6/09a1f0ffdbbd44488e36dae3f7402cb29d302eb1c695e413dacd8c4365c7/editdistpy-0.4.0-cp313-cp313-macosx_10_12_x86_64.whl", hash = "sha256:ff0e93e5b3c7c740af5707fa342f115a3eb27490a9ac9ad82ae37fe5f897b6ea", size = 217057, upload-time = "2026-07-12T11:23:53.406Z" },
+    { url = "https://files.pythonhosted.org/packages/c7/bb/4b3ce82d240c056d516272c6ef3406abdd4c26bc392baf6788ce7256cf43/editdistpy-0.4.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:dc2ffda9d0bb446ca93b7a5159c7d2e1bf124537744239ea282361726ace2afc", size = 214684, upload-time = "2026-07-12T11:23:54.732Z" },
+    { url = "https://files.pythonhosted.org/packages/4f/4a/c2311dd843c5868a0473382cb5c7a9e63ec940bdef4ff5aa57d4dc9ec83a/editdistpy-0.4.0-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:ceba72fdd4ee97f3dc7c973a2b23ef210e3f3721f2fdb46a7aab51fc18e81be7", size = 243476, upload-time = "2026-07-12T11:23:56.088Z" },
+    { url = "https://files.pythonhosted.org/packages/5f/ee/1919bae4d70e9ae2ca8708e3c0bd0ac3b069fe48370699ea2ac137ead225/editdistpy-0.4.0-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:01378f35b2d3a197d128dc80d7fa60dccd770080925490571307481dc158b3f1", size = 246481, upload-time = "2026-07-12T11:23:57.534Z" },
+    { url = "https://files.pythonhosted.org/packages/33/83/d576111d67205096e42dbf36e0e34899ff83ecff5715123358a148a518d5/editdistpy-0.4.0-cp313-cp313-musllinux_1_1_aarch64.whl", hash = "sha256:24264e71520e4c30248f123769de29564f6f186b6a3d602cf5f4610ad98be04f", size = 419380, upload-time = "2026-07-12T11:23:58.88Z" },
+    { url = "https://files.pythonhosted.org/packages/e7/94/4939be38ae89fc523f23f7afb8334c4885d66c9873382c1a6cb890ae40e9/editdistpy-0.4.0-cp313-cp313-musllinux_1_1_x86_64.whl", hash = "sha256:77e0b3a9b2d861298c6ae381bd74f5886c1f8f9131bdf47dce785f32ac030990", size = 449361, upload-time = "2026-07-12T11:24:00.328Z" },
+    { url = "https://files.pythonhosted.org/packages/2d/98/a198472f4d48afe90172e7c4a94ffbb062c663517dd316827a03cab66a2f/editdistpy-0.4.0-cp313-cp313-win32.whl", hash = "sha256:943d2483379347537ec9ca5be646515debdcab10dc917b074bc971906f8110c9", size = 108991, upload-time = "2026-07-12T11:24:01.697Z" },
+    { url = "https://files.pythonhosted.org/packages/5e/38/b0f5fdb8ddd19cd29cbfada4e3d36be4634e15c19fe035b3074115dfbc59/editdistpy-0.4.0-cp313-cp313-win_amd64.whl", hash = "sha256:de1fa669c5845fcac2273f1bf36c2d783476d64b3bf7bd8e3b01a81ed0e7d2c5", size = 111978, upload-time = "2026-07-12T11:24:02.997Z" },
 ]
 
 [[package]]

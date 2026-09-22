@@ -589,14 +589,14 @@ class TantivySearchIndex(GeoSearchIndex):
             query_string, 
             distance_threshold : int, 
             similarity_threshold : float,
+            callback : Optional[Callable[[IndexSearchResult], bool]],
             limit : int = 10,
             expand_abbreviations : bool = True,
             entity_types : Optional[Collection[GeographicalEntityType]] = None,
             strict_entity_type_filtering : bool = False,
             country_codes : Optional[Collection[str]] = None,
             strict_country_filtering : bool = False,
-            admin_codes : Optional[Collection[GeonamesAdminCodes]] = None,
-            accept_matches : Optional[Callable[[list[IndexSearchMatch]], bool]] = None
+            admin_codes : Optional[Collection[GeonamesAdminCodes]] = None
         ):
         if similarity_threshold == 1.0:
             distance_threshold = 0
@@ -644,19 +644,19 @@ class TantivySearchIndex(GeoSearchIndex):
 
         for query_result in _falling_queries():
             matches = query_result
-            if len(matches) == 0:
-                continue
-            # accept_matches lets the caller reject a query level whose candidates
-            # would all end up discarded downstream (e.g. pruned as implausible),
-            # so the search falls through to the next, looser level instead of
-            # stopping on the first one that merely found something.
-            if accept_matches is None or accept_matches(matches):
-                break
+            if len(matches) > 0:
+                if callback(IndexSearchResult(
+                    nfc_query=nfc_query,
+                    query_strings=query_strings,
+                    abbreviation_pattern=abbrev_pattern,
+                    matches=matches
+                )):
+                    break
         return IndexSearchResult(
             nfc_query=nfc_query,
             query_strings=query_strings,
             abbreviation_pattern=abbrev_pattern,
-            matches=matches
+            matches=[]
         )
 
 # Based on observation of the distribution of countries
@@ -686,7 +686,8 @@ class GeoDBSearch(LinkingStep):
             self, search_cache_db, 
             search_index : GeoSearchIndex, materialize_table : bool = True,
             cleaned_distance_threshold : int = 2,
-            score_threshold : float = 0.7,
+            prune_score_threshold : float = 0.5,
+            settle_score_threshold : float = 0.9,
             topk : int = 20,
             priority_countries : Optional[list[str]] = PRIORITY_COUNTRIES,
             geo_db_path : str = "geo.duckdb"
@@ -695,7 +696,8 @@ class GeoDBSearch(LinkingStep):
         self.search_index = search_index
         self.materialize_table = materialize_table
         self.cleaned_distance_threshold = cleaned_distance_threshold
-        self.score_threshold = score_threshold
+        self.prune_score_threshold = prune_score_threshold
+        self.settle_score_threshold = settle_score_threshold
         self.topk = topk
         self.priority_countries = priority_countries
         self.geo_db_path = geo_db_path
@@ -726,49 +728,29 @@ class GeoDBSearch(LinkingStep):
         self, 
         entity : MatchedEntity, 
         country_codes : Optional[Collection[str]], 
-        admin_codes : Optional[Collection[GeonamesAdminCodes]]
+        admin_codes : Optional[Collection[GeonamesAdminCodes]],
+        search_callback : Callable[[IndexSearchResult], bool]
     ) -> IndexSearchResult:
         entity_type = entity.entity_type
         # country_codes as passed in is what _prune_search_match should judge
         # plausibility against; it is only widened to the priority countries
         # below for restricting the search itself.
-        prune_country_codes = country_codes if country_codes is not None else set()
         country_strict = False
         if entity_type != GeographicalEntityType.Country and country_codes is None:
             country_codes = self.priority_countries
         elif country_codes is not None:
             country_strict = True
-
-        nfc_query = unicodedata.normalize("NFC", entity.raw_text)
-        query_strings = normalized_search_strings(nfc_query)
-        abbreviation_pattern = abbreviation_pattern_to_regexes(nfc_query)
-
-        def accept_matches(matches : list[IndexSearchMatch]) -> bool:
-            # Reject a query level if every candidate it found would be pruned
-            # anyway, so search() falls through to the next, looser level
-            # instead of settling for a level that has nothing usable.
-            probe_result = IndexSearchResult(
-                nfc_query=nfc_query,
-                query_strings=query_strings,
-                abbreviation_pattern=abbreviation_pattern,
-                matches=matches
-            )
-            return any(
-                not self._prune_search_match(entity, m, prune_country_codes)
-                for m in self._parse_data(probe_result)
-            )
-
         index_matches = self.search_index.search(
             query_string=entity.raw_text,
             distance_threshold=self.cleaned_distance_threshold,
-            similarity_threshold=self.score_threshold,
+            similarity_threshold=self.prune_score_threshold,
+            callback=search_callback,
             limit=self.topk,
             expand_abbreviations=True,
             entity_types=[entity_type],
             country_codes=country_codes,
             strict_country_filtering=country_strict,
-            admin_codes=admin_codes,
-            accept_matches=accept_matches
+            admin_codes=admin_codes
         )
         return index_matches
         
@@ -801,7 +783,9 @@ class GeoDBSearch(LinkingStep):
             )
 
             yield matched_name
-        
+
+    def _settle_for_search_match(self, entity : RawEntity, match : MatchedName) -> bool:
+        return match.fuzzy_score >= self.settle_score_threshold
 
     def _prune_search_match(self, entity : RawEntity, match : MatchedName, country_codes : set) -> bool:
         """
@@ -811,7 +795,7 @@ class GeoDBSearch(LinkingStep):
             match.geographical_name.entity.country.iso_code not in ("IL", "US") and 
             match.geographical_name.entity.country.continent != "EU"
         )
-        if match.fuzzy_score < self.score_threshold:
+        if match.fuzzy_score < self.prune_score_threshold:
             return True
         elif entity.entity_type == GeographicalEntityType.Country and GeographicalEntityType.Country not in match.geographical_name.entity.possible_entity_types:
             return True
@@ -835,12 +819,23 @@ class GeoDBSearch(LinkingStep):
             if entity.entity_type not in SEARCHABLE_ENTITY_TYPES:
                 new_entities.append(entity)
                 continue
-            index_result = self._search_entity(
+            matched_names : list[MatchedName] = []
+            def callback(index_result : IndexSearchResult) -> bool:
+                nonlocal matched_names
+                settle_here = False
+                for matched_name in self._parse_data(index_result):
+                    if not self._prune_search_match(entity, matched_name, country_codes):
+                        matched_names.append(matched_name)
+                        if self._settle_for_search_match(entity, matched_name):
+                            settle_here = True
+                return settle_here
+            
+            self._search_entity(
                 entity, 
                 country_codes=country_codes if len(country_codes) > 0 else None, 
-                admin_codes=admin_codes if len(admin_codes) > 0 else None
+                admin_codes=admin_codes if len(admin_codes) > 0 else None,
+                search_callback=callback
             )
-            matched_names = tuple(m for m in self._parse_data(index_result) if not self._prune_search_match(entity, m, country_codes))
             for matched_name in matched_names:
                 country_codes.update(matched_name.geographical_name.entity.all_country_iso_codes)
                 if matched_name.geographical_name.entity.admin_codes:
