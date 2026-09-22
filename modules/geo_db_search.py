@@ -800,13 +800,15 @@ class GeoDBSearch(LinkingStep):
         elif entity.entity_type == GeographicalEntityType.Country and GeographicalEntityType.Country not in match.geographical_name.entity.possible_entity_types:
             return True
         elif (
+            entity.entity_type != GeographicalEntityType.Country and
             match.geographical_name.entity.country.iso_code not in country_codes and
             country_is_unlikely and
             (
-                match.is_phonetic_match or
-                match.is_partial_word_match or
-                match.fuzzy_score < 0.95
+                ((match.geographical_name.entity.population or 1) < 100_000 and match.fuzzy_score < 0.95)
+                or
+                match.fuzzy_score < 0.9
             )
+            
         ):
             return True
         return False
@@ -836,9 +838,10 @@ class GeoDBSearch(LinkingStep):
                 admin_codes=admin_codes if len(admin_codes) > 0 else None,
                 search_callback=callback
             )
-            for matched_name in matched_names:
-                country_codes.update(matched_name.geographical_name.entity.all_country_iso_codes)
-                if matched_name.geographical_name.entity.admin_codes:
-                    admin_codes.add(matched_name.geographical_name.entity.admin_codes)
+            if entity.entity_type == GeographicalEntityType.Country and len(matched_names) > 0:
+                for matched_name in matched_names:
+                    country_codes.update(matched_name.geographical_name.entity.all_country_iso_codes)
+                    if matched_name.geographical_name.entity.admin_codes:
+                        admin_codes.add(matched_name.geographical_name.entity.admin_codes)
             new_entities.append(entity.with_matches(matched_names))
         return dataclasses.replace(address, entities=tuple(new_entities))

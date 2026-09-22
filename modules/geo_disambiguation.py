@@ -72,6 +72,7 @@ class Disambiguator:
             score_diff_threshold: float = 0.0, 
             priority: list[str] = DISAMBIGUATION_FACTOR_PRIORITY,
             population_rounding_factor: int = 10_000,
+            min_population_order_of_magnitude: int = 500_000,
             score_prune_thresholds : dict[str, float] = defaultdict(float)
         ):
         if score_diff_threshold != 0.0:
@@ -79,6 +80,7 @@ class Disambiguator:
         self.score_threshold = score_diff_threshold
         self.priority = priority
         self.population_rounding_factor = population_rounding_factor
+        self.min_population_order_of_magnitude = min_population_order_of_magnitude
         self.score_prune_thresholds = score_prune_thresholds
 
     def _drop_duplicates(self, entity : MatchedEntity, matches: list[MatchedName], bzk_field: BZKFieldName) -> list[MatchedName]:
@@ -138,7 +140,7 @@ class Disambiguator:
             scores["population_order_of_magnitude"] = AnnotatedScore(0, "Unknown")
         else:
             scores["population_count"] = AnnotatedScore(round(name.geographical_name.entity.population / self.population_rounding_factor))
-            if name.geographical_name.entity.population < 10_000:
+            if name.geographical_name.entity.population < self.min_population_order_of_magnitude:
                 scores["population_order_of_magnitude"] = AnnotatedScore(0, "Population under minimum threshold")
             else:
                 order_of_magnitude = round(math.log10(name.geographical_name.entity.population)) if name.geographical_name.entity.population > 0 else 0

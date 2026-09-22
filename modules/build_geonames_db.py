@@ -305,6 +305,10 @@ def populate_entities_from_geonames(con: duckdb.DuckDBPyConnection):
                     WHEN 'Region'       THEN (
                         (feature_class = 'A' AND feature_code IN ('ADM1','ADM1H','ADMDH','ADMD','ADM2','ADM2H','ADM3H','ADM3','ADM4','ADM4H','ADM5'))
                         OR (feature_class = 'L' AND feature_code IN ('RGN','RGNH'))
+                        -- Large rivers (class H stream features, excluding intermittent/small streams)
+                        OR (feature_class = 'H' AND feature_code IN ('STM','STMA','STMC','STMD','STMH','STMM','STMS','STMX'))
+                        -- Lakes and reservoirs (class H, excluding intermittent lakes)
+                        OR (feature_class = 'H' AND feature_code IN ('LK','LKC','LKN','LKO','LKS','LKSB','LKSC','LKSN','RSV'))
                     )
                     WHEN 'District'     THEN (
                         feature_class = 'A' AND feature_code IN ('ADM1','ADM1H','ADMDH','ADMD','ADM2','ADM2H','ADM3H','ADM3','ADM4','ADM4H','ADM5')
