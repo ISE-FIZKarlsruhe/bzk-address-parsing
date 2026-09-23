@@ -33,6 +33,7 @@ import pyarrow
 import unidecode
 import math
 import cologne_phonetics
+from modules import phonetics_fuzzy_scoring
 from abc import ABC, abstractmethod
 from modules.pipeline.storage.encoding_util import decode_from_dict
 
@@ -117,7 +118,7 @@ def _remove_stop_words(normalized_string : str) -> str:
     stripped) string. If every word is a stop word, the string is returned
     unchanged rather than reduced to an empty search key.
     """
-    words = [w for w in normalized_string.split(" ") if w not in _STOP_WORDS]
+    words = [w for w in normalized_string.split(" ") if w.lower() not in _STOP_WORDS]
     if not words:
         return normalized_string
     return " ".join(words)
@@ -136,7 +137,6 @@ def ascii_normalize(nfc_string : str) -> str:
     result = _STRIP_PUNCTUATION_REGEX.sub(' ', result)
     result = _DEDUPE_WHITESPACE_REGEX.sub(' ', result)
     result = result.strip()
-    result = _remove_stop_words(result)
     return result
 
 _GERMAN_NORMALIZATION_REPLACEMENTS = [
@@ -170,6 +170,15 @@ def cologne_phonetic_normalize(nfc_string : str) -> str:
     normalized = nfc_string.lower()
     normalized = _remove_stop_words(nfc_string)
     encoded = cologne_phonetics.encode(normalized)
+    return " ".join(b for a, b in encoded)
+
+def phonetics_for_scoring(nfc_string : str) -> str:
+    """
+    Returns a phonetic key for a name, using the phonetics_fuzzy_scoring algorithm.
+    This is used for matching against similarly normalized names in the database.
+    """
+    normalized = nfc_string.lower()
+    encoded = phonetics_fuzzy_scoring.encode(normalized)
     return " ".join(b for a, b in encoded)
 
 def german_normalize(nfc_string : str) -> str:
@@ -207,8 +216,8 @@ def abbreviation_pattern_to_regexes(part : str) -> str:
     if all(len(p.strip()) <= 1 for p in prefixes):
         # Likely a standard abbreviation for exact match: e.g. "U.S.A.", "N.Y."
         return None
-    ascii_regex_pattern = "[a-z]+ ".join([ascii_normalize(x) for x in prefixes]).strip()
-    german_regex_pattern = "[a-z]+ ".join([german_normalize(x) for x in prefixes]).strip()
+    ascii_regex_pattern = "[a-z]* ".join([ascii_normalize(x) for x in prefixes]).strip()
+    german_regex_pattern = "[a-z]* ".join([german_normalize(x) for x in prefixes]).strip()
     if ascii_regex_pattern == german_regex_pattern:
         return ascii_regex_pattern
     else:
@@ -303,7 +312,9 @@ class TantivySearchIndex(GeoSearchIndex):
                 for nfc_name, rows in tqdm(entities_by_name.items(), desc="Writing search index"):
                     doc = tantivy.Document()
                     doc.add_text("nfc_name", nfc_name)
-                    for search_key in normalized_search_strings(nfc_name):
+                    search_keys = set(normalized_search_strings(nfc_name))
+                    search_keys.update(normalized_search_strings(_remove_stop_words(nfc_name)))
+                    for search_key in search_keys:
                         if search_key is None or search_key.strip() == "":
                             continue
                         doc.add_text("search_key", search_key)
@@ -601,7 +612,7 @@ class TantivySearchIndex(GeoSearchIndex):
         if similarity_threshold == 1.0:
             distance_threshold = 0
         nfc_query = unicodedata.normalize("NFC", query_string)
-        query_strings = normalized_search_strings(nfc_query)
+        query_strings = normalized_search_strings(_remove_stop_words(nfc_query))
         phonetic_query_string = cologne_phonetic_normalize(nfc_query)
         if expand_abbreviations:
             abbrev_pattern = abbreviation_pattern_to_regexes(nfc_query)
@@ -765,6 +776,9 @@ class GeoDBSearch(LinkingStep):
             query_for_scoring = normalize_for_scoring(index_result.nfc_query)
             alt_name_for_scoring = normalize_for_scoring(nfc_alt_name)
             edit_distance, fuzzy_score = similarity_and_distance(query_for_scoring, alt_name_for_scoring, 10, distance_function=levenshtein_for_scoring)
+            query_phonetic_key = phonetics_for_scoring(index_result.nfc_query)
+            alt_name_phonetic_key = phonetics_for_scoring(nfc_alt_name)
+            phonetic_dist, phonetic_score = similarity_and_distance(query_phonetic_key, alt_name_phonetic_key, 10)
             matched_name = MatchedName(
                 geographical_name=geographical_name,
                 nfc_query=index_result.nfc_query,
@@ -774,6 +788,7 @@ class GeoDBSearch(LinkingStep):
                 cleaned_edit_distance=None, # Deprecated
                 edit_distance = edit_distance,
                 fuzzy_score = fuzzy_score,
+                phonetic_score = phonetic_score,
                 abbreviation_pattern=index_result.abbreviation_pattern,
                 is_abbreviation_match=is_abreviation_match,
                 is_phonetic_match=index_match.is_phonetic_match,
@@ -795,9 +810,9 @@ class GeoDBSearch(LinkingStep):
             match.geographical_name.entity.country.iso_code not in ("IL", "US") and 
             match.geographical_name.entity.country.continent != "EU"
         )
-        if match.fuzzy_score < self.prune_score_threshold:
-            return True
-        elif entity.entity_type == GeographicalEntityType.Country and GeographicalEntityType.Country not in match.geographical_name.entity.possible_entity_types:
+        # if match.fuzzy_score < self.prune_score_threshold:
+        #     return True
+        if entity.entity_type == GeographicalEntityType.Country and GeographicalEntityType.Country not in match.geographical_name.entity.possible_entity_types:
             return True
         elif (
             entity.entity_type != GeographicalEntityType.Country and

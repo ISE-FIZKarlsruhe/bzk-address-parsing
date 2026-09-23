@@ -17,12 +17,13 @@ def _is_admin_code_null(code : Optional[str]) -> bool:
 
 
 DISAMBIGUATION_FACTOR_PRIORITY = [
-    "fuzzy_similarity_score",
     "child_parent_likelihood",
+    "fuzzy_similarity_score",
     "entity_types_matching_fuzzy",
     "population_order_of_magnitude",
     "country_likelihood_rank", # general rank of country likelihood based on observation
     "entity_types_matching",
+    "phonetic_score",
     "is_preferred_name",
     "population_count"
 ]
@@ -47,17 +48,20 @@ def _compare_scores(
         s1 : dict[str, AnnotatedScore | float], 
         s2 : dict[str, AnnotatedScore | float], 
         priority : list[str],
-        threshold : float = 0.0
-    ) -> float:
+        threshold : float
+    ) -> Literal["gt", "lt", "eq"]:
     """
     Returns true if the difference between the two score dictionaries is under the given threshold.
     """
-    # TODO this logic does not work:
-    #   - If a higher priority factor differs it is returned even if under the threshold
-    #   - If instead we skip this factor, we may encounter a higher score on lower priority factors, which is not handled
     t1 = _score_dict_to_tuple(s1, priority)
     t2 = _score_dict_to_tuple(s2, priority)
-    return all(abs(a - b) <= threshold for a, b in zip(t1, t2))
+    for a, b in zip(t1, t2):
+        if abs(a - b) > threshold:
+            if a > b:
+                return "gt"
+            else:
+                return "lt"
+    return "eq"
 
 def _average_scores(scored_matches : list[ScoredMatch]) -> dict[str, float]:
     scores = defaultdict(lambda: 0.0)
@@ -75,8 +79,6 @@ class Disambiguator:
             min_population_order_of_magnitude: int = 500_000,
             score_prune_thresholds : dict[str, float] = defaultdict(float)
         ):
-        if score_diff_threshold != 0.0:
-            raise NotImplementedError("Non-zero score difference threshold is not currently working.")
         self.score_threshold = score_diff_threshold
         self.priority = priority
         self.population_rounding_factor = population_rounding_factor
@@ -117,7 +119,7 @@ class Disambiguator:
                 scores["entity_types_matching_fuzzy"] = AnnotatedScore(1.0, "Neighborhood instead of city match")
             else:
                 scores["entity_types_matching_fuzzy"] = AnnotatedScore(0.0, "Entity type does not match")
-            
+        scores["phonetic_score"] = AnnotatedScore(name.phonetic_score, "Phonetic similarity score")
         scores["is_preferred_name"] = AnnotatedScore.from_bool(name.geographical_name.is_preferred_name)
         if name.is_abbreviation_match:
             scores["fuzzy_similarity_score"] = AnnotatedScore(1.0, "Abbreviation match")
@@ -295,20 +297,19 @@ class Disambiguator:
         for entity in sorted(address.entities, key=lambda e: (1 if e.entity_type == GeographicalEntityType.City else 0, e.entity_type), reverse=True):
             if not isinstance(entity, MatchedEntity) or entity.matches is None or len(entity.matches) == 0:
                 continue
-            possible_addresses.extend(self._score_ambiguous_matches(address, entity, address.bzk_field_name))
+            result = self._score_ambiguous_matches(address, entity, address.bzk_field_name)
+            result = [r for r in result if not self._prune(r.scores)]
+            possible_addresses.extend(result)
             if len(possible_addresses) > 0:
                 best_address = possible_addresses[0]
-                if self._prune(best_address.scores):
-                    return dataclasses.replace(address,
-                        possible_links=possible_addresses,
-                        likely_links=tuple(),
-                        linked_to=None
-                    )
+                for other_address in possible_addresses[1:]:
+                    if _compare_scores(best_address.scores, other_address.scores, self.priority, self.score_threshold) == "lt":
+                        best_address = other_address
                 reference_iris = set()
                 reference_iris.add(best_address.finest_grain_entity.linked_to.geographical_name.entity.iri)
                 likely_addresses = [best_address]
-                for other_address in possible_addresses[1:]:
-                    if _compare_scores(best_address.scores, other_address.scores, self.priority, self.score_threshold):
+                for other_address in possible_addresses:
+                    if _compare_scores(best_address.scores, other_address.scores, self.priority, self.score_threshold) == "eq":
                         if not other_address.finest_grain_entity.linked_to.geographical_name.entity.iri in reference_iris:
                             reference_iris.add(other_address.finest_grain_entity.linked_to.geographical_name.entity.iri)
                             likely_addresses.append(other_address)

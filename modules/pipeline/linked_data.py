@@ -37,6 +37,7 @@ class MatchedName:
     matching_method : str
     matching_score : float
     fuzzy_score : float
+    phonetic_score : float
     abbreviation_pattern : Optional[str]
     edit_distance : int
     is_abbreviation_match : bool
