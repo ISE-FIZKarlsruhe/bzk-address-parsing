@@ -13,7 +13,7 @@ import pandas as pd
 
 from modules.address_tagging import GHETTO_TERM_PATTERN
 from modules.geo_db_search import ascii_normalize, german_normalize, similarity_and_distance
-from modules.pipeline.linked_data import AddressProcessingData
+from modules.pipeline.linked_data import AddressProcessingData, BZKFieldName
 
 DEFAULT_CAMPS_REFERENCE_PATH = Path("reference_data/wikidata_camps_and_ghettos.csv")
 
@@ -77,6 +77,12 @@ class CampReferenceMatcher:
     # than a missed one.
     _FUZZY_MAX_DISTANCE = 1
     _FUZZY_MIN_KEY_LENGTH = 6
+
+    # Bound for the substring fallback in match(): only keys at least this
+    # long are considered, so a short/generic reference name (e.g. an
+    # abbreviation) doesn't spuriously match as a substring of an unrelated
+    # address.
+    _SUBSTRING_MIN_KEY_LENGTH = 6
 
     def initialize(self):
         df = pd.read_csv(self.csv_path, dtype=str)
@@ -216,10 +222,11 @@ class CampReferenceMatcher:
     def _normalized_keys(label: str) -> set[str]:
         keys = set((
             label,
-            KZ_REGEX.sub("", label)
+            KZ_REGEX.sub("", label),
+            GHETTO_TERM_PATTERN.sub("", label),
         ))
         keys = {
-            new_key 
+            new_key
             for key in keys
             for new_key in (ascii_normalize(key), german_normalize(key))
             if new_key
@@ -235,15 +242,29 @@ class CampReferenceMatcher:
         name (e.g. "Litzmannstadt"/"Lodz"); matching that name alone is not
         enough evidence that the address is about the ghetto rather than an
         unrelated mention of the same town. Requiring the address to also use
-        the word "Ghetto"/"Getto" itself corroborates the match.
-        Concentration camps are not affected: their names are their own, not
-        shared with an ordinary place with unrelated mentions.
+        the word "Ghetto"/"Getto" itself corroborates the match. The word's
+        position is ignored (and stripped from the indexed key, see
+        `_normalized_keys`) since it appears inconsistently before or after
+        the place name, both in the reference data and in input addresses.
+
+        A place administered as both a concentration camp and a ghetto (e.g.
+        Theresienstadt) is keyed under both tags; the concentration camp
+        reading always takes precedence, since concentration camp names are
+        their own and not shared with an ordinary place with unrelated
+        mentions, unlike ghetto names.
         """
+        if "concentration_camp" in match.tags:
+            return True
         if "ghetto" not in match.tags:
             return True
         return GHETTO_TERM_PATTERN.search(full_address) is not None
 
     def match(self, address: AddressProcessingData) -> Optional[CampMatch]:
+        if address.bzk_field_name.is_current_address():
+            return None # People cannot currently reside in a concentration camp or ghetto
+        
+        # However there were people that were born in concentraion camps and ghettos and therefore that 
+        # hypothesis should be considered as well. The current address is not relevant for this case.
         queries = [address.full_address]
         for entity in address.entities:
             if entity.entity_type == "City":
@@ -265,6 +286,12 @@ class CampReferenceMatcher:
             match = self._fuzzy_match(keys, query)
             if match is not None:
                 return match
+            # Full addresses often carry more than just the place name (e.g.
+            # a street or a surrounding region), so also accept a reference
+            # name appearing as a whole-word substring of the query.
+            match = self._substring_match(keys, query)
+            if match is not None:
+                return match
         return None
 
     def _fuzzy_match(self, keys: set[str], full_address: str) -> Optional[CampMatch]:
@@ -283,4 +310,21 @@ class CampReferenceMatcher:
                     if edit_distance <= self._FUZZY_MAX_DISTANCE and similarity > best_similarity:
                         best_similarity = similarity
                         best_match = candidate_match
+        return best_match
+
+    def _substring_match(self, keys: set[str], full_address: str) -> Optional[CampMatch]:
+        best_match = None
+        best_key_length = -1
+        for normalized_query in keys:
+            for index_key, candidate_match in self._index.items():
+                if len(index_key) < self._SUBSTRING_MIN_KEY_LENGTH:
+                    continue
+                if len(index_key) <= best_key_length:
+                    # Already found an equally-specific or more specific match.
+                    continue
+                if not self._is_acceptable(candidate_match, full_address):
+                    continue
+                if re.search(rf"\b{re.escape(index_key)}\b", normalized_query):
+                    best_match = candidate_match
+                    best_key_length = len(index_key)
         return best_match
