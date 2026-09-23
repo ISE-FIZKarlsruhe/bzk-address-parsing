@@ -5,6 +5,7 @@ import pprint
 from typing import Literal, Optional, NamedTuple
 
 from modules.pipeline.geographical_entity import GeographicalEntityType
+from modules.geo_db_search import ABOVE_CITY_ENTITY_TYPES
 from modules.pipeline.linked_data import BZKFieldName, AddressProcessingData, LinkedEntity, MatchedEntity, MatchedName, LinkedAddress
 import dataclasses
 from collections import defaultdict
@@ -117,6 +118,10 @@ class Disambiguator:
                 scores["entity_types_matching_fuzzy"] = AnnotatedScore(1.0, "City instead of neighborhood match")
             elif entity.entity_type == GeographicalEntityType.City and GeographicalEntityType.Neighborhood in name.geographical_name.entity.possible_entity_types:
                 scores["entity_types_matching_fuzzy"] = AnnotatedScore(1.0, "Neighborhood instead of city match")
+            elif entity.entity_type == GeographicalEntityType.AboveCity and any(
+                possible_type in ABOVE_CITY_ENTITY_TYPES for possible_type in name.geographical_name.entity.possible_entity_types
+            ):
+                scores["entity_types_matching_fuzzy"] = AnnotatedScore(1.0, "Above-city match")
             else:
                 scores["entity_types_matching_fuzzy"] = AnnotatedScore(0.0, "Entity type does not match")
         scores["phonetic_score"] = AnnotatedScore(name.phonetic_score, "Phonetic similarity score")
@@ -224,7 +229,7 @@ class Disambiguator:
         if len(address.entities) == 0:
             return possible_addresses
         for match in entity.matches:
-            matched = {id(e): ScoredMatch(None, {}) for e in address.entities if e.entity_type in [GeographicalEntityType.Neighborhood, GeographicalEntityType.City, GeographicalEntityType.Region, GeographicalEntityType.State, GeographicalEntityType.Country]}
+            matched = {id(e): ScoredMatch(None, {}) for e in address.entities if e.entity_type in [GeographicalEntityType.Neighborhood, GeographicalEntityType.City, GeographicalEntityType.Region, GeographicalEntityType.State, GeographicalEntityType.Country, GeographicalEntityType.AboveCity]}
             matched[id(entity)] = self._score_individual_match(entity, match, bzk_field)
             matched[id(entity)].scores["child_parent_likelihood"] = AnnotatedScore(1.0, "Reference match")
             finest_entity = entity

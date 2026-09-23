@@ -236,10 +236,10 @@ def _build_entities(
         if text
     ]
     if above_city_text:
-        # AboveCity (e.g. "Danzig" in "Putzig (Danzig)") has no dedicated
-        # entity type; it names a broader place around the target, so it is
-        # treated as a Region-level hint for disambiguation purposes.
-        # TODO it should be setup with a special value to signal search to use a multivalue disjunctive mask instead.
+        # AboveCity (e.g. "Danzig" in "Putzig (Danzig)") names a broader place
+        # around the target, without parsing knowing which entity type above
+        # City it actually is; GeoDBSearch expands it into a disjunction over
+        # every such type (District, Region, State, Country) when searching.
         # However parsing sometimes captures the same text into AboveCity and
         # into one of the typed columns (e.g. "Sofia, Bulg." -> City="Sofia",
         # AboveCity="Bulg." *and* Country="Bulg."); adding it again then would
@@ -250,7 +250,7 @@ def _build_entities(
             _normalize_for_dedup(entity.raw_text) == normalized_above_city for entity in entities
         )
         if not is_duplicate:
-            entities.append(RawEntity.with_parsed(entity_type=GeographicalEntityType.Region, raw_text=above_city_text))
+            entities.append(RawEntity.with_parsed(entity_type=GeographicalEntityType.AboveCity, raw_text=above_city_text))
     return entities
 
 

@@ -18,6 +18,12 @@ class GeographicalEntityType(GeographicalEntityTypeProperties, Enum):
     Neighborhood = "Neighborhood", 4
     StreetName = "StreetName", 5
     HouseNumber = "HouseNumber", 6
+    # Not a real geographical feature type: a parsing-time hint for a place
+    # named alongside the city that is broader than it (e.g. "Danzig" in
+    # "Putzig (Danzig)"), without knowing which of the coarser types it
+    # actually is. GeoDBSearch expands it into a disjunction over all entity
+    # types above City (see ABOVE_CITY_ENTITY_TYPES) when searching.
+    AboveCity = "AboveCity", 1
 
     def __gt__(self, other):
         if not isinstance(other, GeographicalEntityType):

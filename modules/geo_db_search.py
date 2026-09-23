@@ -368,6 +368,8 @@ class TantivySearchIndex(GeoSearchIndex):
 
         # extra fields for search restriction
         for entity_type in GeographicalEntityType:
+            if entity_type == GeographicalEntityType.AboveCity:
+                continue
             schema_builder.add_boolean_field(entity_type.entity_type, fast=True, indexed=True)
         schema_builder.add_text_field("country_code", fast=True, **text_field_options)
         for code in ["admin1_code", "admin2_code", "admin3_code", "admin4_code", "admin5_code"]:
@@ -707,8 +709,19 @@ SEARCHABLE_ENTITY_TYPES = [
     GeographicalEntityType.Region ,
     GeographicalEntityType.District,
     GeographicalEntityType.City,
-    GeographicalEntityType.Neighborhood
+    GeographicalEntityType.Neighborhood,
+    GeographicalEntityType.AboveCity,
 ]
+
+
+
+# Every real feature type coarser than City, i.e. what AboveCity (a
+# parsing-time hint with no dedicated feature type of its own) expands to
+# when searched: District, Region, State, Country.
+ABOVE_CITY_ENTITY_TYPES = tuple(
+    entity_type for entity_type in GeographicalEntityType
+    if entity_type != GeographicalEntityType.AboveCity and entity_type < GeographicalEntityType.City
+)
 
 class GeoDBSearch(LinkingStep):
     def __init__(
@@ -793,6 +806,12 @@ class GeoDBSearch(LinkingStep):
             country_codes = self.priority_countries
         elif country_codes is not None:
             country_strict = True
+        # AboveCity has no dedicated feature type of its own; search for it
+        # as a disjunction over every real type coarser than City instead
+        # (the search index already treats multiple entity_types as an OR).
+        search_entity_types = (
+            ABOVE_CITY_ENTITY_TYPES if entity_type == GeographicalEntityType.AboveCity else [entity_type]
+        )
         index_matches = self.search_index.search(
             query_string=entity.raw_text,
             distance_threshold=self.cleaned_distance_threshold,
@@ -800,7 +819,7 @@ class GeoDBSearch(LinkingStep):
             callback=search_callback,
             limit=self.topk,
             expand_abbreviations=True,
-            entity_types=[entity_type],
+            entity_types=search_entity_types,
             country_codes=country_codes,
             strict_country_filtering=country_strict,
             admin_codes=admin_codes
