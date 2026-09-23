@@ -35,7 +35,7 @@ import math
 import cologne_phonetics
 from modules import phonetics_fuzzy_scoring
 from abc import ABC, abstractmethod
-from modules.pipeline.storage.encoding_util import decode_from_dict
+from modules.pipeline.storage.encoding_util import decode_from_dict, encode_as_dict
 
 _CASE_TRANSPOSE_COST = 0.1
 
@@ -683,6 +683,24 @@ PRIORITY_COUNTRIES = [
     "RU", # Russia
 ]
 
+# Matches geonames iris regardless of scheme (http/https), as attached by
+# address parsing (see entity_linking._geonames_iri) or held by the geo
+# duckdb (built as "https://sws.geonames.org/{geonameId}", see
+# build_geonames_db.py) -- these two do not always agree on scheme, so
+# geonames iris are resolved by id instead of by direct iri comparison.
+_GEONAMES_IRI_REGEX = re.compile(r"^https?://sws\.geonames\.org/(\d+)/?$")
+
+
+def _normalize_iri(iri: str) -> str:
+    """
+    Normalizes a non-geonames iri to the form used by the geo duckdb: https,
+    no trailing slash.
+    """
+    if iri.startswith("http://"):
+        iri = "https://" + iri[len("http://"):]
+    return iri.rstrip("/")
+
+
 SEARCHABLE_ENTITY_TYPES = [
     GeographicalEntityType.Country,
     GeographicalEntityType.State,
@@ -694,14 +712,15 @@ SEARCHABLE_ENTITY_TYPES = [
 
 class GeoDBSearch(LinkingStep):
     def __init__(
-            self, search_cache_db, 
+            self, search_cache_db,
             search_index : GeoSearchIndex, materialize_table : bool = True,
             cleaned_distance_threshold : int = 2,
             prune_score_threshold : float = 0.5,
             settle_score_threshold : float = 0.9,
             topk : int = 20,
             priority_countries : Optional[list[str]] = PRIORITY_COUNTRIES,
-            geo_db_path : str = "geo.duckdb"
+            geo_db_path : str = "geo.duckdb",
+            cache_dir : str | Path = "cache"
         ):
         self.search_cache_db_path = search_cache_db
         self.search_index = search_index
@@ -712,6 +731,9 @@ class GeoDBSearch(LinkingStep):
         self.topk = topk
         self.priority_countries = priority_countries
         self.geo_db_path = geo_db_path
+        self.cache_dir = Path(cache_dir)
+        self._pre_linked_cache_path = self.cache_dir / "pre_linked_entities.json"
+        self._pre_linked_cache : dict[str, Optional[GeographicalName]] = {}
 
     def initialize(self):
         self.connection = duckdb.connect(self.search_cache_db_path)
@@ -729,11 +751,31 @@ class GeoDBSearch(LinkingStep):
                 pbar.update(len(batch))
             pbar.close()
         self.search_index.populate_index(row_retriever(POP_LANGUAGE_FILTERED_NAMES_SELECT), skip_if_exists=True)
+        self._load_pre_linked_cache()
         return super().initialize()
-    
+
     def finalize(self):
         self.connection.close()
         return super().finalize()
+
+    def _load_pre_linked_cache(self):
+        if not self._pre_linked_cache_path.exists():
+            return
+        with self._pre_linked_cache_path.open("r", encoding="utf-8") as f:
+            raw_cache = json.load(f)
+        self._pre_linked_cache = {
+            iri: (decode_from_dict(data, GeographicalName) if data is not None else None)
+            for iri, data in raw_cache.items()
+        }
+
+    def _save_pre_linked_cache(self):
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        raw_cache = {
+            iri: (encode_as_dict(geographical_name) if geographical_name is not None else None)
+            for iri, geographical_name in self._pre_linked_cache.items()
+        }
+        with self._pre_linked_cache_path.open("w", encoding="utf-8") as f:
+            json.dump(raw_cache, f, ensure_ascii=False)
 
     def _search_entity(
         self, 
@@ -799,6 +841,65 @@ class GeoDBSearch(LinkingStep):
 
             yield matched_name
 
+    def _retrieve_pre_linked(self, iri : str) -> Optional[GeographicalName]:
+        """
+        Resolves an entity already known by iri (attached during address
+        parsing) via a direct id lookup against the geo duckdb, instead of a
+        text search against the tantivy index (which maps text to possibly
+        many entities and is not suited for an exact id lookup). The small,
+        bounded set of ids that ever shows up this way is cached to disk
+        (see _pre_linked_cache_path), since the duckdb lookup is comparatively
+        slow and is otherwise repeated for the same handful of entities.
+        """
+        if iri in self._pre_linked_cache:
+            return self._pre_linked_cache[iri]
+        print(f"{iri} is not in the pre-linked cache; looking it up in the geo database...")
+        geonames_match = _GEONAMES_IRI_REGEX.match(iri)
+        if geonames_match is not None:
+            # The duckdb's own geonames iris and the ones attached during
+            # parsing do not always agree on http vs https; reconstruct the
+            # canonical https form the geo duckdb itself stores (rather than
+            # matching on geonames_id, which -- unlike iri -- is not a
+            # primary/unique key and would force a full table scan).
+            lookup_iri = f"https://sws.geonames.org/{geonames_match.group(1)}"
+        else:
+            lookup_iri = _normalize_iri(iri)
+        row = self.connection.execute(
+            "SELECT * FROM geo_db.geographical_names_with_entities WHERE entity.iri = ? "
+            "ORDER BY is_preferred_name DESC NULLS LAST, name_id LIMIT 1",
+            [lookup_iri]
+        ).fetchone()
+        if row is None:
+            geographical_name = None
+        else:
+            columns = [description[0] for description in self.connection.description]
+            geographical_name = decode_from_dict(dict(zip(columns, row)), GeographicalName)
+        self._pre_linked_cache[iri] = geographical_name
+        self._save_pre_linked_cache()
+        return geographical_name
+
+    def _pre_linked_match(self, entity : RawEntity) -> Optional[MatchedName]:
+        geographical_name = self._retrieve_pre_linked(entity.pre_linked_iri)
+        if geographical_name is None:
+            return None
+        return MatchedName(
+            geographical_name=geographical_name,
+            nfc_query=entity.raw_text,
+            nfc_alt_name=geographical_name.name,
+            cleaned_query=None,
+            cleaned_alt_name=None,
+            cleaned_edit_distance=None,
+            matching_method="pre_linked",
+            matching_score=1.0,
+            fuzzy_score=1.0,
+            phonetic_score=1.0,
+            abbreviation_pattern=None,
+            edit_distance=0,
+            is_abbreviation_match=False,
+            is_phonetic_match=False,
+            is_partial_word_match=False,
+        )
+
     def _settle_for_search_match(self, entity : RawEntity, match : MatchedName) -> bool:
         return match.fuzzy_score >= self.settle_score_threshold
 
@@ -836,27 +937,37 @@ class GeoDBSearch(LinkingStep):
             if entity.entity_type not in SEARCHABLE_ENTITY_TYPES:
                 new_entities.append(entity)
                 continue
-            matched_names : list[MatchedName] = []
-            def callback(index_result : IndexSearchResult) -> bool:
-                nonlocal matched_names
-                settle_here = False
-                for matched_name in self._parse_data(index_result):
-                    if not self._prune_search_match(entity, matched_name, country_codes):
-                        matched_names.append(matched_name)
-                        if self._settle_for_search_match(entity, matched_name):
-                            settle_here = True
-                return settle_here
-            
-            self._search_entity(
-                entity, 
-                country_codes=country_codes if len(country_codes) > 0 else None, 
-                admin_codes=admin_codes if len(admin_codes) > 0 else None,
-                search_callback=callback
-            )
-            if entity.entity_type == GeographicalEntityType.Country and len(matched_names) > 0:
+            if entity.pre_linked_iri is not None:
+                # Already known by id from address parsing: resolve it
+                # directly instead of running a text search.
+                pre_linked_match = self._pre_linked_match(entity)
+                matched_names = [pre_linked_match] if pre_linked_match is not None else []
+                # A pre-linked entity is as authoritative as a resolved
+                # Country search match, regardless of its own entity type.
+                is_authoritative = pre_linked_match is not None
+            else:
+                matched_names : list[MatchedName] = []
+                def callback(index_result : IndexSearchResult) -> bool:
+                    nonlocal matched_names
+                    settle_here = False
+                    for matched_name in self._parse_data(index_result):
+                        if not self._prune_search_match(entity, matched_name, country_codes):
+                            matched_names.append(matched_name)
+                            if self._settle_for_search_match(entity, matched_name):
+                                settle_here = True
+                    return settle_here
+
+                self._search_entity(
+                    entity,
+                    country_codes=country_codes if len(country_codes) > 0 else None,
+                    admin_codes=admin_codes if len(admin_codes) > 0 else None,
+                    search_callback=callback
+                )
+                is_authoritative = entity.entity_type == GeographicalEntityType.Country
+            if is_authoritative and len(matched_names) > 0:
                 for matched_name in matched_names:
                     country_codes.update(matched_name.geographical_name.entity.all_country_iso_codes)
                     if matched_name.geographical_name.entity.admin_codes:
                         admin_codes.add(matched_name.geographical_name.entity.admin_codes)
-            new_entities.append(entity.with_matches(matched_names))
+            new_entities.append(entity.with_matches(tuple(matched_names)))
         return dataclasses.replace(address, entities=tuple(new_entities))

@@ -38,6 +38,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
+import time
 from typing import Iterable, Optional
 
 import pandas as pd
@@ -140,6 +141,8 @@ def _resolved_disambiguation_status(address: AddressProcessingData) -> str:
 
 
 def _geo_db_search_status(matched_name: MatchedName) -> str:
+    if matched_name.matching_method == "pre_linked":
+        return SearchStatus.PRE_LINKED_DURING_PARSING
     if matched_name.is_abbreviation_match:
         return SearchStatus.GEO_DB_ABBREVIATION_MATCH
     if matched_name.is_phonetic_match:
@@ -180,17 +183,55 @@ def _extract_entity_texts(row, prefix: str) -> dict[str, Optional[str]]:
     }
 
 
-def _pre_linked_entity(row, prefix: str) -> Optional[tuple[str, str]]:
+def _pre_linked_iris(row, prefix: str) -> dict[str, str]:
+    """
+    All geonames ids already attached to this address field's entities by
+    parsing, keyed by entity type.
+    """
+    return {
+        entity_type: iri
+        for entity_type in PRE_LINKED_ENTITY_ORDER
+        for iri in (_geonames_iri(row.get(f"{prefix}.{entity_type}.geonames_id")),)
+        if iri is not None
+    }
+
+
+def _finest_entity_type_with_text(entity_texts: dict[str, Optional[str]]) -> Optional[str]:
     for entity_type in PRE_LINKED_ENTITY_ORDER:
-        iri = _geonames_iri(row.get(f"{prefix}.{entity_type}.geonames_id"))
-        if iri is not None:
-            return entity_type, iri
+        if entity_texts.get(entity_type):
+            return entity_type
     return None
 
 
-def _build_entities(entity_texts: dict[str, Optional[str]], above_city_text: Optional[str]) -> list[RawEntity]:
+def _pre_linked_finest_entity(
+    pre_linked_iris: dict[str, str], entity_texts: dict[str, Optional[str]]
+) -> Optional[tuple[str, str]]:
+    """
+    Only when the pre-linked iri is for the finest grain entity actually
+    present in the address (e.g. Neighborhood if parsed, else City, ...) can
+    linking be short-circuited entirely: a pre-link for a coarser entity
+    (e.g. Country) while a finer one (e.g. City) is still unresolved must
+    instead go through the full pipeline, which resolves the pre-linked
+    entity by id and propagates it downstream (see GeoDBSearch.apply).
+    """
+    finest_type = _finest_entity_type_with_text(entity_texts)
+    if finest_type is not None and finest_type in pre_linked_iris:
+        return finest_type, pre_linked_iris[finest_type]
+    return None
+
+
+def _normalize_for_dedup(text: str) -> str:
+    return " ".join(text.split()).casefold()
+
+
+def _build_entities(
+    entity_texts: dict[str, Optional[str]], above_city_text: Optional[str], pre_linked_iris: dict[str, str]
+) -> list[RawEntity]:
     entities = [
-        RawEntity.with_parsed(entity_type=GeographicalEntityType[entity_type], raw_text=text)
+        RawEntity.with_parsed(
+            entity_type=GeographicalEntityType[entity_type], raw_text=text,
+            pre_linked_iri=pre_linked_iris.get(entity_type)
+        )
         for entity_type, text in entity_texts.items()
         if text
     ]
@@ -199,7 +240,17 @@ def _build_entities(entity_texts: dict[str, Optional[str]], above_city_text: Opt
         # entity type; it names a broader place around the target, so it is
         # treated as a Region-level hint for disambiguation purposes.
         # TODO it should be setup with a special value to signal search to use a multivalue disjunctive mask instead.
-        entities.append(RawEntity.with_parsed(entity_type=GeographicalEntityType.Region, raw_text=above_city_text))
+        # However parsing sometimes captures the same text into AboveCity and
+        # into one of the typed columns (e.g. "Sofia, Bulg." -> City="Sofia",
+        # AboveCity="Bulg." *and* Country="Bulg."); adding it again then would
+        # only duplicate an entity already covered (and possibly pre-linked)
+        # above, at the cost of a redundant search.
+        normalized_above_city = _normalize_for_dedup(above_city_text)
+        is_duplicate = any(
+            _normalize_for_dedup(entity.raw_text) == normalized_above_city for entity in entities
+        )
+        if not is_duplicate:
+            entities.append(RawEntity.with_parsed(entity_type=GeographicalEntityType.Region, raw_text=above_city_text))
     return entities
 
 
@@ -224,7 +275,8 @@ class LinkedEntityMetadata:
     # Number of candidates GeoDBSearch found for this entity, before dedup
     # and disambiguation.
     search_candidate_count: Optional[int] = None
-
+    
+    total_time : Optional[float] = None
 
 @dataclass(frozen=True)
 class LinkingOutcome:
@@ -246,6 +298,7 @@ class LinkingOutcome:
     # Address-level (average of per-entity) disambiguation scores for the
     # winning candidate.
     disambiguation_scores: dict = field(default_factory=dict)
+    total_time : Optional[float] = None
 
 
 def _matching_metadata(matched_name: MatchedName) -> dict:
@@ -284,6 +337,7 @@ def _linked_entities_metadata(
     )
 
 
+
 def link_field(
     row,
     prefix: str,
@@ -294,10 +348,15 @@ def link_field(
     """
     Run the full linking pipeline for a single address field of a single row.
     """
+    start = time.monotonic()
+    def _elapsed():
+        nonlocal start
+        return time.monotonic() - start
     raw_address = _clean_optional_str(row.get(f"{prefix}.raw"))
     entity_texts = _extract_entity_texts(row, prefix)
     above_city_text = _clean_optional_str(row.get(f"{prefix}.AboveCity.text"))
-    entities = _build_entities(entity_texts, above_city_text)
+    pre_linked_iris = _pre_linked_iris(row, prefix)
+    entities = _build_entities(entity_texts, above_city_text, pre_linked_iris)
     address = AddressProcessingData(
         card_id=row.get("card_id"),
         id=str(row.get("address_id", row.get("filename"))),
@@ -306,7 +365,7 @@ def link_field(
         entities=entities,
     )
 
-    pre_linked = _pre_linked_entity(row, prefix)
+    pre_linked = _pre_linked_finest_entity(pre_linked_iris, entity_texts)
     if pre_linked is not None:
         entity_type, iri = pre_linked
         return LinkingOutcome(
@@ -314,21 +373,10 @@ def link_field(
             search_status=SearchStatus.PRE_LINKED_DURING_PARSING,
             disambiguation_status=DisambiguationStatus.NOT_APPLICABLE,
             linked_entities=(LinkedEntityMetadata(entity_type=entity_type, iri=iri),),
+            total_time=_elapsed()
         )
 
-    # The full raw text is tried first since camp/ghetto labels often include
-    # a "KZ "/"Ghetto " prefix (e.g. "KZ Auschwitz" is itself a known label);
-    # the parsed city name is tried too since it may already have been
-    # cleaned of surrounding words (e.g. "deportiert nach Auschwitz").
-    camp_match = camp_matcher.match(address)
-    if camp_match is not None:
-        return LinkingOutcome(
-            iri=camp_match.iri, entity_type="Camp", tags=tuple(sorted(camp_match.tags)),
-            search_status=f"{SearchStatus.CAMP_REFERENCE}",
-            disambiguation_status=DisambiguationStatus.NOT_APPLICABLE,
-            linked_entities=(LinkedEntityMetadata(entity_type="Camp", iri=camp_match.iri),),
-        )
-
+    
     address_tags = tag_address(raw_address or entity_texts.get("City"))
     if "location_unspecified" in address_tags:
         reasons = sorted(address_tags - {"location_unspecified"})
@@ -336,16 +384,36 @@ def link_field(
             iri=None, entity_type=None, tags=("unresolved", *sorted(address_tags)),
             search_status=f"{SearchStatus.NO_LOCATION} ({', '.join(reasons)})" if reasons else SearchStatus.NO_LOCATION,
             disambiguation_status=DisambiguationStatus.NOT_APPLICABLE,
+            total_time=_elapsed()
         )
     # Tags that describe the value without ruling out a location (e.g.
     # "displaced_persons_camp" for "DP-Lager Foehrenwald"); carried over
     # regardless of how the rest of the pipeline resolves the location.
     extra_tags = tuple(sorted(address_tags))
+
+    # The full raw text is tried first since camp/ghetto labels often include
+    # a "KZ "/"Ghetto " prefix (e.g. "KZ Auschwitz" is itself a known label);
+    # the parsed city name is tried too since it may already have been
+    # cleaned of surrounding words (e.g. "deportiert nach Auschwitz").
+    camp_match = camp_matcher.match(address, extra_tags)
+    if camp_match is not None:
+        camp_tags = set(camp_match.tags)
+        camp_tags.update(extra_tags)
+        camp_tags = tuple(sorted(camp_tags))
+        return LinkingOutcome(
+            iri=camp_match.iri, entity_type="Camp", tags=camp_tags,
+            search_status=f"{SearchStatus.CAMP_REFERENCE}",
+            disambiguation_status=DisambiguationStatus.NOT_APPLICABLE,
+            linked_entities=(LinkedEntityMetadata(entity_type="Camp", iri=camp_match.iri),),
+            total_time=_elapsed()
+        )
+    
     if len(entities) == 0:
         return LinkingOutcome(
             iri=None, entity_type=None, tags=("unresolved", *extra_tags),
             search_status=SearchStatus.NO_ENTITIES,
             disambiguation_status=DisambiguationStatus.NOT_APPLICABLE,
+            total_time=_elapsed()
         )
 
     address = AddressProcessingData(
@@ -380,6 +448,7 @@ def link_field(
             possible_links_count=possible_links_count,
             likely_links_count=likely_links_count,
             disambiguation_scores=dict(linked_address.scores),
+            total_time=_elapsed()
         )
     if likely_links_count > 1:
         first_candidate = address.likely_links[0]
@@ -398,12 +467,14 @@ def link_field(
             possible_links_count=possible_links_count,
             likely_links_count=likely_links_count,
             disambiguation_scores=dict(first_candidate.scores),
+            total_time=_elapsed()
         )
     return LinkingOutcome(
         iri=None, entity_type=None, tags=("unresolved", *extra_tags),
         search_status=SearchStatus.GEO_DB_NO_CANDIDATES,
         disambiguation_status=DisambiguationStatus.NO_CANDIDATES,
         possible_links_count=possible_links_count, likely_links_count=likely_links_count,
+        total_time=_elapsed()
     )
 
 

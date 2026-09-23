@@ -259,7 +259,7 @@ class CampReferenceMatcher:
             return True
         return GHETTO_TERM_PATTERN.search(full_address) is not None
 
-    def match(self, address: AddressProcessingData) -> Optional[CampMatch]:
+    def match(self, address: AddressProcessingData, tags : list[str]) -> Optional[CampMatch]:
         if address.bzk_field_name.is_current_address():
             return None # People cannot currently reside in a concentration camp or ghetto
         
@@ -286,10 +286,16 @@ class CampReferenceMatcher:
             match = self._fuzzy_match(keys, query)
             if match is not None:
                 return match
+        
+        if len(address.entities) == 0 or "concentration_camp" in tags or "ghetto" in tags:
+            # substring match is expensive and therefore should only be used 
+            # if there are no parsed entities that can be matched or if the address
+            # is already tagged as a concentration camp or ghetto.
+            
             # Full addresses often carry more than just the place name (e.g.
             # a street or a surrounding region), so also accept a reference
             # name appearing as a whole-word substring of the query.
-            match = self._substring_match(keys, query)
+            match = self._substring_match(keys, address.full_address)
             if match is not None:
                 return match
         return None

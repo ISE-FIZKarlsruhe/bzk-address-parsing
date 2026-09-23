@@ -1,6 +1,7 @@
 *.ttl
 envs/
 __pycache__/
+cache/
 .ipynb_checkpoints/
 data/
 dumps/

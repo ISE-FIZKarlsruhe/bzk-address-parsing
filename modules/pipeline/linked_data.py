@@ -75,9 +75,20 @@ class RawEntity:
     entity_type: GeographicalEntityType
     span : Optional[AddressSpan]
     nearby : Optional[str | Literal['unspecified']] # This entity is near the target address but the target may not be contained in it
+    # IRI already known for this entity from address parsing (e.g. a geonames
+    # id attached by the parser), when it did not turn out to be the finest
+    # grain entity of the address (which would have short-circuited linking
+    # entirely). GeoDBSearch resolves this via a direct id lookup instead of
+    # a text search, and propagates it (e.g. for country restriction) the
+    # same way a resolved search match would be.
+    pre_linked_iri: Optional[str] = field(default=None, kw_only=True)
 
     @classmethod
-    def with_parsed(cls, raw_text: str, entity_type: GeographicalEntityType | str, span: Optional[AddressSpan] = None, nearby: Optional[str | Literal['unspecified']] = None) -> 'RawEntity':
+    def with_parsed(
+        cls, raw_text: str, entity_type: GeographicalEntityType | str,
+        span: Optional[AddressSpan] = None, nearby: Optional[str | Literal['unspecified']] = None,
+        pre_linked_iri: Optional[str] = None,
+    ) -> 'RawEntity':
         if isinstance(entity_type, str):
             entity_type = GeographicalEntityType[entity_type]
         return cls(
@@ -85,7 +96,8 @@ class RawEntity:
             raw_text=raw_text,
             entity_type=entity_type,
             span=span,
-            nearby=nearby
+            nearby=nearby,
+            pre_linked_iri=pre_linked_iri
         )
 
     def with_matches(self, matches: tuple[MatchedName, ...]) -> 'MatchedEntity':
@@ -95,9 +107,10 @@ class RawEntity:
             entity_type=self.entity_type,
             span=self.span,
             nearby=self.nearby,
+            pre_linked_iri=self.pre_linked_iri,
             matches=matches
         )
-    
+
     def link_to(self, matched_name: MatchedName, scores: FrozenDict | dict[str, float]) -> 'LinkedEntity':
         if isinstance(scores, dict):
             scores = FrozenDict(scores)
@@ -107,6 +120,7 @@ class RawEntity:
             entity_type=self.entity_type,
             span=self.span,
             nearby=self.nearby,
+            pre_linked_iri=self.pre_linked_iri,
             linked_to=matched_name,
             scores=scores
         )
