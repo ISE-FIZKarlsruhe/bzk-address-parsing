@@ -324,7 +324,7 @@ def link_field(
     if camp_match is not None:
         return LinkingOutcome(
             iri=camp_match.iri, entity_type="Camp", tags=tuple(sorted(camp_match.tags)),
-            search_status=f"{SearchStatus.CAMP_REFERENCE} ('{camp_match.label}')",
+            search_status=f"{SearchStatus.CAMP_REFERENCE}",
             disambiguation_status=DisambiguationStatus.NOT_APPLICABLE,
             linked_entities=(LinkedEntityMetadata(entity_type="Camp", iri=camp_match.iri),),
         )

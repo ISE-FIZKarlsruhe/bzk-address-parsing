@@ -258,18 +258,23 @@ class Disambiguator:
             ))
         return sorted(possible_addresses, key=lambda a: _score_dict_to_tuple(a.scores, self.priority), reverse=True)
     
-    def _prune(self, score_dict : dict[str, float]) -> bool:
+    def _prune(self, candidate: LinkedAddress) -> bool:
         """
         Prune possible addresses based on score thresholds.
 
         Args:
-            score_dict (dict[str, float]): The dictionary of scores to check.
+            candidate (LinkedAddress): The linked address to check.
         Returns:
             bool: True if the scores should be pruned, False otherwise.
         """
+        score_dict = candidate.scores
         for factor, threshold in self.score_prune_thresholds.items():
             if score_dict.get(factor, 0.0) < threshold:
                 return True
+        # finest_grain_entity = candidate.finest_grain_entity.linked_to.geographical_name.entity
+        # if finest_grain_entity.country.continent != "EU" and finest_grain_entity.country.iso_code not in ("IL", "US"):
+        #     if score_dict.get("parent_child_likelihood", 0.0) * score_dict.get("fuzzy_similarity_score", 0.0) < 0.5:
+        #         return True
         return False
 
     def disambiguate(self, address : AddressProcessingData) -> AddressProcessingData:
@@ -298,7 +303,7 @@ class Disambiguator:
             if not isinstance(entity, MatchedEntity) or entity.matches is None or len(entity.matches) == 0:
                 continue
             result = self._score_ambiguous_matches(address, entity, address.bzk_field_name)
-            result = [r for r in result if not self._prune(r.scores)]
+            result = [r for r in result if not self._prune(r)]
             possible_addresses.extend(result)
             if len(possible_addresses) > 0:
                 best_address = possible_addresses[0]
