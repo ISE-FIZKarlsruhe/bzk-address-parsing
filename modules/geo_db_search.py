@@ -38,6 +38,14 @@ from modules import phonetics_fuzzy_scoring
 from abc import ABC, abstractmethod
 from modules.pipeline.storage.encoding_util import decode_from_dict, encode_as_dict
 
+# Common parent of the entity linking loggers (GeoDBSearch, TantivySearchIndex,
+# CampReferenceMatcher, Disambiguator), which leave their own level unset so
+# that setting this logger's level adjusts all of them at once. Only defaulted
+# to INFO when no level was configured before this module was imported.
+ENTITY_LINKING_LOGGER = logging.getLogger("entity_linking")
+if ENTITY_LINKING_LOGGER.level == logging.NOTSET:
+    ENTITY_LINKING_LOGGER.setLevel(logging.INFO)
+
 _CASE_TRANSPOSE_COST = 0.1
 
 def levenshtein_for_scoring(a : str, b : str, max_distance : int) -> int:
@@ -285,8 +293,7 @@ class GeoSearchIndex(ABC):
 
 class TantivySearchIndex(GeoSearchIndex):
     index_descriptor = "tantivy"
-    logger = logging.getLogger(f"{__name__}.TantivySearchIndex")
-    logger.setLevel(logging.INFO)
+    logger = ENTITY_LINKING_LOGGER.getChild("TantivySearchIndex")
 
     # Reference words used to calibrate, from the index's own word statistics,
     # how rare a word must be before its absence can block a partial word
@@ -691,12 +698,19 @@ class TantivySearchIndex(GeoSearchIndex):
                 hints.append((tantivy.Occur.Should, admin_code_restriction))
         def _falling_queries():
             other_params = dict(hints=hints, limit=limit)
-            # exact/abbrev matches first
+            # exact matches first
             self.logger.debug(
                 "Phase 'exact' for %r: query strings %s, abbreviation pattern %r",
                 nfc_query, query_strings, abbrev_pattern)
-            yield "exact", self._search_inner(
-                abbrev_pattern=abbrev_pattern, query_strings=query_strings, distance_threshold=0, **other_params)
+            yield "exact", self._search_inner(query_strings=query_strings, distance_threshold=0, **other_params)
+
+            #abbreviation matches next: catches names that are abbreviated in the query but not in the index, e.g. "Rum." vs "Rumanien"
+            if abbrev_pattern is not None:
+                self.logger.debug(
+                    "Phase 'abbreviation' for %r: abbreviation pattern %r", nfc_query, abbrev_pattern)
+                yield "abbreviation", self._search_inner(
+                    abbrev_pattern=abbrev_pattern, query_strings=[], distance_threshold=0, **other_params)
+            
             # phonetic matches next: catches names that were misheard/misspelled
             # in a way plain edit distance on the raw string would not
             if phonetic_query_string.strip() != "":
@@ -799,8 +813,7 @@ ABOVE_CITY_ENTITY_TYPES = tuple(
 )
 
 class GeoDBSearch(LinkingStep):
-    logger = logging.getLogger(f"{__name__}.GeoDBSearch")
-    logger.setLevel(logging.INFO)
+    logger = ENTITY_LINKING_LOGGER.getChild("GeoDBSearch")
 
     def __init__(
             self, search_cache_db,

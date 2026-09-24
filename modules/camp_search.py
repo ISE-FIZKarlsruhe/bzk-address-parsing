@@ -7,13 +7,12 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
-import logging
 import re
 
 import pandas as pd
 
 from modules.address_tagging import GHETTO_TERM_PATTERN
-from modules.geo_db_search import ascii_normalize, german_normalize, similarity_and_distance
+from modules.geo_db_search import ENTITY_LINKING_LOGGER, ascii_normalize, german_normalize, similarity_and_distance
 from modules.pipeline.linked_data import AddressProcessingData, BZKFieldName
 
 DEFAULT_CAMPS_REFERENCE_PATH = Path("reference_data/wikidata_camps_and_ghettos.csv")
@@ -60,8 +59,7 @@ class CampReferenceMatcher:
     ghettos retrieved from wikidata, preferring a linked geonames id over the
     bare wikidata IRI when one is available.
     """
-    logger = logging.getLogger(f"{__name__}.CampReferenceMatcher")
-    logger.setLevel(logging.INFO)
+    logger = ENTITY_LINKING_LOGGER.getChild("CampReferenceMatcher")
 
     def __init__(self, csv_path: Path | str = DEFAULT_CAMPS_REFERENCE_PATH):
         self.csv_path = Path(csv_path)

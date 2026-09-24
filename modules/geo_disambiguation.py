@@ -5,7 +5,7 @@ import pprint
 from typing import Literal, Optional, NamedTuple
 
 from modules.pipeline.geographical_entity import GeographicalEntityType
-from modules.geo_db_search import ABOVE_CITY_ENTITY_TYPES
+from modules.geo_db_search import ABOVE_CITY_ENTITY_TYPES, ENTITY_LINKING_LOGGER
 from modules.pipeline.linked_data import BZKFieldName, AddressProcessingData, LinkedEntity, MatchedEntity, MatchedName, LinkedAddress
 import dataclasses
 import logging
@@ -85,8 +85,7 @@ def _describe_linked_address(linked_address : LinkedAddress) -> str:
     )
 
 class Disambiguator:
-    logger = logging.getLogger(f"{__name__}.Disambiguator")
-    logger.setLevel(logging.INFO)
+    logger = ENTITY_LINKING_LOGGER.getChild("Disambiguator")
 
     def __init__(
             self, 

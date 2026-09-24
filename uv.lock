@@ -366,6 +366,7 @@ source = { editable = "." }
 dependencies = [
     { name = "accelerate" },
     { name = "cologne-phonetics" },
+    { name = "colorlog" },
     { name = "datasets" },
     { name = "de-core-news-sm" },
     { name = "deepparse" },
@@ -419,6 +420,7 @@ dev = [
 requires-dist = [
     { name = "accelerate", specifier = ">=0.20.0" },
     { name = "cologne-phonetics", specifier = ">=2.0.0" },
+    { name = "colorlog", specifier = ">=6.10.1" },
     { name = "datasets", specifier = ">=4.7.0" },
     { name = "de-core-news-sm", url = "https://github.com/explosion/spacy-models/releases/download/de_core_news_sm-3.8.0/de_core_news_sm-3.8.0-py3-none-any.whl" },
     { name = "deepparse", specifier = ">=0.9.0" },
