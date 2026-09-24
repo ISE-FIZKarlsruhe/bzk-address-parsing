@@ -7,6 +7,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+import logging
 import re
 
 import pandas as pd
@@ -59,6 +60,8 @@ class CampReferenceMatcher:
     ghettos retrieved from wikidata, preferring a linked geonames id over the
     bare wikidata IRI when one is available.
     """
+    logger = logging.getLogger(f"{__name__}.CampReferenceMatcher")
+    logger.setLevel(logging.INFO)
 
     def __init__(self, csv_path: Path | str = DEFAULT_CAMPS_REFERENCE_PATH):
         self.csv_path = Path(csv_path)
@@ -85,6 +88,7 @@ class CampReferenceMatcher:
     _SUBSTRING_MIN_KEY_LENGTH = 6
 
     def initialize(self):
+        self.logger.info("Loading camp/ghetto reference list from %s", self.csv_path)
         df = pd.read_csv(self.csv_path, dtype=str)
         grouped = df.groupby("place")
         places = set(df["place"].unique())
@@ -104,7 +108,7 @@ class CampReferenceMatcher:
             if len(geoname_ids) > 0:
                 geoname_id = geoname_ids.iloc[0]
                 if geoname_id in GEONAMES_INVALID_IDS:
-                    print(f"Warning: ignoring invalid geonames id {geoname_id} for {place_iri}")
+                    self.logger.warning("Ignoring invalid geonames id %s for %s", geoname_id, place_iri)
                 else:
                     own_geoname[place_iri] = geoname_id
         resolved_geoname = self._propagate_geoname_ids(parent_of, own_geoname)
@@ -133,15 +137,21 @@ class CampReferenceMatcher:
                             if self._is_ancestor(place_iri, existing.wikidata_iri, parent_of):
                                 # This place is the parent of the already-indexed
                                 # one; the parent's entry takes precedence.
+                                self.logger.debug(
+                                    "Key %r: parent %s replaces child %s", key, place_iri, existing.wikidata_iri)
                                 self._index[key] = match
                             elif self._is_ancestor(existing.wikidata_iri, place_iri, parent_of):
                                 # The already-indexed place is the parent of this
                                 # one; keep the parent's entry.
-                                pass
+                                self.logger.debug(
+                                    "Key %r: keeping parent %s over child %s", key, existing.wikidata_iri, place_iri)
                             else:
                                 # Same label used by more than one unrelated
                                 # camp/ghetto; too ambiguous to use for matching
                                 # full addresses.
+                                self.logger.debug(
+                                    "Key %r is ambiguous between unrelated places %s and %s; dropping it",
+                                    key, existing.wikidata_iri, place_iri)
                                 del self._index[key]
                                 ambiguous_keys.add(key)
                         # else: keep the already-indexed, higher-priority label
@@ -150,6 +160,9 @@ class CampReferenceMatcher:
 
         for key in self._index:
             self._keys_by_length[len(key)].append(key)
+        self.logger.info(
+            "Indexed %d keys for %d places (%d places with a resolved geonames id, %d ambiguous keys dropped)",
+            len(self._index), len(places), len(resolved_geoname), len(ambiguous_keys))
 
     @staticmethod
     def _propagate_geoname_ids(parent_of: dict[str, set[str]], own_geoname: dict[str, str]) -> dict[str, str]:
@@ -178,7 +191,8 @@ class CampReferenceMatcher:
                     resolved[parent] = next(iter(child_values))
                     changed = True
                 if len(child_values) > 1:
-                    print(f"Warning: conflicting geonames ids among children of {parent}: {child_values}")
+                    CampReferenceMatcher.logger.warning(
+                        "Conflicting geonames ids among children of %s: %s", parent, child_values)
                 # else: no, or conflicting, values among children; leave unresolved.
             for child, parents in parent_of.items():
                 if resolved.get(child) is not None:
@@ -261,6 +275,9 @@ class CampReferenceMatcher:
 
     def match(self, address: AddressProcessingData, tags : list[str]) -> Optional[CampMatch]:
         if address.bzk_field_name.is_current_address():
+            self.logger.debug(
+                "Skipping camp search for address %s: field %s is a current address",
+                address.id, address.bzk_field_name)
             return None # People cannot currently reside in a concentration camp or ghetto
         
         # However there were people that were born in concentraion camps and ghettos and therefore that 
@@ -270,20 +287,33 @@ class CampReferenceMatcher:
             if entity.entity_type == "City":
                 queries.append(entity.raw_text)
                 break
+        self.logger.debug("Camp search for address %s with queries %s (tags %s)", address.id, queries, tags)
         for query in queries:
             if not query:
                 continue
             keys = self._normalized_keys(query)
+            self.logger.debug("Phase 'exact' for %r: keys %s", query, keys)
             for key in keys:
                 match = self._index.get(key)
-                if match is not None and self._is_acceptable(match, query):
+                if match is None:
+                    continue
+                if self._is_acceptable(match, query):
+                    self.logger.debug("Phase 'exact' for %r matched key %r: %s", query, key, match)
                     return match
+                self.logger.debug(
+                    "Phase 'exact' for %r rejected ghetto %s for key %r: address does not mention a ghetto term",
+                    query, match, key)
+            self.logger.debug("Phase 'exact' for %r found no match", query)
             # Exact match misses small typos/OCR errors, so fall back to a bounded
             # fuzzy match. The reference list is small enough (a few thousand
             # unique keys) that a length-bucketed scan is cheap, so this doesn't
             # need a dedicated search index the way GeoDBSearch's much larger
             # geonames data does.
+            self.logger.debug(
+                "Phase 'fuzzy' for %r: keys %s, max distance %d, min key length %d",
+                query, keys, self._FUZZY_MAX_DISTANCE, self._FUZZY_MIN_KEY_LENGTH)
             match = self._fuzzy_match(keys, query)
+            self.logger.debug("Phase 'fuzzy' for %r retrieved %s", query, match)
             if match is not None:
                 return match
         
@@ -295,9 +325,17 @@ class CampReferenceMatcher:
             # Full addresses often carry more than just the place name (e.g.
             # a street or a surrounding region), so also accept a reference
             # name appearing as a whole-word substring of the query.
+            self.logger.debug(
+                "Phase 'substring' for %r: keys %s, min key length %d (entities: %d, tags: %s)",
+                address.full_address, keys, self._SUBSTRING_MIN_KEY_LENGTH, len(address.entities), tags)
             match = self._substring_match(keys, address.full_address)
+            self.logger.debug("Phase 'substring' for %r retrieved %s", address.full_address, match)
             if match is not None:
                 return match
+        else:
+            self.logger.debug(
+                "Phase 'substring' for %r skipped: address has parsed entities and no camp/ghetto tag",
+                address.full_address)
         return None
 
     def _fuzzy_match(self, keys: set[str], full_address: str) -> Optional[CampMatch]:
@@ -308,12 +346,18 @@ class CampReferenceMatcher:
                 continue
             for length in range(len(key) - self._FUZZY_MAX_DISTANCE, len(key) + self._FUZZY_MAX_DISTANCE + 1):
                 for candidate_key in self._keys_by_length.get(length, ()):
-                    candidate_match = self._index[candidate_key]
-                    if not self._is_acceptable(candidate_match, full_address):
-                        continue
                     edit_distance, similarity = similarity_and_distance(
                         key, candidate_key, self._FUZZY_MAX_DISTANCE)
                     if edit_distance <= self._FUZZY_MAX_DISTANCE and similarity > best_similarity:
+                        candidate_match = self._index[candidate_key]
+                        if not self._is_acceptable(candidate_match, full_address):
+                            self.logger.debug(
+                                "Fuzzy candidate %r for key %r rejected: ghetto %s not mentioned as a ghetto in %r",
+                                candidate_key, key, candidate_match, full_address)
+                            continue
+                        self.logger.debug(
+                            "Fuzzy candidate %r for key %r: distance %d, similarity %.3f (new best)",
+                            candidate_key, key, edit_distance, similarity)
                         best_similarity = similarity
                         best_match = candidate_match
         return best_match
@@ -328,9 +372,14 @@ class CampReferenceMatcher:
                 if len(index_key) <= best_key_length:
                     # Already found an equally-specific or more specific match.
                     continue
-                if not self._is_acceptable(candidate_match, full_address):
-                    continue
                 if re.search(rf"\b{re.escape(index_key)}\b", normalized_query):
+                    if not self._is_acceptable(candidate_match, full_address):
+                        self.logger.debug(
+                            "Substring candidate %r rejected: ghetto %s not mentioned as a ghetto in %r",
+                            index_key, candidate_match, full_address)
+                        continue
+                    self.logger.debug(
+                        "Substring candidate %r found in %r (new best)", index_key, normalized_query)
                     best_match = candidate_match
                     best_key_length = len(index_key)
         return best_match

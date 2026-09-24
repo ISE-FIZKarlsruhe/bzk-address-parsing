@@ -29,6 +29,7 @@ import editdistpy
 import sys
 import dataclasses
 import json
+import logging
 import pyarrow
 import unidecode
 import math
@@ -242,7 +243,24 @@ class IndexSearchResult(NamedTuple):
     query_strings : list[str]
     abbreviation_pattern : Optional[str]
     matches : list[IndexSearchMatch]
-    
+
+
+def _describe_index_matches(matches : Iterable[IndexSearchMatch]) -> list[str]:
+    """
+    Compact, human-readable summary of index matches for debug logging. Only
+    call this behind a logger.isEnabledFor(logging.DEBUG) check, since it
+    walks every match.
+    """
+    descriptions = []
+    for match in matches:
+        entity = (match.retrieved_data or {}).get("entity") or {}
+        country = (entity.get("country") or {}).get("iso_code")
+        descriptions.append(
+            f"{match.nfc_name!r} (key={match.matched_key!r}, iri={entity.get('iri')}, "
+            f"country={country}, types={entity.get('possible_entity_types')}, score={match.score:.3f})"
+        )
+    return descriptions
+
 
 class GeoSearchIndex(ABC):
     index_descriptor : str
@@ -267,6 +285,8 @@ class GeoSearchIndex(ABC):
 
 class TantivySearchIndex(GeoSearchIndex):
     index_descriptor = "tantivy"
+    logger = logging.getLogger(f"{__name__}.TantivySearchIndex")
+    logger.setLevel(logging.INFO)
 
     # Reference words used to calibrate, from the index's own word statistics,
     # how rare a word must be before its absence can block a partial word
@@ -289,6 +309,9 @@ class TantivySearchIndex(GeoSearchIndex):
             self.index_path.mkdir(parents=True)
         self.read_threads = read_threads
         self.write_threads = write_threads
+        self.logger.info(
+            "Opening tantivy index at %s (already exists: %s, read threads: %d, write threads: %d)",
+            self.index_path, self.already_exists, self.read_threads, self.write_threads)
         self.index = tantivy.Index(self.schema, path=str(self.index_path))
         self.index.config_reader(num_warmers=self.read_threads)
         self.index.register_tokenizer(
@@ -300,8 +323,10 @@ class TantivySearchIndex(GeoSearchIndex):
 
     def populate_index(self, row_retriever : Iterable[dict], skip_if_exists=True):
         if skip_if_exists and self.already_exists:
+            self.logger.info("Index already exists at %s; skipping population", self.index_path)
             self.index.reload()
         else:
+            self.logger.info("Populating index at %s", self.index_path)
             # Group all entities sharing the same (NFC normalized) name together, so that
             # a single document maps a name to every entity known under that name.
             entities_by_name : dict[str, list[dict]] = defaultdict(list)
@@ -341,7 +366,11 @@ class TantivySearchIndex(GeoSearchIndex):
                                 doc.add_text(f"admin{admin_level}_code", admin_code)
                     writer.add_document(doc)
             self.index.reload()
+            self.logger.info("Finished writing %d name documents to the index", len(entities_by_name))
         self.partial_match_idf_threshold = self._compute_partial_match_idf_threshold()
+        self.logger.info(
+            "Partial word match IDF threshold set to %.4f (from reference words %s)",
+            self.partial_match_idf_threshold, self._PARTIAL_MATCH_IDF_REFERENCE_WORDS)
 
     def create_schema(self):
         schema_builder = tantivy.SchemaBuilder()
@@ -434,18 +463,33 @@ class TantivySearchIndex(GeoSearchIndex):
             self, searcher : tantivy.Searcher, query_words : list[str], candidate_words : list[str]
         ) -> bool:
         if len(query_words) == 0 or len(candidate_words) == 0:
+            self.logger.debug(
+                "Partial word match %s vs %s rejected: empty word list", query_words, candidate_words)
             return False
         unmatched_query, unmatched_candidate = self._pair_words(query_words, candidate_words)
         if len(unmatched_query) == len(query_words):
             # nothing matched at all: not even a partial match
+            self.logger.debug(
+                "Partial word match %s vs %s rejected: no words paired", query_words, candidate_words)
             return False
         # at most one word may be missing/added/substituted on either side
         if len(unmatched_query) > 1 or len(unmatched_candidate) > 1:
+            self.logger.debug(
+                "Partial word match %s vs %s rejected: too many unpaired words (query: %s, candidate: %s)",
+                query_words, candidate_words, unmatched_query, unmatched_candidate)
             return False
-        return all(
-            self._word_idf(searcher, word) <= self.partial_match_idf_threshold
-            for word in unmatched_query + unmatched_candidate
-        )
+        for word in unmatched_query + unmatched_candidate:
+            idf = self._word_idf(searcher, word)
+            if idf > self.partial_match_idf_threshold:
+                self.logger.debug(
+                    "Partial word match %s vs %s rejected: unpaired word %r is too informative "
+                    "(idf %.4f > threshold %.4f)",
+                    query_words, candidate_words, word, idf, self.partial_match_idf_threshold)
+                return False
+        self.logger.debug(
+            "Partial word match %s vs %s accepted (unpaired query words: %s, unpaired candidate words: %s)",
+            query_words, candidate_words, unmatched_query, unmatched_candidate)
+        return True
 
     def _partial_word_match(
             self,
@@ -465,6 +509,7 @@ class TantivySearchIndex(GeoSearchIndex):
             for word in query_string.split(" ") if word != ""
         ]
         if len(word_queries) == 0:
+            self.logger.debug("Partial word match skipped: no words in query strings %s", query_strings)
             return []
         final_name_query = tantivy.Query.disjunction_max_query(word_queries)
         if len(hints) > 0:
@@ -488,6 +533,7 @@ class TantivySearchIndex(GeoSearchIndex):
                 if matched_key is not None:
                     break
             if matched_key is None:
+                self.logger.debug("Partial word match candidate %r discarded", nfc_name)
                 continue
             entities_data = json.loads(doc.get_first("name_data").decode("utf-8"))
             for entity_data in entities_data:
@@ -612,6 +658,7 @@ class TantivySearchIndex(GeoSearchIndex):
             admin_codes : Optional[Collection[GeonamesAdminCodes]] = None
         ):
         if similarity_threshold == 1.0:
+            self.logger.debug("Similarity threshold is 1.0; disabling fuzzy search (distance threshold 0)")
             distance_threshold = 0
         nfc_query = unicodedata.normalize("NFC", query_string)
         query_strings = normalized_search_strings(_remove_stop_words(nfc_query))
@@ -619,6 +666,13 @@ class TantivySearchIndex(GeoSearchIndex):
         if expand_abbreviations:
             abbrev_pattern = abbreviation_pattern_to_regexes(nfc_query)
         else: abbrev_pattern = None
+        self.logger.debug(
+            "Searching %r: query strings %s, phonetic key %r, abbreviation pattern %r, "
+            "distance threshold %d, limit %d, entity types %s (strict: %s), "
+            "country codes %s (strict: %s), admin codes %s",
+            nfc_query, query_strings, phonetic_query_string, abbrev_pattern,
+            distance_threshold, limit, entity_types, strict_entity_type_filtering,
+            country_codes, strict_country_filtering, admin_codes)
         
         hints = []
         if entity_types is not None:
@@ -638,25 +692,42 @@ class TantivySearchIndex(GeoSearchIndex):
         def _falling_queries():
             other_params = dict(hints=hints, limit=limit)
             # exact/abbrev matches first
-            yield self._search_inner(
+            self.logger.debug(
+                "Phase 'exact' for %r: query strings %s, abbreviation pattern %r",
+                nfc_query, query_strings, abbrev_pattern)
+            yield "exact", self._search_inner(
                 abbrev_pattern=abbrev_pattern, query_strings=query_strings, distance_threshold=0, **other_params)
             # phonetic matches next: catches names that were misheard/misspelled
             # in a way plain edit distance on the raw string would not
             if phonetic_query_string.strip() != "":
-                yield self._search_inner(
+                self.logger.debug(
+                    "Phase 'phonetic' for %r: phonetic key %r", nfc_query, phonetic_query_string)
+                yield "phonetic", self._search_inner(
                     query_strings=[phonetic_query_string], distance_threshold=0,
                     field="phonetic_key", is_phonetic=True, **other_params)
+            else:
+                self.logger.debug("Phase 'phonetic' for %r skipped: empty phonetic key", nfc_query)
             # fuzzy matches next, only tried once exact, abbreviation and
             # phonetic matching have failed to find anything
             for i in range(1, distance_threshold + 1):
-                yield self._search_inner(
+                self.logger.debug(
+                    "Phase 'fuzzy' for %r: query strings %s, edit distance %d",
+                    nfc_query, query_strings, i)
+                yield f"fuzzy(distance={i})", self._search_inner(
                     query_strings=query_strings, distance_threshold=i, **other_params)
             # partial word match last: lowest priority and riskiest for false
             # positives, only tried once nothing else has found anything
-            yield self._partial_word_match(query_strings, hints=hints, limit=limit)
+            self.logger.debug(
+                "Phase 'partial_word' for %r: query strings %s, max word distance %d",
+                nfc_query, query_strings, self._PARTIAL_MATCH_WORD_DISTANCE)
+            yield "partial_word", self._partial_word_match(query_strings, hints=hints, limit=limit)
 
-        for query_result in _falling_queries():
+        for phase, query_result in _falling_queries():
             matches = query_result
+            if self.logger.isEnabledFor(logging.DEBUG):
+                self.logger.debug(
+                    "Phase '%s' for %r retrieved %d matches: %s",
+                    phase, nfc_query, len(matches), _describe_index_matches(matches))
             if len(matches) > 0:
                 if callback(IndexSearchResult(
                     nfc_query=nfc_query,
@@ -664,7 +735,11 @@ class TantivySearchIndex(GeoSearchIndex):
                     abbreviation_pattern=abbrev_pattern,
                     matches=matches
                 )):
+                    self.logger.debug("Phase '%s' for %r settled the search; stopping", phase, nfc_query)
                     break
+                self.logger.debug("Phase '%s' for %r did not settle the search; continuing", phase, nfc_query)
+        else:
+            self.logger.debug("All search phases for %r exhausted without settling", nfc_query)
         return IndexSearchResult(
             nfc_query=nfc_query,
             query_strings=query_strings,
@@ -724,6 +799,9 @@ ABOVE_CITY_ENTITY_TYPES = tuple(
 )
 
 class GeoDBSearch(LinkingStep):
+    logger = logging.getLogger(f"{__name__}.GeoDBSearch")
+    logger.setLevel(logging.INFO)
+
     def __init__(
             self, search_cache_db,
             search_index : GeoSearchIndex, materialize_table : bool = True,
@@ -749,11 +827,20 @@ class GeoDBSearch(LinkingStep):
         self._pre_linked_cache : dict[str, Optional[GeographicalName]] = {}
 
     def initialize(self):
+        self.logger.info(
+            "Initializing with search cache db %s, geo db %s, index %s "
+            "(distance threshold %d, prune score threshold %.2f, settle score threshold %.2f, "
+            "topk %d, priority countries %s)",
+            self.search_cache_db_path, self.geo_db_path, self.search_index.index_descriptor,
+            self.cleaned_distance_threshold, self.prune_score_threshold, self.settle_score_threshold,
+            self.topk, self.priority_countries)
         self.connection = duckdb.connect(self.search_cache_db_path)
         self.connection.execute(f"ATTACH DATABASE '{self.geo_db_path}' AS geo_db (READ_ONLY)")
         def row_retriever(sql_query : str) -> Iterable[dict]:
             total_rows = self.connection.execute("SELECT COUNT(*) FROM (" + sql_query + ")").fetchone()[0]
-            print(f"Populating {self.search_index.index_descriptor} index with {total_rows} names from the geo database...")
+            self.logger.info(
+                "Populating %s index with %d names from the geo database...",
+                self.search_index.index_descriptor, total_rows)
             batch_iterator = self.connection.execute(sql_query).to_arrow_reader(5_000)
             pbar = tqdm(total=total_rows, desc="Populating search index")
             for batch in batch_iterator:
@@ -773,6 +860,7 @@ class GeoDBSearch(LinkingStep):
 
     def _load_pre_linked_cache(self):
         if not self._pre_linked_cache_path.exists():
+            self.logger.info("No pre-linked cache found at %s", self._pre_linked_cache_path)
             return
         with self._pre_linked_cache_path.open("r", encoding="utf-8") as f:
             raw_cache = json.load(f)
@@ -780,6 +868,8 @@ class GeoDBSearch(LinkingStep):
             iri: (decode_from_dict(data, GeographicalName) if data is not None else None)
             for iri, data in raw_cache.items()
         }
+        self.logger.info(
+            "Loaded %d pre-linked entities from %s", len(self._pre_linked_cache), self._pre_linked_cache_path)
 
     def _save_pre_linked_cache(self):
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -803,8 +893,14 @@ class GeoDBSearch(LinkingStep):
         # below for restricting the search itself.
         country_strict = False
         if entity_type != GeographicalEntityType.Country and country_codes is None:
+            self.logger.debug(
+                "No known country for %r (%s); hinting search towards priority countries %s",
+                entity.raw_text, entity_type, self.priority_countries)
             country_codes = self.priority_countries
         elif country_codes is not None:
+            self.logger.debug(
+                "Restricting search for %r (%s) strictly to already resolved countries %s",
+                entity.raw_text, entity_type, country_codes)
             country_strict = True
         # AboveCity has no dedicated feature type of its own; search for it
         # as a disjunction over every real type coarser than City instead
@@ -812,6 +908,9 @@ class GeoDBSearch(LinkingStep):
         search_entity_types = (
             ABOVE_CITY_ENTITY_TYPES if entity_type == GeographicalEntityType.AboveCity else [entity_type]
         )
+        if entity_type == GeographicalEntityType.AboveCity:
+            self.logger.debug(
+                "Expanding AboveCity entity %r to entity types %s", entity.raw_text, search_entity_types)
         index_matches = self.search_index.search(
             query_string=entity.raw_text,
             distance_threshold=self.cleaned_distance_threshold,
@@ -871,8 +970,9 @@ class GeoDBSearch(LinkingStep):
         slow and is otherwise repeated for the same handful of entities.
         """
         if iri in self._pre_linked_cache:
+            self.logger.debug("Pre-linked iri %s found in cache", iri)
             return self._pre_linked_cache[iri]
-        print(f"{iri} is not in the pre-linked cache; looking it up in the geo database...")
+        self.logger.debug("Pre-linked iri %s is not in the cache; looking it up in the geo database", iri)
         geonames_match = _GEONAMES_IRI_REGEX.match(iri)
         if geonames_match is not None:
             # The duckdb's own geonames iris and the ones attached during
@@ -889,6 +989,7 @@ class GeoDBSearch(LinkingStep):
             [lookup_iri]
         ).fetchone()
         if row is None:
+            self.logger.debug("Pre-linked iri %s (looked up as %s) not found in the geo database", iri, lookup_iri)
             geographical_name = None
         else:
             columns = [description[0] for description in self.connection.description]
@@ -920,7 +1021,13 @@ class GeoDBSearch(LinkingStep):
         )
 
     def _settle_for_search_match(self, entity : RawEntity, match : MatchedName) -> bool:
-        return match.fuzzy_score >= self.settle_score_threshold
+        if match.fuzzy_score >= self.settle_score_threshold:
+            self.logger.debug(
+                "Settling search for %r on %r (%s): fuzzy score %.3f >= settle threshold %.3f",
+                entity.raw_text, match.nfc_alt_name, match.geographical_name.entity.iri,
+                match.fuzzy_score, self.settle_score_threshold)
+            return True
+        return False
 
     def _prune_search_match(self, entity : RawEntity, match : MatchedName, country_codes : set) -> bool:
         """
@@ -933,6 +1040,10 @@ class GeoDBSearch(LinkingStep):
         # if match.fuzzy_score < self.prune_score_threshold:
         #     return True
         if entity.entity_type == GeographicalEntityType.Country and GeographicalEntityType.Country not in match.geographical_name.entity.possible_entity_types:
+            self.logger.debug(
+                "Pruned %r (%s) for %r: searched for a country but match is not a country (types %s)",
+                match.nfc_alt_name, match.geographical_name.entity.iri, entity.raw_text,
+                match.geographical_name.entity.possible_entity_types)
             return True
         elif (
             entity.entity_type != GeographicalEntityType.Country and
@@ -945,6 +1056,12 @@ class GeoDBSearch(LinkingStep):
             )
             
         ):
+            self.logger.debug(
+                "Pruned %r (%s) for %r: unlikely country %s (continent %s) outside known countries %s "
+                "with population %s and fuzzy score %.3f",
+                match.nfc_alt_name, match.geographical_name.entity.iri, entity.raw_text,
+                match.geographical_name.entity.country.iso_code, match.geographical_name.entity.country.continent,
+                country_codes, match.geographical_name.entity.population, match.fuzzy_score)
             return True
         return False
 
@@ -952,13 +1069,18 @@ class GeoDBSearch(LinkingStep):
         new_entities = []
         country_codes = set()
         admin_codes = set()
+        self.logger.debug("Searching entities of address %s (%r)", address.id, address.full_address)
         for entity in sorted(address.entities, key=lambda e: e.entity_type):
             if entity.entity_type not in SEARCHABLE_ENTITY_TYPES:
+                self.logger.debug("Skipping entity %r: type %s is not searchable", entity.raw_text, entity.entity_type)
                 new_entities.append(entity)
                 continue
             if entity.pre_linked_iri is not None:
                 # Already known by id from address parsing: resolve it
                 # directly instead of running a text search.
+                self.logger.debug(
+                    "Entity %r (%s) is pre-linked to %s; resolving directly",
+                    entity.raw_text, entity.entity_type, entity.pre_linked_iri)
                 pre_linked_match = self._pre_linked_match(entity)
                 matched_names = [pre_linked_match] if pre_linked_match is not None else []
                 # A pre-linked entity is as authoritative as a resolved
@@ -971,11 +1093,20 @@ class GeoDBSearch(LinkingStep):
                     settle_here = False
                     for matched_name in self._parse_data(index_result):
                         if not self._prune_search_match(entity, matched_name, country_codes):
+                            self.logger.debug(
+                                "Kept %r (%s, country %s) for %r: fuzzy %.3f, phonetic %.3f, "
+                                "abbreviation %s, phonetic match %s, partial word match %s",
+                                matched_name.nfc_alt_name, matched_name.geographical_name.entity.iri,
+                                matched_name.geographical_name.entity.country.iso_code, entity.raw_text,
+                                matched_name.fuzzy_score, matched_name.phonetic_score,
+                                matched_name.is_abbreviation_match, matched_name.is_phonetic_match,
+                                matched_name.is_partial_word_match)
                             matched_names.append(matched_name)
                             if self._settle_for_search_match(entity, matched_name):
                                 settle_here = True
                     return settle_here
 
+                self.logger.debug("Searching for entity %r (%s)", entity.raw_text, entity.entity_type)
                 self._search_entity(
                     entity,
                     country_codes=country_codes if len(country_codes) > 0 else None,
@@ -983,7 +1114,12 @@ class GeoDBSearch(LinkingStep):
                     search_callback=callback
                 )
                 is_authoritative = entity.entity_type == GeographicalEntityType.Country
+            self.logger.debug(
+                "Entity %r (%s) ended with %d matches", entity.raw_text, entity.entity_type, len(matched_names))
             if is_authoritative and len(matched_names) > 0:
+                self.logger.debug(
+                    "Entity %r is authoritative; its matches restrict countries/admin codes of later searches",
+                    entity.raw_text)
                 for matched_name in matched_names:
                     country_codes.update(matched_name.geographical_name.entity.all_country_iso_codes)
                     if matched_name.geographical_name.entity.admin_codes:

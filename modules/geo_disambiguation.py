@@ -8,6 +8,7 @@ from modules.pipeline.geographical_entity import GeographicalEntityType
 from modules.geo_db_search import ABOVE_CITY_ENTITY_TYPES
 from modules.pipeline.linked_data import BZKFieldName, AddressProcessingData, LinkedEntity, MatchedEntity, MatchedName, LinkedAddress
 import dataclasses
+import logging
 from collections import defaultdict
 from modules.pipeline.linked_data import AnnotatedScore
 from modules.pipeline.storage.frozendict import FrozenDict
@@ -71,7 +72,22 @@ def _average_scores(scored_matches : list[ScoredMatch]) -> dict[str, float]:
             scores[factor] += score.score
     return {factor: score / len(scored_matches) for factor, score in scores.items()}
 
+def _describe_linked_address(linked_address : LinkedAddress) -> str:
+    """
+    Compact, human-readable summary of a candidate address for debug logging.
+    Only call this behind a logger.isEnabledFor(logging.DEBUG) check.
+    """
+    linked_name = linked_address.finest_grain_entity.linked_to
+    return (
+        f"{linked_name.nfc_alt_name!r} ({linked_name.geographical_name.entity.iri}, "
+        f"country {linked_name.geographical_name.entity.country.iso_code}) "
+        f"scores {dict(linked_address.scores)}"
+    )
+
 class Disambiguator:
+    logger = logging.getLogger(f"{__name__}.Disambiguator")
+    logger.setLevel(logging.INFO)
+
     def __init__(
             self, 
             score_diff_threshold: float = 0.0, 
@@ -85,6 +101,11 @@ class Disambiguator:
         self.population_rounding_factor = population_rounding_factor
         self.min_population_order_of_magnitude = min_population_order_of_magnitude
         self.score_prune_thresholds = score_prune_thresholds
+        self.logger.info(
+            "Initialized with score diff threshold %s, priority %s, population rounding factor %d, "
+            "min population order of magnitude %d, score prune thresholds %s",
+            self.score_threshold, self.priority, self.population_rounding_factor,
+            self.min_population_order_of_magnitude, dict(self.score_prune_thresholds))
 
     def _drop_duplicates(self, entity : MatchedEntity, matches: list[MatchedName], bzk_field: BZKFieldName) -> list[MatchedName]:
         """
@@ -102,6 +123,8 @@ class Disambiguator:
         for match in matches:
             iri = match.geographical_name.entity.iri
             if iri in already_seen:
+                self.logger.debug(
+                    "Dropping duplicate match %r (%s) for %r", match.nfc_alt_name, iri, entity.raw_text)
                 continue
             already_seen.add(iri)
             unique_matches.append(match)
@@ -198,14 +221,27 @@ class Disambiguator:
         if (
             reference_match.geographical_name.entity.country.iso_code != other_match.match.geographical_name.entity.country.iso_code
         ):
+            self.logger.debug(
+                "Pruned %r (%s) for %r: country %s differs from reference %r country %s",
+                other_match.match.nfc_alt_name, other_match.match.geographical_name.entity.iri, other_entity.raw_text,
+                other_match.match.geographical_name.entity.country.iso_code,
+                reference_match.nfc_alt_name, reference_match.geographical_name.entity.country.iso_code)
             return True
 
         if (
            other_entity.entity_type == GeographicalEntityType.Country and GeographicalEntityType.Country not in other_match.match.geographical_name.entity.possible_entity_types
         ):
+            self.logger.debug(
+                "Pruned %r (%s) for %r: entity is a country but match is not (types %s)",
+                other_match.match.nfc_alt_name, other_match.match.geographical_name.entity.iri, other_entity.raw_text,
+                other_match.match.geographical_name.entity.possible_entity_types)
             return True
         
         if other_entity.entity_type == GeographicalEntityType.Neighborhood and other_match.scores.get("child_parent_likelihood", AnnotatedScore(0, "Not applicable")).score < 0.6:
+            self.logger.debug(
+                "Pruned %r (%s) for neighborhood %r: child/parent likelihood %s below 0.6",
+                other_match.match.nfc_alt_name, other_match.match.geographical_name.entity.iri, other_entity.raw_text,
+                other_match.scores.get("child_parent_likelihood"))
             return True
         return False
 
@@ -275,6 +311,10 @@ class Disambiguator:
         score_dict = candidate.scores
         for factor, threshold in self.score_prune_thresholds.items():
             if score_dict.get(factor, 0.0) < threshold:
+                if self.logger.isEnabledFor(logging.DEBUG):
+                    self.logger.debug(
+                        "Pruned candidate %s: %s score %s below threshold %s",
+                        _describe_linked_address(candidate), factor, score_dict.get(factor, 0.0), threshold)
                 return True
         # finest_grain_entity = candidate.finest_grain_entity.linked_to.geographical_name.entity
         # if finest_grain_entity.country.continent != "EU" and finest_grain_entity.country.iso_code not in ("IL", "US"):
@@ -301,14 +341,24 @@ class Disambiguator:
             else:
                 unduped_entities.append(entity)
         address = dataclasses.replace(address, entities=unduped_entities)
+        self.logger.debug("Disambiguating address %s (%r)", address.id, address.full_address)
 
         possible_addresses : list[LinkedAddress] = []
 
         for entity in sorted(address.entities, key=lambda e: (1 if e.entity_type == GeographicalEntityType.City else 0, e.entity_type), reverse=True):
             if not isinstance(entity, MatchedEntity) or entity.matches is None or len(entity.matches) == 0:
+                self.logger.debug(
+                    "Skipping %r (%s) as reference entity: no matches", entity.raw_text, entity.entity_type)
                 continue
+            self.logger.debug(
+                "Phase 'reference entity' for address %s: entity %r (%s) with %d matches, field %s",
+                address.id, entity.raw_text, entity.entity_type, len(entity.matches), address.bzk_field_name)
             result = self._score_ambiguous_matches(address, entity, address.bzk_field_name)
             result = [r for r in result if not self._prune(r)]
+            if self.logger.isEnabledFor(logging.DEBUG):
+                self.logger.debug(
+                    "Phase 'reference entity' %r retrieved %d candidates: %s",
+                    entity.raw_text, len(result), [_describe_linked_address(r) for r in result])
             possible_addresses.extend(result)
             if len(possible_addresses) > 0:
                 best_address = possible_addresses[0]
@@ -325,13 +375,20 @@ class Disambiguator:
                             likely_addresses.append(other_address)
                 
                 if len(reference_iris) > 1:
+                    self.logger.debug(
+                        "Address %s is ambiguous: %d distinct candidates tie with the best (%s); leaving unlinked",
+                        address.id, len(reference_iris), reference_iris)
                     best_address = None
+                elif self.logger.isEnabledFor(logging.DEBUG):
+                    self.logger.debug(
+                        "Address %s linked to %s", address.id, _describe_linked_address(best_address))
 
                 return dataclasses.replace(address,
                     possible_links=possible_addresses,
                     likely_links=likely_addresses,
                     linked_to=best_address
                 )
+        self.logger.debug("Address %s has no candidates; leaving unlinked", address.id)
         return dataclasses.replace(address,
             possible_links=tuple(),
             likely_links=tuple(),
