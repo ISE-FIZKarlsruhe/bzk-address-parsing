@@ -296,10 +296,10 @@ class TantivySearchIndex(GeoSearchIndex):
     logger = ENTITY_LINKING_LOGGER.getChild("TantivySearchIndex")
 
     # Reference words used to calibrate, from the index's own word statistics,
-    # how rare a word must be before its absence can block a partial word
-    # match (see _compute_partial_match_idf_threshold): common German
-    # place-name qualifiers, none of which should on their own be treated as
-    # the "real" identifying word of a name.
+    # how rare a word must be to count as informative enough to support a
+    # partial word match (see _compute_partial_match_idf_threshold): common
+    # German place-name qualifiers, none of which should on their own be
+    # treated as the "real" identifying word of a name.
     _PARTIAL_MATCH_IDF_REFERENCE_WORDS = ("Alt", "Neu", "Bad", "Main")
     # Max per-word edit distance tolerated when pairing a query word against
     # a candidate word in the partial word match (character-level typo
@@ -420,16 +420,15 @@ class TantivySearchIndex(GeoSearchIndex):
         """
         doc_freq = searcher.doc_freq("search_words", word)
         # A word absent from the index is at least as rare as the rarest word
-        # actually present; treat it as maximally informative (the safer
-        # default, since an unmatched word should block a match unless it is
-        # known to be a common filler) rather than dividing by zero.
+        # actually present; treat it as maximally informative rather than
+        # dividing by zero.
         doc_freq = max(doc_freq, 1)
         return math.log(searcher.num_docs / doc_freq)
 
     def _compute_partial_match_idf_threshold(self) -> float:
         """
         The minimum IDF a word must exceed to be treated as meaningful enough
-        to block a partial word match. Set to the worst (highest) IDF among
+        to support a partial word match. Set to the worst (highest) IDF among
         _PARTIAL_MATCH_IDF_REFERENCE_WORDS, computed from this index's own
         word frequencies rather than hardcoded, so that anything at least as
         common as the most rarely-shared of those reference qualifiers is
@@ -443,11 +442,12 @@ class TantivySearchIndex(GeoSearchIndex):
 
     def _pair_words(
             self, query_words : list[str], candidate_words : list[str]
-        ) -> tuple[list[str], list[str]]:
+        ) -> tuple[list[tuple[str, str]], list[int], list[int]]:
         """
         Greedily pairs up words between the two lists, closest edit distance
         first (within _PARTIAL_MATCH_WORD_DISTANCE), each word used in at
-        most one pair. Returns the words on either side left unpaired.
+        most one pair. Returns the (query word, candidate word) pairs and the
+        indices of the words on either side left unpaired.
         """
         candidate_pairs = []
         for qi, qword in enumerate(query_words):
@@ -457,14 +457,16 @@ class TantivySearchIndex(GeoSearchIndex):
                     candidate_pairs.append((distance, qi, ci))
         candidate_pairs.sort(key=lambda p: p[0])
         used_query, used_candidate = set(), set()
+        pairs = []
         for _, qi, ci in candidate_pairs:
             if qi in used_query or ci in used_candidate:
                 continue
             used_query.add(qi)
             used_candidate.add(ci)
-        unmatched_query = [w for i, w in enumerate(query_words) if i not in used_query]
-        unmatched_candidate = [w for i, w in enumerate(candidate_words) if i not in used_candidate]
-        return unmatched_query, unmatched_candidate
+            pairs.append((query_words[qi], candidate_words[ci]))
+        unmatched_query = [i for i in range(len(query_words)) if i not in used_query]
+        unmatched_candidate = [i for i in range(len(candidate_words)) if i not in used_candidate]
+        return pairs, unmatched_query, unmatched_candidate
 
     def _is_partial_word_match(
             self, searcher : tantivy.Searcher, query_words : list[str], candidate_words : list[str]
@@ -473,26 +475,70 @@ class TantivySearchIndex(GeoSearchIndex):
             self.logger.debug(
                 "Partial word match %s vs %s rejected: empty word list", query_words, candidate_words)
             return False
-        unmatched_query, unmatched_candidate = self._pair_words(query_words, candidate_words)
-        if len(unmatched_query) == len(query_words):
+        pairs, unmatched_query_idx, unmatched_candidate_idx = self._pair_words(query_words, candidate_words)
+        if len(pairs) == 0:
             # nothing matched at all: not even a partial match
             self.logger.debug(
                 "Partial word match %s vs %s rejected: no words paired", query_words, candidate_words)
             return False
+        # unpaired stop words carry no meaning and are ignored altogether
+        unmatched_query_idx = [i for i in unmatched_query_idx if query_words[i] not in _STOP_WORDS]
+        unmatched_candidate_idx = [
+            i for i in unmatched_candidate_idx if candidate_words[i] not in _STOP_WORDS]
+        unmatched_query = [query_words[i] for i in unmatched_query_idx]
+        unmatched_candidate = [candidate_words[i] for i in unmatched_candidate_idx]
+        # a candidate made up only of informative words, all of them found in
+        # the query (in any order), is accepted regardless of how many query
+        # words are left over or where they are (e.g. "Homburg" in
+        # "Homburg Saarpfalz Kreis")
+        if len(unmatched_candidate) == 0:
+            candidate_content_words = [w for w in candidate_words if w not in _STOP_WORDS]
+            if len(candidate_content_words) > 0 and all(
+                    self._word_idf(searcher, w) > self.partial_match_idf_threshold
+                    for w in candidate_content_words):
+                self.logger.debug(
+                    "Partial word match %s vs %s accepted: candidate of informative words fully "
+                    "contained in query (unpaired query words: %s)",
+                    query_words, candidate_words, unmatched_query)
+                return True
         # at most one word may be missing/added/substituted on either side
         if len(unmatched_query) > 1 or len(unmatched_candidate) > 1:
             self.logger.debug(
                 "Partial word match %s vs %s rejected: too many unpaired words (query: %s, candidate: %s)",
                 query_words, candidate_words, unmatched_query, unmatched_candidate)
             return False
-        for word in unmatched_query + unmatched_candidate:
-            idf = self._word_idf(searcher, word)
-            if idf > self.partial_match_idf_threshold:
-                self.logger.debug(
-                    "Partial word match %s vs %s rejected: unpaired word %r is too informative "
-                    "(idf %.4f > threshold %.4f)",
-                    query_words, candidate_words, word, idf, self.partial_match_idf_threshold)
-                return False
+        # the shared words must include at least one informative word: names
+        # sharing only a common qualifier (e.g. "Bad Homburg" vs "Bad Tölz")
+        # are unrelated places. IDF is taken on the candidate side, since the
+        # candidate word is known to be in the index while the query word may
+        # be a typo.
+        paired_idfs = [(cword, self._word_idf(searcher, cword)) for _, cword in pairs]
+        if all(idf <= self.partial_match_idf_threshold for _, idf in paired_idfs):
+            self.logger.debug(
+                "Partial word match %s vs %s rejected: only non-informative words paired "
+                "(%s, threshold %.4f)",
+                query_words, candidate_words,
+                ", ".join(f"{w!r} idf {idf:.4f}" for w, idf in paired_idfs),
+                self.partial_match_idf_threshold)
+            return False
+        # an informative word may only be dropped if it is the last word of
+        # its name (e.g. "Frankfurt" vs "Frankfurt Oder"), not counting
+        # trailing stop words; a dropped leading or middle word must be a
+        # common filler
+        for words, unmatched_idx in (
+                (query_words, unmatched_query_idx), (candidate_words, unmatched_candidate_idx)):
+            last_content_idx = max(
+                (i for i, w in enumerate(words) if w not in _STOP_WORDS), default=len(words) - 1)
+            for i in unmatched_idx:
+                if i == last_content_idx:
+                    continue
+                idf = self._word_idf(searcher, words[i])
+                if idf > self.partial_match_idf_threshold:
+                    self.logger.debug(
+                        "Partial word match %s vs %s rejected: unpaired non-final word %r is too "
+                        "informative (idf %.4f > threshold %.4f)",
+                        query_words, candidate_words, words[i], idf, self.partial_match_idf_threshold)
+                    return False
         self.logger.debug(
             "Partial word match %s vs %s accepted (unpaired query words: %s, unpaired candidate words: %s)",
             query_words, candidate_words, unmatched_query, unmatched_candidate)
@@ -509,12 +555,27 @@ class TantivySearchIndex(GeoSearchIndex):
         necessarily all, of their words with the query (see _is_partial_word_match).
         """
         searcher = self.index.searcher()
-        word_queries = [
-            tantivy.Query.fuzzy_term_query(
-                self.schema, "search_words", word, distance=self._PARTIAL_MATCH_WORD_DISTANCE)
+        words = [
+            word
             for query_string in query_strings
             for word in query_string.split(" ") if word != ""
         ]
+        word_queries = []
+        for word in words:
+            # tantivy's fuzzy term query scores every hit a constant 1.0
+            # regardless of edit distance, so on its own exact hits are not
+            # ranked above fuzzy ones in the top k (and can even rank below
+            # them, since an exact BM25 score on a common word may be < 1).
+            # Exact hits get the same constant plus their BM25 score, putting
+            # them above every fuzzy-only hit while still favouring rarer words.
+            exact_query = tantivy.Query.term_query(
+                self.schema, "search_words", word, index_option='basic')
+            word_queries.append(tantivy.Query.boolean_query([
+                (tantivy.Occur.Should, tantivy.Query.const_score_query(exact_query, 1.0)),
+                (tantivy.Occur.Should, exact_query),
+            ]))
+            word_queries.append(tantivy.Query.fuzzy_term_query(
+                self.schema, "search_words", word, distance=self._PARTIAL_MATCH_WORD_DISTANCE))
         if len(word_queries) == 0:
             self.logger.debug("Partial word match skipped: no words in query strings %s", query_strings)
             return []
@@ -1039,6 +1100,16 @@ class GeoDBSearch(LinkingStep):
                 "Settling search for %r on %r (%s): fuzzy score %.3f >= settle threshold %.3f",
                 entity.raw_text, match.nfc_alt_name, match.geographical_name.entity.iri,
                 match.fuzzy_score, self.settle_score_threshold)
+            return True
+        # very short abbreviations (e.g. "Rum.") inherently score low against
+        # their expansion, so the fuzzy score is not a useful signal for them
+        query_letters = sum(c.isalpha() for c in entity.raw_text)
+        if match.is_abbreviation_match and query_letters < 4:
+            self.logger.debug(
+                "Settling search for %r on %r (%s): abbreviation match on a %d-letter query "
+                "(fuzzy score %.3f ignored)",
+                entity.raw_text, match.nfc_alt_name, match.geographical_name.entity.iri,
+                query_letters, match.fuzzy_score)
             return True
         return False
 
