@@ -25,8 +25,8 @@ DISAMBIGUATION_FACTOR_PRIORITY = [
     "entity_types_matching_fuzzy",
     "population_order_of_magnitude",
     "country_likelihood_rank", # general rank of country likelihood based on observation
-    "entity_types_matching",
     "phonetic_score",
+    "entity_types_matching",
     "is_preferred_name",
     "population_count"
 ]
