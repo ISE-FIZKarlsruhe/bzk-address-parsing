@@ -74,8 +74,8 @@ RGX_RULES = [
     (re.compile(r"[mn]"), "6"),
     (re.compile(r"r"), "7"),
     (re.compile(r"[sz]"), "8"),
-    # repeating digits
-    (re.compile(r"(\d)(?=\1)"), ""),
+    # repeating digits # NOTE modified to account for the vowels in the code
+    (re.compile(r"([0-9aeiou])(?=\1)"), ""),
     (re.compile(r"\B0"), ""),
 ]
 

@@ -1128,6 +1128,10 @@ class GeoDBSearch(LinkingStep):
         
     def _parse_data(self, index_result : IndexSearchResult) -> Iterable[MatchedName]:
         for index_match in index_result.matches:
+            if self.logger.isEnabledFor(logging.DEBUG):
+                self.logger.debug(
+                    "Parsing index match with IRI %r for query %r (abbreviation pattern %r)",
+                    index_match.retrieved_data.get("entity", {}).get("iri", None), index_result.nfc_query, index_result.abbreviation_pattern)
             is_abreviation_match = False
             if index_result.abbreviation_pattern is not None:
                is_abreviation_match = re.fullmatch(index_result.abbreviation_pattern, index_match.matched_key) is not None
@@ -1137,9 +1141,17 @@ class GeoDBSearch(LinkingStep):
             query_for_scoring = normalize_for_scoring(index_result.nfc_query)
             alt_name_for_scoring = normalize_for_scoring(nfc_alt_name)
             edit_distance, fuzzy_score = similarity_and_distance(query_for_scoring, alt_name_for_scoring, 10, distance_function=levenshtein_for_scoring)
+            self.logger.debug(
+                "Computed edit distance %d and fuzzy score %.3f for query %r vs alt name %r",
+                edit_distance, fuzzy_score, query_for_scoring, alt_name_for_scoring
+            )
             query_phonetic_key = phonetics_for_scoring(index_result.nfc_query)
             alt_name_phonetic_key = phonetics_for_scoring(nfc_alt_name)
             phonetic_dist, phonetic_score = similarity_and_distance(query_phonetic_key, alt_name_phonetic_key, 10)
+            self.logger.debug(
+                "Computed phonetic distance %d and score %.3f for query phonetic key %r vs alt name phonetic key %r",
+                phonetic_dist, phonetic_score, query_phonetic_key, alt_name_phonetic_key
+            )
             matched_name = MatchedName(
                 geographical_name=geographical_name,
                 nfc_query=index_result.nfc_query,
