@@ -96,6 +96,15 @@ class GeonamesAdminCodes(NamedTuple):
     admin4_code : Optional[str]
     admin5_code : Optional[str]
 
+class GeographicalBranch(NamedTuple):
+    """
+    A path down the administrative hierarchy: a country followed by the
+    leading non-null geonames admin codes (admin1, admin2, ...) shared by
+    every entity within it.
+    """
+    country_iso_code : str
+    admin_codes : tuple[str, ...]
+
 class Coordinates(NamedTuple):
     latitude : float
     longitude : float

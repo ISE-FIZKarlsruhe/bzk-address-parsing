@@ -17,8 +17,8 @@ import textwrap
 import itertools
 import time
 from collections import defaultdict
-from modules.pipeline.geographical_entity import CountryData, GeographicalEntity, GeographicalEntityType, GeographicalName, GeonamesAdminCodes
-from modules.pipeline.linked_data import MatchedEntity, MatchedName, RawEntity
+from modules.pipeline.geographical_entity import CountryData, GeographicalBranch, GeographicalEntity, GeographicalEntityType, GeographicalName, GeonamesAdminCodes
+from modules.pipeline.linked_data import MatchedEntity, MatchedName, RawEntity, RegionHintEntity
 from modules.pipeline.linking_steps import LinkingStep
 import tantivy
 from tqdm.auto import tqdm
@@ -34,6 +34,7 @@ import pyarrow
 import unidecode
 import math
 import cologne_phonetics
+import uuid
 from modules import phonetics_fuzzy_scoring
 from abc import ABC, abstractmethod
 from modules.pipeline.storage.encoding_util import decode_from_dict, encode_as_dict
@@ -251,6 +252,11 @@ class IndexSearchResult(NamedTuple):
     query_strings : list[str]
     abbreviation_pattern : Optional[str]
     matches : list[IndexSearchMatch]
+    # (word, branches) for each informative word that names retrieved
+    # by a partial word match only shared with the trailing part of the
+    # query, pointing at a region the queried place is in rather than at the
+    # place itself (see TantivySearchIndex._is_partial_word_match)
+    region_hints : tuple[tuple[str, tuple[GeographicalBranch, ...]], ...] = ()
 
 
 def _describe_index_matches(matches : Iterable[IndexSearchMatch]) -> list[str]:
@@ -305,6 +311,11 @@ class TantivySearchIndex(GeoSearchIndex):
     # a candidate word in the partial word match (character-level typo
     # tolerance, e.g. "Frankfrut" vs "Frankfurt").
     _PARTIAL_MATCH_WORD_DISTANCE = 1
+    # Max number of indexed names containing a word for their branches to
+    # still be extracted as a region hint (see _region_branches_for_word); a
+    # word shared by more names than this is too widespread to point at
+    # specific regions.
+    _REGION_HINT_MAX_DOCS = 1000
 
     def __init__(self, index_path : str | Path, read_threads : int | Literal['auto'] = 'auto', write_threads : int = 8):
         if read_threads == 'auto':
@@ -321,6 +332,7 @@ class TantivySearchIndex(GeoSearchIndex):
             self.index_path, self.already_exists, self.read_threads, self.write_threads)
         self.index = tantivy.Index(self.schema, path=str(self.index_path))
         self.index.config_reader(num_warmers=self.read_threads)
+        self._region_branch_cache : dict[str, tuple[GeographicalBranch, ...]] = {}
         self.index.register_tokenizer(
             "whitespace",
             tantivy.TextAnalyzerBuilder(
@@ -470,17 +482,25 @@ class TantivySearchIndex(GeoSearchIndex):
 
     def _is_partial_word_match(
             self, searcher : tantivy.Searcher, query_words : list[str], candidate_words : list[str]
-        ) -> bool:
+        ) -> tuple[bool, list[str]]:
+        """
+        Returns whether the candidate is a partial word match of the query
+        and, when it is not a match only because the words it shares with the
+        query are just the trailing part of either name (e.g. "Weilheim in
+        Oberbayern" vs "Tiefenbach Oberbayern"), those shared informative
+        words: region words, pointing at a region the queried place is in
+        (see _region_branches_for_word) rather than at the place itself.
+        """
         if len(query_words) == 0 or len(candidate_words) == 0:
             self.logger.debug(
                 "Partial word match %s vs %s rejected: empty word list", query_words, candidate_words)
-            return False
+            return False, []
         pairs, unmatched_query_idx, unmatched_candidate_idx = self._pair_words(query_words, candidate_words)
         if len(pairs) == 0:
             # nothing matched at all: not even a partial match
             self.logger.debug(
                 "Partial word match %s vs %s rejected: no words paired", query_words, candidate_words)
-            return False
+            return False, []
         # unpaired stop words carry no meaning and are ignored altogether
         unmatched_query_idx = [i for i in unmatched_query_idx if query_words[i] not in _STOP_WORDS]
         unmatched_candidate_idx = [
@@ -500,13 +520,13 @@ class TantivySearchIndex(GeoSearchIndex):
                     "Partial word match %s vs %s accepted: candidate of informative words fully "
                     "contained in query (unpaired query words: %s)",
                     query_words, candidate_words, unmatched_query)
-                return True
+                return True, []
         # at most one word may be missing/added/substituted on either side
         if len(unmatched_query) > 1 or len(unmatched_candidate) > 1:
             self.logger.debug(
                 "Partial word match %s vs %s rejected: too many unpaired words (query: %s, candidate: %s)",
                 query_words, candidate_words, unmatched_query, unmatched_candidate)
-            return False
+            return False, []
         # the shared words must include at least one informative word: names
         # sharing only a common qualifier (e.g. "Bad Homburg" vs "Bad Tölz")
         # are unrelated places. IDF is taken on the candidate side, since the
@@ -520,13 +540,18 @@ class TantivySearchIndex(GeoSearchIndex):
                 query_words, candidate_words,
                 ", ".join(f"{w!r} idf {idf:.4f}" for w, idf in paired_idfs),
                 self.partial_match_idf_threshold)
-            return False
+            return False, []
         # an informative word may only be dropped if it is the last word of
         # its name (e.g. "Frankfurt" vs "Frankfurt Oder"), not counting
-        # trailing stop words; a dropped leading or middle word must be a
-        # common filler
-        for words, unmatched_idx in (
-                (query_words, unmatched_query_idx), (candidate_words, unmatched_candidate_idx)):
+        # trailing stop words. When a leading or middle query word is
+        # dropped, the candidate only shares the trailing part of the query,
+        # which is then no match for the place itself, but its shared
+        # informative words are kept as region words (e.g. "oberbayern" from
+        # "Weilheim in Oberbayern" vs "Tiefenbach Oberbayern"). Not so for a
+        # dropped candidate word, where the shared words may well be the
+        # place's own name (e.g. "Tiefenbach" in "Kleinwalsertal Tiefenbach")
+        for words, unmatched_idx, keeps_region_words in (
+                (query_words, unmatched_query_idx, True), (candidate_words, unmatched_candidate_idx, False)):
             last_content_idx = max(
                 (i for i, w in enumerate(words) if w not in _STOP_WORDS), default=len(words) - 1)
             for i in unmatched_idx:
@@ -534,25 +559,100 @@ class TantivySearchIndex(GeoSearchIndex):
                     continue
                 idf = self._word_idf(searcher, words[i])
                 if idf > self.partial_match_idf_threshold:
+                    region_words = [
+                        w for w, word_idf in paired_idfs if word_idf > self.partial_match_idf_threshold
+                    ] if keeps_region_words else []
                     self.logger.debug(
                         "Partial word match %s vs %s rejected: unpaired non-final word %r is too "
-                        "informative (idf %.4f > threshold %.4f)",
-                        query_words, candidate_words, words[i], idf, self.partial_match_idf_threshold)
-                    return False
+                        "informative (idf %.4f > threshold %.4f); keeping region words %s",
+                        query_words, candidate_words, words[i], idf, self.partial_match_idf_threshold,
+                        region_words)
+                    return False, region_words
         self.logger.debug(
             "Partial word match %s vs %s accepted (unpaired query words: %s, unpaired candidate words: %s)",
             query_words, candidate_words, unmatched_query, unmatched_candidate)
-        return True
+        return True, []
+
+    def _region_branches_for_word(self, searcher : tantivy.Searcher, word : str) -> tuple[GeographicalBranch, ...]:
+        """
+        Aggregates every indexed name containing `word`, groups the entities
+        known under those names by (country, admin1 code), and returns one
+        branch per group, down to the longest sequence of admin codes common
+        to every entity in the group. Returns no branches if the word is in
+        too many names (_REGION_HINT_MAX_DOCS) to point at specific regions.
+        """
+        self.logger.debug("Looking up region branches for word %r", word)
+        if word in self._region_branch_cache:
+            self.logger.debug("Cache hit: region branches for word %r", word)
+            return self._region_branch_cache[word]
+        self.logger.debug("Cache miss: fetching all matches containing word %r", word)
+        query = tantivy.Query.term_query(self.schema, "search_words", word, index_option='basic')
+        search_results = searcher.search(query, limit=self._REGION_HINT_MAX_DOCS, count=True)
+        branches : tuple[GeographicalBranch, ...] = ()
+        if search_results.count == 0:
+            self.logger.debug("Region word %r: not found in any indexed name", word)
+        elif search_results.count > self._REGION_HINT_MAX_DOCS:
+            self.logger.debug(
+                "Region word %r: found in %d indexed names (> %d); too widespread for a region hint",
+                word, search_results.count, self._REGION_HINT_MAX_DOCS)
+        else:
+            # (country, admin1 code) -> admin codes common to the group so far
+            common_codes_by_group : dict[tuple[str, Optional[str]], list[str]] = {}
+            for _, doc_address in search_results.hits:
+                doc = searcher.doc(doc_address)
+                for row in json.loads(doc.get_first("name_data").decode("utf-8")):
+                    entity = row["entity"]
+                    iri = entity.get("iri")
+                    country_code = (entity.get("country") or {}).get("iso_code")
+                    if not country_code:
+                        self.logger.debug("Skipping entity %r without a country", iri)
+                        continue
+                    admin_codes_data = entity.get("admin_codes") or {}
+                    codes = []
+                    for admin_level in range(1, 6):
+                        code = admin_codes_data.get(f"admin{admin_level}_code")
+                        if code is None or code == "" or all(c == "0" for c in code):
+                            break
+                        codes.append(code)
+                    group = (country_code, codes[0] if codes else None)
+                    common_codes = common_codes_by_group.get(group)
+                    if common_codes is None:
+                        self.logger.debug("New group %s with codes %s from entity %r", group, codes, iri)
+                        common_codes_by_group[group] = codes
+                        continue
+                    common_length = 0
+                    for a, b in zip(common_codes, codes):
+                        if a != b:
+                            break
+                        common_length += 1
+                    if common_length < len(common_codes):
+                        self.logger.debug(
+                            "Group %s codes reduced from %s to %s by entity %r (codes: %s)",
+                            group, common_codes, common_codes[:common_length], iri, codes)
+                        common_codes_by_group[group] = common_codes[:common_length]
+            distinct_branches = {
+                GeographicalBranch(country_code, tuple(codes)): None
+                for (country_code, _), codes in common_codes_by_group.items()
+            }
+            branches = tuple(distinct_branches)
+            self.logger.debug(
+                "Region word %r: %d indexed names span branches %s",
+                word, search_results.count, branches)
+        self._region_branch_cache[word] = branches
+        return branches
 
     def _partial_word_match(
             self,
             query_strings : list[str],
             hints : list[tuple[tantivy.Occur, tantivy.Query]],
             limit : int,
-        ) -> list[IndexSearchMatch]:
+        ) -> tuple[list[IndexSearchMatch], tuple[tuple[str, tuple[GeographicalBranch, ...]], ...]]:
         """
         Lowest-priority fallback: matches names that share most, but not
         necessarily all, of their words with the query (see _is_partial_word_match).
+        Also returns the region hints (region word, branches) gathered
+        from the retrieved names rejected for sharing only a trailing part of
+        the query.
         """
         searcher = self.index.searcher()
         words = [
@@ -578,7 +678,7 @@ class TantivySearchIndex(GeoSearchIndex):
                 self.schema, "search_words", word, distance=self._PARTIAL_MATCH_WORD_DISTANCE))
         if len(word_queries) == 0:
             self.logger.debug("Partial word match skipped: no words in query strings %s", query_strings)
-            return []
+            return [], ()
         final_name_query = tantivy.Query.disjunction_max_query(word_queries)
         if len(hints) > 0:
             final_query = tantivy.Query.boolean_query(
@@ -587,6 +687,7 @@ class TantivySearchIndex(GeoSearchIndex):
             final_query = final_name_query
         search_results = searcher.search(final_query, limit=limit)
         matches = []
+        region_words = []
         for score, doc_address in search_results.hits:
             doc = searcher.doc(doc_address)
             nfc_name = doc.get_first("nfc_name")
@@ -595,7 +696,10 @@ class TantivySearchIndex(GeoSearchIndex):
                 query_words = [w for w in query_string.split(" ") if w]
                 for candidate_string in normalized_search_strings(nfc_name):
                     candidate_words = [w for w in candidate_string.split(" ") if w]
-                    if self._is_partial_word_match(searcher, query_words, candidate_words):
+                    is_match, candidate_region_words = self._is_partial_word_match(
+                        searcher, query_words, candidate_words)
+                    region_words.extend(w for w in candidate_region_words if w not in region_words)
+                    if is_match:
                         matched_key = candidate_string
                         break
                 if matched_key is not None:
@@ -612,7 +716,12 @@ class TantivySearchIndex(GeoSearchIndex):
                     retrieved_data=entity_data,
                     is_partial_word_match=True
                 ))
-        return matches
+        region_hints = []
+        for word in region_words:
+            branches = self._region_branches_for_word(searcher, word)
+            if len(branches) > 0:
+                region_hints.append((word, branches))
+        return matches, tuple(region_hints)
 
     def _build_entity_type_restriction(
             self, entity_types : Collection[GeographicalEntityType]) -> tantivy.Query:
@@ -763,14 +872,14 @@ class TantivySearchIndex(GeoSearchIndex):
             self.logger.debug(
                 "Phase 'exact' for %r: query strings %s, abbreviation pattern %r",
                 nfc_query, query_strings, abbrev_pattern)
-            yield "exact", self._search_inner(query_strings=query_strings, distance_threshold=0, **other_params)
+            yield "exact", self._search_inner(query_strings=query_strings, distance_threshold=0, **other_params), ()
 
             #abbreviation matches next: catches names that are abbreviated in the query but not in the index, e.g. "Rum." vs "Rumanien"
             if abbrev_pattern is not None:
                 self.logger.debug(
                     "Phase 'abbreviation' for %r: abbreviation pattern %r", nfc_query, abbrev_pattern)
                 yield "abbreviation", self._search_inner(
-                    abbrev_pattern=abbrev_pattern, query_strings=[], distance_threshold=0, **other_params)
+                    abbrev_pattern=abbrev_pattern, query_strings=[], distance_threshold=0, **other_params), ()
             
             # phonetic matches next: catches names that were misheard/misspelled
             # in a way plain edit distance on the raw string would not
@@ -779,7 +888,7 @@ class TantivySearchIndex(GeoSearchIndex):
                     "Phase 'phonetic' for %r: phonetic key %r", nfc_query, phonetic_query_string)
                 yield "phonetic", self._search_inner(
                     query_strings=[phonetic_query_string], distance_threshold=0,
-                    field="phonetic_key", is_phonetic=True, **other_params)
+                    field="phonetic_key", is_phonetic=True, **other_params), ()
             else:
                 self.logger.debug("Phase 'phonetic' for %r skipped: empty phonetic key", nfc_query)
             # fuzzy matches next, only tried once exact, abbreviation and
@@ -789,26 +898,26 @@ class TantivySearchIndex(GeoSearchIndex):
                     "Phase 'fuzzy' for %r: query strings %s, edit distance %d",
                     nfc_query, query_strings, i)
                 yield f"fuzzy(distance={i})", self._search_inner(
-                    query_strings=query_strings, distance_threshold=i, **other_params)
+                    query_strings=query_strings, distance_threshold=i, **other_params), ()
             # partial word match last: lowest priority and riskiest for false
             # positives, only tried once nothing else has found anything
             self.logger.debug(
                 "Phase 'partial_word' for %r: query strings %s, max word distance %d",
                 nfc_query, query_strings, self._PARTIAL_MATCH_WORD_DISTANCE)
-            yield "partial_word", self._partial_word_match(query_strings, hints=hints, limit=limit)
+            yield ("partial_word", *self._partial_word_match(query_strings, hints=hints, limit=limit))
 
-        for phase, query_result in _falling_queries():
-            matches = query_result
+        for phase, matches, region_hints in _falling_queries():
             if self.logger.isEnabledFor(logging.DEBUG):
                 self.logger.debug(
-                    "Phase '%s' for %r retrieved %d matches: %s",
-                    phase, nfc_query, len(matches), _describe_index_matches(matches))
-            if len(matches) > 0:
+                    "Phase '%s' for %r retrieved %d matches: %s (region hints: %s)",
+                    phase, nfc_query, len(matches), _describe_index_matches(matches), region_hints)
+            if len(matches) > 0 or len(region_hints) > 0:
                 if callback(IndexSearchResult(
                     nfc_query=nfc_query,
                     query_strings=query_strings,
                     abbreviation_pattern=abbrev_pattern,
-                    matches=matches
+                    matches=matches,
+                    region_hints=region_hints
                 )):
                     self.logger.debug("Phase '%s' for %r settled the search; stopping", phase, nfc_query)
                     break
@@ -1151,6 +1260,7 @@ class GeoDBSearch(LinkingStep):
 
     def apply(self, address):
         new_entities = []
+        region_hint_entities = []
         country_codes = set()
         admin_codes = set()
         self.logger.debug("Searching entities of address %s (%r)", address.id, address.full_address)
@@ -1172,9 +1282,11 @@ class GeoDBSearch(LinkingStep):
                 is_authoritative = pre_linked_match is not None
             else:
                 matched_names : list[MatchedName] = []
+                region_hints : dict[str, tuple[GeographicalBranch, ...]] = {}
                 def callback(index_result : IndexSearchResult) -> bool:
                     nonlocal matched_names
                     settle_here = False
+                    region_hints.update(index_result.region_hints)
                     for matched_name in self._parse_data(index_result):
                         if not self._prune_search_match(entity, matched_name, country_codes):
                             self.logger.debug(
@@ -1198,6 +1310,18 @@ class GeoDBSearch(LinkingStep):
                     search_callback=callback
                 )
                 is_authoritative = entity.entity_type == GeographicalEntityType.Country
+                for word, branches in region_hints.items():
+                    self.logger.debug(
+                        "Attaching region hint %r (branches %s) to entity %r", word, branches, entity.raw_text)
+                    region_hint_entities.append(RegionHintEntity(
+                        address_entity_id=str(uuid.uuid4()),
+                        raw_text=word,
+                        entity_type=GeographicalEntityType.Region,
+                        span=None,
+                        nearby=None,
+                        source_entity_id=entity.address_entity_id,
+                        branches=branches
+                    ))
             self.logger.debug(
                 "Entity %r (%s) ended with %d matches", entity.raw_text, entity.entity_type, len(matched_names))
             if is_authoritative and len(matched_names) > 0:
@@ -1209,4 +1333,5 @@ class GeoDBSearch(LinkingStep):
                     if matched_name.geographical_name.entity.admin_codes:
                         admin_codes.add(matched_name.geographical_name.entity.admin_codes)
             new_entities.append(entity.with_matches(tuple(matched_names)))
-        return dataclasses.replace(address, entities=tuple(new_entities))
+        return dataclasses.replace(
+            address, entities=tuple(new_entities), region_hints=tuple(address.region_hints) + tuple(region_hint_entities))

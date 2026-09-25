@@ -6,7 +6,7 @@ from typing import Literal, Optional, NamedTuple
 
 from modules.pipeline.geographical_entity import GeographicalEntityType
 from modules.geo_db_search import ABOVE_CITY_ENTITY_TYPES, ENTITY_LINKING_LOGGER
-from modules.pipeline.linked_data import BZKFieldName, AddressProcessingData, LinkedEntity, MatchedEntity, MatchedName, LinkedAddress
+from modules.pipeline.linked_data import BZKFieldName, AddressProcessingData, LinkedEntity, MatchedEntity, MatchedName, LinkedAddress, RegionHintEntity
 import dataclasses
 import logging
 from collections import defaultdict
@@ -20,6 +20,7 @@ def _is_admin_code_null(code : Optional[str]) -> bool:
 
 DISAMBIGUATION_FACTOR_PRIORITY = [
     "child_parent_likelihood",
+    "regional_term_match",
     "fuzzy_similarity_score",
     "entity_types_matching_fuzzy",
     "population_order_of_magnitude",
@@ -206,6 +207,38 @@ class Disambiguator:
         else:
             return AnnotatedScore(0, "Entity type mismatch")
         
+    def _score_regional_term_match(
+            self, match : MatchedName, region_hints : list[RegionHintEntity]
+        ) -> Optional[AnnotatedScore]:
+        """
+        Score how well a match agrees with the region hints found for its
+        entity, as the average over the hints of how far down any one of the
+        hint's branches (taken disjunctively) the match lies: the fraction of
+        the branch (country, then admin codes in order) the match shares.
+        None if the entity has no region hints.
+        """
+        if len(region_hints) == 0:
+            return None
+        entity = match.geographical_name.entity
+        country_code = entity.country.iso_code if entity.country is not None else None
+        admin_codes = tuple(entity.admin_codes) if entity.admin_codes is not None else ()
+        hint_scores = []
+        for region in region_hints:
+            best = 0.0
+            for branch in region.branches:
+                if branch.country_iso_code != country_code:
+                    continue
+                levels_in_common = 1
+                for branch_code, match_code in zip(branch.admin_codes, admin_codes):
+                    if branch_code != match_code:
+                        break
+                    levels_in_common += 1
+                best = max(best, levels_in_common / (1 + len(branch.admin_codes)))
+            hint_scores.append(best)
+        return AnnotatedScore(
+            sum(hint_scores) / len(hint_scores),
+            f"Region hints {[region.raw_text for region in region_hints]}")
+
     def _prune_match(self, reference_match : MatchedName, other_entity : MatchedEntity, other_match : ScoredMatch) -> bool:
         """
         Prune a match if it is unlikely to be the correct match for the given address and entity.
@@ -263,10 +296,16 @@ class Disambiguator:
         possible_addresses = []
         if len(address.entities) == 0:
             return possible_addresses
+        region_hints = defaultdict(list)
+        for region_hint in address.region_hints:
+            region_hints[region_hint.source_entity_id].append(region_hint)
         for match in entity.matches:
             matched = {id(e): ScoredMatch(None, {}) for e in address.entities if e.entity_type in [GeographicalEntityType.Neighborhood, GeographicalEntityType.City, GeographicalEntityType.Region, GeographicalEntityType.State, GeographicalEntityType.Country, GeographicalEntityType.AboveCity]}
             matched[id(entity)] = self._score_individual_match(entity, match, bzk_field)
             matched[id(entity)].scores["child_parent_likelihood"] = AnnotatedScore(1.0, "Reference match")
+            regional_term_match = self._score_regional_term_match(match, region_hints[entity.address_entity_id])
+            if regional_term_match is not None:
+                matched[id(entity)].scores["regional_term_match"] = regional_term_match
             finest_entity = entity
             for other_entity in address.entities:
                 if other_entity is entity or not isinstance(other_entity, MatchedEntity) or other_entity.matches is None or len(other_entity.matches) == 0:
@@ -278,6 +317,10 @@ class Disambiguator:
                         scored_match.scores["child_parent_likelihood"] = self._score_parent_child(match, other_match)
                     else:
                         scored_match.scores["child_parent_likelihood"] = self._score_parent_child(other_match, match)
+                    regional_term_match = self._score_regional_term_match(
+                        other_match, region_hints[other_entity.address_entity_id])
+                    if regional_term_match is not None:
+                        scored_match.scores["regional_term_match"] = regional_term_match
                     if self._prune_match(match, other_entity, scored_match):
                         continue
                     old_scores = best_other_match_scored.scores

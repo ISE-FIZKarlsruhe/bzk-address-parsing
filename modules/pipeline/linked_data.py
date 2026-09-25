@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from typing import Hashable, LiteralString, Optional, Callable, NamedTuple, Literal
 from enum import Enum
 from modules.pipeline.geographical_entity import (
+    GeographicalBranch,
     GeographicalEntityType,
     GeographicalName
 )
@@ -138,6 +139,20 @@ class RawEntity:
 class MatchedEntity(RawEntity):
     matches : tuple[MatchedName, ...]
 
+@dataclass(frozen=True)
+class RegionHintEntity(RawEntity):
+    """
+    Not a real geographical entity (no iri, official name, etc.): a region
+    inferred by GeoDBSearch from an informative word left over from a partial
+    word match of another entity (e.g. "Saarpfalz" in "Homburg Saarpfalz"),
+    as the branches of the indexed names containing that word: one per
+    (country, admin1) group, down to the admin codes common to the group. Only used by the Disambiguator to score the regional_term_match of
+    the matches of the entity it was found for (source_entity_id), where a
+    match within any one of the branches counts.
+    """
+    source_entity_id : str
+    branches : tuple[GeographicalBranch, ...]
+
 class AnnotatedScore(NamedTuple):
     score : int | float
     comment : Optional[str] = None
@@ -174,4 +189,6 @@ class AddressProcessingData:
     possible_links: Optional[tuple[LinkedAddress, ...]] = None
     likely_links: Optional[tuple[LinkedAddress, ...]] = None
     linked_to : Optional[LinkedAddress] = None
+    # kept apart from entities, which are all expected to be real entities
+    region_hints : tuple[RegionHintEntity, ...] = ()
 
