@@ -35,7 +35,7 @@ import unidecode
 import math
 import cologne_phonetics
 import uuid
-from modules import phonetics_fuzzy_scoring
+from modules import abbrev_list_expander, phonetics_fuzzy_scoring
 from abc import ABC, abstractmethod
 from modules.pipeline.storage.encoding_util import decode_from_dict, encode_as_dict
 
@@ -837,17 +837,35 @@ class TantivySearchIndex(GeoSearchIndex):
         if similarity_threshold == 1.0:
             self.logger.debug("Similarity threshold is 1.0; disabling fuzzy search (distance threshold 0)")
             distance_threshold = 0
-        nfc_query = unicodedata.normalize("NFC", query_string)
-        query_strings = normalized_search_strings(_remove_stop_words(nfc_query))
-        phonetic_query_string = cologne_phonetic_normalize(nfc_query)
+        expanded_query = unicodedata.normalize("NFC", query_string)
+        expanded_query, direct_link_iri = abbrev_list_expander.expand_abbreviations(expanded_query)
+        # TODO the code bellow has a new field, data schema needs update. Upstream code needs to fetch the entity data
+        # if direct_link_iri is not None:
+        #     self.logger.debug(
+        #         "Query %r expanded to direct link IRI %r; returning only that entity",
+        #         query_string, direct_link_iri)
+        #     return IndexSearchResult(
+        #         nfc_query=expanded_query,
+        #         query_strings=[],
+        #         abbreviation_pattern=None,
+        #         matches=[IndexSearchMatch(
+        #             score=1.0,
+        #             matched_key=expanded_query,
+        #             nfc_name=expanded_query,
+        #             retrieved_data={"entity": {"iri": direct_link_iri}},
+        #             is_direct_link=True
+        #         )]
+        #     )
+        query_strings = normalized_search_strings(_remove_stop_words(expanded_query))
+        phonetic_query_string = cologne_phonetic_normalize(expanded_query)
         if expand_abbreviations:
-            abbrev_pattern = abbreviation_pattern_to_regexes(nfc_query)
+            abbrev_pattern = abbreviation_pattern_to_regexes(expanded_query)
         else: abbrev_pattern = None
         self.logger.debug(
             "Searching %r: query strings %s, phonetic key %r, abbreviation pattern %r, "
             "distance threshold %d, limit %d, entity types %s (strict: %s), "
             "country codes %s (strict: %s), admin codes %s",
-            nfc_query, query_strings, phonetic_query_string, abbrev_pattern,
+            expanded_query, query_strings, phonetic_query_string, abbrev_pattern,
             distance_threshold, limit, entity_types, strict_entity_type_filtering,
             country_codes, strict_country_filtering, admin_codes)
         
@@ -871,13 +889,13 @@ class TantivySearchIndex(GeoSearchIndex):
             # exact matches first
             self.logger.debug(
                 "Phase 'exact' for %r: query strings %s, abbreviation pattern %r",
-                nfc_query, query_strings, abbrev_pattern)
+                expanded_query, query_strings, abbrev_pattern)
             yield "exact", self._search_inner(query_strings=query_strings, distance_threshold=0, **other_params), ()
 
             #abbreviation matches next: catches names that are abbreviated in the query but not in the index, e.g. "Rum." vs "Rumanien"
             if abbrev_pattern is not None:
                 self.logger.debug(
-                    "Phase 'abbreviation' for %r: abbreviation pattern %r", nfc_query, abbrev_pattern)
+                    "Phase 'abbreviation' for %r: abbreviation pattern %r", expanded_query, abbrev_pattern)
                 yield "abbreviation", self._search_inner(
                     abbrev_pattern=abbrev_pattern, query_strings=[], distance_threshold=0, **other_params), ()
             
@@ -885,47 +903,47 @@ class TantivySearchIndex(GeoSearchIndex):
             # in a way plain edit distance on the raw string would not
             if phonetic_query_string.strip() != "":
                 self.logger.debug(
-                    "Phase 'phonetic' for %r: phonetic key %r", nfc_query, phonetic_query_string)
+                    "Phase 'phonetic' for %r: phonetic key %r", expanded_query, phonetic_query_string)
                 yield "phonetic", self._search_inner(
                     query_strings=[phonetic_query_string], distance_threshold=0,
                     field="phonetic_key", is_phonetic=True, **other_params), ()
             else:
-                self.logger.debug("Phase 'phonetic' for %r skipped: empty phonetic key", nfc_query)
+                self.logger.debug("Phase 'phonetic' for %r skipped: empty phonetic key", expanded_query)
             # fuzzy matches next, only tried once exact, abbreviation and
             # phonetic matching have failed to find anything
             for i in range(1, distance_threshold + 1):
                 self.logger.debug(
                     "Phase 'fuzzy' for %r: query strings %s, edit distance %d",
-                    nfc_query, query_strings, i)
+                    expanded_query, query_strings, i)
                 yield f"fuzzy(distance={i})", self._search_inner(
                     query_strings=query_strings, distance_threshold=i, **other_params), ()
             # partial word match last: lowest priority and riskiest for false
             # positives, only tried once nothing else has found anything
             self.logger.debug(
                 "Phase 'partial_word' for %r: query strings %s, max word distance %d",
-                nfc_query, query_strings, self._PARTIAL_MATCH_WORD_DISTANCE)
+                expanded_query, query_strings, self._PARTIAL_MATCH_WORD_DISTANCE)
             yield ("partial_word", *self._partial_word_match(query_strings, hints=hints, limit=limit))
 
         for phase, matches, region_hints in _falling_queries():
             if self.logger.isEnabledFor(logging.DEBUG):
                 self.logger.debug(
                     "Phase '%s' for %r retrieved %d matches: %s (region hints: %s)",
-                    phase, nfc_query, len(matches), _describe_index_matches(matches), region_hints)
+                    phase, expanded_query, len(matches), _describe_index_matches(matches), region_hints)
             if len(matches) > 0 or len(region_hints) > 0:
                 if callback(IndexSearchResult(
-                    nfc_query=nfc_query,
+                    nfc_query=expanded_query,
                     query_strings=query_strings,
                     abbreviation_pattern=abbrev_pattern,
                     matches=matches,
                     region_hints=region_hints
                 )):
-                    self.logger.debug("Phase '%s' for %r settled the search; stopping", phase, nfc_query)
+                    self.logger.debug("Phase '%s' for %r settled the search; stopping", phase, expanded_query)
                     break
-                self.logger.debug("Phase '%s' for %r did not settle the search; continuing", phase, nfc_query)
+                self.logger.debug("Phase '%s' for %r did not settle the search; continuing", phase, expanded_query)
         else:
-            self.logger.debug("All search phases for %r exhausted without settling", nfc_query)
+            self.logger.debug("All search phases for %r exhausted without settling", expanded_query)
         return IndexSearchResult(
-            nfc_query=nfc_query,
+            nfc_query=expanded_query,
             query_strings=query_strings,
             abbreviation_pattern=abbrev_pattern,
             matches=[]
