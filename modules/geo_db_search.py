@@ -576,7 +576,10 @@ class TantivySearchIndex(GeoSearchIndex):
                 idf = self._word_idf(searcher, words[i])
                 if idf > self.partial_match_idf_threshold:
                     region_words = [
-                        w for w, word_idf in paired_idfs if word_idf > self.partial_match_idf_threshold
+                        w for w, word_idf in paired_idfs if (
+                            word_idf > self.partial_match_idf_threshold and 
+                            len(w) > 3
+                        )
                     ] if keeps_region_words else []
                     self.logger.debug(
                         "Partial word match %s vs %s rejected: unpaired non-final word %r is too "

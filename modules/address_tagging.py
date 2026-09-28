@@ -1,7 +1,7 @@
 """
 Tags an address field with the thematic categories it mentions, instead of (or
 alongside) a real place name: concentration camps, ghettos, displaced persons
-camps, deportation, emigration, and "the location is missing/unknown" markers.
+camps, deportation, death, emigration, and "the location is missing/unknown" markers.
 
 Tags are not mutually exclusive, and matching one does not necessarily mean
 the field fails to name a location: "DP-Lager Foehrenwald" is tagged
@@ -19,15 +19,14 @@ instead, using wikidata's own classification of the matched place.
 import re
 from typing import Optional
 
-# A leading "in"/"nach"/... or a trailing "gestorben"/... carries no location
-# information on its own; stripped out before deciding whether anything
-# resembling a place name remains.
+# A leading "in"/"nach"/"der"/... carries no location on its own;
+# stripped out before deciding whether anything resembling a place name
+# remains.
 _FILLER_WORD_PATTERN = re.compile(
     r"\b("
     r"in|im|an|am|bei|nach|zur?|zum|"
     r"der|die|das|dem|den|des|ein|eine|einem|einen|einer|"
-    r"und|oder|or|of|the|to|at|"
-    r"gestorben|verstorben|starb|tot|died"
+    r"und|oder|or|of|the|to|at"
     r")\b",
     re.IGNORECASE,
 )
@@ -37,6 +36,10 @@ _PUNCTUATION_PATTERN = re.compile(r"[?!\-.,;:()\[\]\"']")
 # word/abbreviation, in German or English.
 UNKNOWN_PATTERN = re.compile(r"^[\s?!\-.,;:]*$|\b(unbekannt|unbek\.?|unknown)\b", re.IGNORECASE)
 DEPORTATION_PATTERN = re.compile(r"\b(deportiert|deportation|deported)\b", re.IGNORECASE)
+# The abbreviations "verst."/"gest." (verstorben/gestorben) require their
+# period, so that "Gest"/"Verst" alone are not mistaken for them.
+DECEASED_PATTERN = re.compile(
+    r"\b(gestorben|verstorben|starb|tot|died|deceased)\b|\b(verst|gest)\.", re.IGNORECASE)
 MISSING_PATTERN = re.compile(r"\b(vermisst|verschollen|missing)\b", re.IGNORECASE)
 EMIGRATION_PATTERN = re.compile(r"\b(emigr(?:iert|ation|ated|ate)|ausgewandert)\b", re.IGNORECASE)
 # Requires a "Lager"/"Camp" suffix so the "DP" abbreviation alone (which could
@@ -53,6 +56,7 @@ GHETTO_TERM_PATTERN = re.compile(r"\bGh?etto\b", re.IGNORECASE)
 _THEMATIC_PATTERNS: dict[str, re.Pattern] = {
     "unknown": UNKNOWN_PATTERN,
     "deportation": DEPORTATION_PATTERN,
+    "deceased": DECEASED_PATTERN,
     "missing": MISSING_PATTERN,
     "emigration": EMIGRATION_PATTERN,
     "displaced_persons_camp": DISPLACED_PERSONS_CAMP_PATTERN,

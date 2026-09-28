@@ -53,6 +53,8 @@ from modules.entity_linking_eval_metrics import normalize_iri
 from modules.pipeline.geographical_entity import GeographicalEntityType
 from modules.pipeline.linked_data import AddressProcessingData, AddressSpan, BZKFieldName, LinkedAddress, MatchedEntity, MatchedName, RawEntity
 
+logger = logging.getLogger("entity_linking")
+
 FIELD_PREFIXES: dict[str, BZKFieldName] = {
     "abp": BZKFieldName.APPLICANT_BIRTH_PLACE,
     "aca": BZKFieldName.APPLICANT_CURRENT_ADDRESS,
@@ -182,6 +184,53 @@ def _extract_entity_texts(row, prefix: str) -> dict[str, Optional[str]]:
         entity_type: _clean_optional_str(row.get(f"{prefix}.{entity_type}.text"))
         for entity_type in ENTITY_TYPE_COLUMNS
     }
+
+
+def _hotfix_truncated_regex_city(row, prefix: str):
+    """
+    HOTFIX: the corpus was regex-parsed while
+    modules.regex_patterns.get_words_left split words after their first
+    letter and dropped the last one, so a 2-3 letter address left as a single
+    unparsed word got only its first letter as City (e.g. "Lom" -> "L", "KZ"
+    -> "K"), marked "fully_parsed". Rather than re-parsing the corpus, the
+    truncated City is widened here back to the whole word it starts, stopping
+    at text assigned to any other entity.
+
+    The bug is recognized as a regex (not LLM) parse whose City came from
+    neither a common-name pattern nor a global regex, and does not end at a
+    word boundary. Returns `row` unchanged when it does not apply, otherwise
+    a copy with the corrected "{prefix}.City.*" columns.
+    """
+    raw_address = _clean_optional_str(row.get(f"{prefix}.raw"))
+    city_text = _clean_optional_str(row.get(f"{prefix}.City.text"))
+    city_start = _clean_optional_str(row.get(f"{prefix}.City.start"))
+    city_end = _clean_optional_str(row.get(f"{prefix}.City.end"))
+    if (
+        raw_address is None or city_text is None or city_start is None or city_end is None
+        or row.get(f"{prefix}.status") != "fully_parsed"
+        or _clean_optional_str(row.get(f"{prefix}.global_regex")) is not None
+        or _clean_optional_str(row.get(f"{prefix}.City.special_regex")) is not None
+    ):
+        return row
+    city_start, city_end = int(city_start), int(city_end)
+    if raw_address[city_start:city_end] != city_text:
+        return row
+    covered = [False] * len(raw_address)
+    for column, value in row.items():
+        if not (column.startswith(f"{prefix}.") and column.endswith(".start")) or column == f"{prefix}.City.start":
+            continue
+        start = _clean_optional_str(value)
+        end = _clean_optional_str(row.get(column[:-len(".start")] + ".end"))
+        if start is not None and end is not None:
+            covered[int(start):int(end)] = [True] * (int(end) - int(start))
+    fixed_end = city_end
+    while fixed_end < len(raw_address) and raw_address[fixed_end].isalpha() and not covered[fixed_end]:
+        fixed_end += 1
+    if fixed_end == city_end:
+        return row
+    fixed_text = raw_address[city_start:fixed_end]
+    logger.debug("Hotfix: widened truncated regex City %r to %r in %r", city_text, fixed_text, raw_address)
+    return {**row, f"{prefix}.City.text": fixed_text, f"{prefix}.City.end": float(fixed_end)}
 
 
 def _pre_linked_iris(row, prefix: str) -> dict[str, str]:
@@ -450,6 +499,7 @@ def link_field(
     def _elapsed():
         nonlocal start
         return time.monotonic() - start
+    row = _hotfix_truncated_regex_city(row, prefix)
     raw_address = _clean_optional_str(row.get(f"{prefix}.raw"))
     entity_texts = _extract_entity_texts(row, prefix)
     above_city_text = _clean_optional_str(row.get(f"{prefix}.AboveCity.text"))
