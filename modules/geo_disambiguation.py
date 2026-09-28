@@ -19,6 +19,7 @@ def _is_admin_code_null(code : Optional[str]) -> bool:
 
 
 DISAMBIGUATION_FACTOR_PRIORITY = [
+    "weighted_score",
     "child_parent_likelihood",
     "regional_term_match",
     "fuzzy_similarity_score",
@@ -30,6 +31,12 @@ DISAMBIGUATION_FACTOR_PRIORITY = [
     "is_preferred_name",
     "population_count"
 ]
+
+WEIGHTED_DISAMBIGUATION_FACTORS = {
+    "child_parent_likelihood" : 1,
+    "phonetic_score" : 2,
+    "fuzzy_similarity_score" : 2
+}
 
 NA_SCORE = AnnotatedScore(0.0, "Not applicable")
 
@@ -67,11 +74,13 @@ def _compare_scores(
     return "eq"
 
 def _average_scores(scored_matches : list[ScoredMatch]) -> dict[str, float]:
-    scores = defaultdict(lambda: 0.0)
+    sums = defaultdict(lambda: 0.0)
     for scored_match in scored_matches:
         for factor, score in scored_match.scores.items():
-            scores[factor] += score.score
-    return {factor: score / len(scored_matches) for factor, score in scores.items()}
+            if isinstance(score, AnnotatedScore):
+                score = score.score
+            sums[factor] += score
+    return {factor: score / len(scored_matches) for factor, score in sums.items()}
 
 def _describe_linked_address(linked_address : LinkedAddress) -> str:
     """
@@ -92,12 +101,14 @@ class Disambiguator:
             self, 
             score_diff_threshold: float = 0.0, 
             priority: list[str] = DISAMBIGUATION_FACTOR_PRIORITY,
+            score_weights: list[str] = WEIGHTED_DISAMBIGUATION_FACTORS,
             population_rounding_factor: int = 10_000,
             min_population_order_of_magnitude: int = 500_000,
             score_prune_thresholds : dict[str, float] = defaultdict(float)
         ):
         self.score_threshold = score_diff_threshold
         self.priority = priority
+        self.score_weights = score_weights
         self.population_rounding_factor = population_rounding_factor
         self.min_population_order_of_magnitude = min_population_order_of_magnitude
         self.score_prune_thresholds = score_prune_thresholds
@@ -129,6 +140,21 @@ class Disambiguator:
             already_seen.add(iri)
             unique_matches.append(match)
         return unique_matches
+
+    def _calculate_weighted_score(self, scores : dict[str, float]) -> AnnotatedScore:
+        weight_sum = 0
+        score_sum = 0
+        for score_name, score_weight in self.score_weights.items():
+            score_value = scores.get(score_name)
+            if isinstance(score_value, AnnotatedScore):
+                score_value = score_value.score
+            if score_value:
+                score_sum += score_value * score_weight
+                weight_sum += score_weight
+        if weight_sum == 0:
+            return 0
+        return AnnotatedScore(score_sum / weight_sum, "Weighted sum")
+
 
     def _score_individual_match(self, entity: MatchedEntity, name: MatchedName, bzk_field : BZKFieldName) -> ScoredMatch:
         scores = dict()
@@ -306,6 +332,7 @@ class Disambiguator:
             regional_term_match = self._score_regional_term_match(match, region_hints[entity.address_entity_id])
             if regional_term_match is not None:
                 matched[id(entity)].scores["regional_term_match"] = regional_term_match
+            matched[id(entity)].scores["weighted_score"] = self._calculate_weighted_score(matched[id(entity)].scores)
             finest_entity = entity
             for other_entity in address.entities:
                 if other_entity is entity or not isinstance(other_entity, MatchedEntity) or other_entity.matches is None or len(other_entity.matches) == 0:
@@ -321,6 +348,7 @@ class Disambiguator:
                         other_match, region_hints[other_entity.address_entity_id])
                     if regional_term_match is not None:
                         scored_match.scores["regional_term_match"] = regional_term_match
+                    scored_match.scores["weighted_score"] = self._calculate_weighted_score(scored_match.scores)
                     if self._prune_match(match, other_entity, scored_match):
                         continue
                     old_scores = best_other_match_scored.scores
