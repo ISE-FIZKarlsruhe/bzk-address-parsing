@@ -24,6 +24,12 @@ class GeographicalEntityType(GeographicalEntityTypeProperties, Enum):
     # actually is. GeoDBSearch expands it into a disjunction over all entity
     # types above City (see ABOVE_CITY_ENTITY_TYPES) when searching.
     AboveCity = "AboveCity", 1
+    # Not a real geographical feature type either: a place whose type parsing
+    # could not tell (e.g. a single-word address, which is most often a City
+    # but sometimes a Country). It acts as a wildcard matching any entity
+    # type, both when searching (see GeoDBSearch) and disambiguating (see
+    # Disambiguator). Ranked like City since that is what it usually is.
+    Unknown = "Unknown", 3
 
     def __gt__(self, other):
         if not isinstance(other, GeographicalEntityType):

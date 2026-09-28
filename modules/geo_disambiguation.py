@@ -23,7 +23,7 @@ DISAMBIGUATION_FACTOR_PRIORITY = [
     "child_parent_likelihood",
     "regional_term_match",
     "fuzzy_similarity_score",
-    "entity_types_matching_fuzzy",
+    "entity_types_matching_preferred",
     "population_order_of_magnitude",
     "country_likelihood_rank", # general rank of country likelihood based on observation
     "phonetic_score",
@@ -39,6 +39,24 @@ WEIGHTED_DISAMBIGUATION_FACTORS = {
 }
 
 NA_SCORE = AnnotatedScore(0.0, "Not applicable")
+
+# "entity_types_matching_preferred" for Unknown entities (see
+# _score_individual_match), which match any entity type but, coming from
+# single-word addresses (e.g. "Polen"), are most likely a Country, then a
+# City or a Neighborhood, and least likely any other coarser type. A
+# Neighborhood is on par with a City, as when matching a City entity (see
+# "Neighborhood instead of city match"), since a former town now part of a
+# city (e.g. "Elberfeld" in Wuppertal) should not lose to a namesake city
+# abroad; entity_types_matching still ranks it slightly lower. A match with
+# several possible entity types gets the best of their scores.
+UNKNOWN_ENTITY_TYPE_PREFERENCE = {
+    GeographicalEntityType.Country: AnnotatedScore(1.0, "Unknown entity type matches country"),
+    GeographicalEntityType.City: AnnotatedScore(0.75, "Unknown entity type matches city"),
+    GeographicalEntityType.Neighborhood: AnnotatedScore(0.75, "Unknown entity type matches neighborhood"),
+    GeographicalEntityType.State: AnnotatedScore(0.25, "Unknown entity type matches state"),
+    GeographicalEntityType.Region: AnnotatedScore(0.25, "Unknown entity type matches region"),
+    GeographicalEntityType.District: AnnotatedScore(0.25, "Unknown entity type matches district"),
+}
 
 class ScoredMatch(NamedTuple):
     match: MatchedName
@@ -158,21 +176,34 @@ class Disambiguator:
 
     def _score_individual_match(self, entity: MatchedEntity, name: MatchedName, bzk_field : BZKFieldName) -> ScoredMatch:
         scores = dict()
-        if entity.entity_type in name.geographical_name.entity.possible_entity_types:
-            scores["entity_types_matching_fuzzy"] = AnnotatedScore(1.0, "Entity type matches")
+        if entity.entity_type != GeographicalEntityType.Unknown and  entity.entity_type in name.geographical_name.entity.possible_entity_types:
+            scores["entity_types_matching_preferred"] = AnnotatedScore(1.0, "Entity type matches")
             scores["entity_types_matching"] = AnnotatedScore(1.0, "Entity type matches")
+        elif entity.entity_type == GeographicalEntityType.Unknown:
+            # Unknown is a wildcard: any real entity type matches it, though
+            # some are preferred (see UNKNOWN_ENTITY_TYPE_PREFERENCE). Unknown
+            # only comes from single-word addresses, which are rarely a
+            # neighborhood on its own, so those match slightly less.
+            scores["entity_types_matching_preferred"] = max(
+                (UNKNOWN_ENTITY_TYPE_PREFERENCE[t] for t in name.geographical_name.entity.possible_entity_types
+                 if t in UNKNOWN_ENTITY_TYPE_PREFERENCE),
+                key=lambda score: score.score, default=AnnotatedScore(0.0, "Entity type does not match"))
+            if all(t == GeographicalEntityType.Neighborhood for t in name.geographical_name.entity.possible_entity_types):
+                scores["entity_types_matching"] = AnnotatedScore(0.8, "Unknown entity type matches neighborhood")
+            else:
+                scores["entity_types_matching"] = AnnotatedScore(1.0, "Unknown entity type matches any")
         else:
             scores["entity_types_matching"] = AnnotatedScore(0.0, "Entity type does not match")
             if entity.entity_type == GeographicalEntityType.Neighborhood and GeographicalEntityType.City in name.geographical_name.entity.possible_entity_types:
-                scores["entity_types_matching_fuzzy"] = AnnotatedScore(1.0, "City instead of neighborhood match")
+                scores["entity_types_matching_preferred"] = AnnotatedScore(1.0, "City instead of neighborhood match")
             elif entity.entity_type == GeographicalEntityType.City and GeographicalEntityType.Neighborhood in name.geographical_name.entity.possible_entity_types:
-                scores["entity_types_matching_fuzzy"] = AnnotatedScore(1.0, "Neighborhood instead of city match")
+                scores["entity_types_matching_preferred"] = AnnotatedScore(1.0, "Neighborhood instead of city match")
             elif entity.entity_type == GeographicalEntityType.AboveCity and any(
                 possible_type in ABOVE_CITY_ENTITY_TYPES for possible_type in name.geographical_name.entity.possible_entity_types
             ):
-                scores["entity_types_matching_fuzzy"] = AnnotatedScore(1.0, "Above-city match")
+                scores["entity_types_matching_preferred"] = AnnotatedScore(1.0, "Above-city match")
             else:
-                scores["entity_types_matching_fuzzy"] = AnnotatedScore(0.0, "Entity type does not match")
+                scores["entity_types_matching_preferred"] = AnnotatedScore(0.0, "Entity type does not match")
         scores["phonetic_score"] = AnnotatedScore(name.phonetic_score, "Phonetic similarity score")
         scores["is_preferred_name"] = AnnotatedScore.from_bool(name.geographical_name.is_preferred_name)
         if name.is_abbreviation_match:
@@ -326,7 +357,7 @@ class Disambiguator:
         for region_hint in address.region_hints:
             region_hints[region_hint.source_entity_id].append(region_hint)
         for match in entity.matches:
-            matched = {id(e): ScoredMatch(None, {}) for e in address.entities if e.entity_type in [GeographicalEntityType.Neighborhood, GeographicalEntityType.City, GeographicalEntityType.Region, GeographicalEntityType.State, GeographicalEntityType.Country, GeographicalEntityType.AboveCity]}
+            matched = {id(e): ScoredMatch(None, {}) for e in address.entities if e.entity_type in [GeographicalEntityType.Neighborhood, GeographicalEntityType.City, GeographicalEntityType.Region, GeographicalEntityType.State, GeographicalEntityType.Country, GeographicalEntityType.AboveCity, GeographicalEntityType.Unknown]}
             matched[id(entity)] = self._score_individual_match(entity, match, bzk_field)
             matched[id(entity)].scores["child_parent_likelihood"] = AnnotatedScore(1.0, "Reference match")
             regional_term_match = self._score_regional_term_match(match, region_hints[entity.address_entity_id])

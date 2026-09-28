@@ -37,7 +37,7 @@ import argparse
 import json
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 import time
 from typing import Iterable, Optional
@@ -52,6 +52,7 @@ from modules.geo_disambiguation import DISAMBIGUATION_FACTOR_PRIORITY, Disambigu
 from modules.entity_linking_eval_metrics import normalize_iri
 from modules.pipeline.geographical_entity import GeographicalEntityType
 from modules.pipeline.linked_data import AddressProcessingData, AddressSpan, BZKFieldName, LinkedAddress, MatchedEntity, MatchedName, RawEntity
+from modules.regex_patterns import CITY_SOMETHING_REGEX
 
 logger = logging.getLogger("entity_linking")
 
@@ -116,7 +117,7 @@ class DisambiguationStatus:
 # generic ranking criteria (population, country, preferred name, ...).
 _CONTEXT_DISAMBIGUATION_FACTORS = {
     "child_parent_likelihood",
-    "entity_types_matching_fuzzy",
+    "entity_types_matching_preferred",
     "entity_types_matching",
 }
 
@@ -137,10 +138,35 @@ def _resolved_disambiguation_status(address: AddressProcessingData) -> str:
     best, runner_up = possible_links[0].scores, possible_links[1].scores
     for factor in DISAMBIGUATION_FACTOR_PRIORITY:
         if best.get(factor, 0.0) != runner_up.get(factor, 0.0):
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "Address %s: best candidate beats the runner-up %s on '%s' (%.3f vs %.3f)",
+                    address.id, _describe_candidate(possible_links[1]), factor,
+                    best.get(factor, 0.0), runner_up.get(factor, 0.0))
             if factor in _CONTEXT_DISAMBIGUATION_FACTORS:
                 return DisambiguationStatus.DISAMBIGUATED_BY_CONTEXT
             return DisambiguationStatus.DISAMBIGUATED_HEURISTICALLY
     return DisambiguationStatus.DISAMBIGUATED_HEURISTICALLY
+
+
+def _describe_raw_entity(entity: RawEntity) -> str:
+    pre_linked = f" (pre-linked {entity.pre_linked_iri})" if entity.pre_linked_iri else ""
+    return f"{entity.entity_type.name} {entity.raw_text!r}{pre_linked}"
+
+
+def _describe_candidate(candidate: LinkedAddress) -> str:
+    """
+    Compact, human-readable summary of every entity of a candidate address
+    and its scores, for debug logging. Only call this behind a
+    logger.isEnabledFor(logging.DEBUG) check.
+    """
+    entities = ", ".join(
+        f"{entity.entity_type.name} {entity.linked_to.geographical_name.name!r} "
+        f"({normalize_iri(entity.linked_to.geographical_name.entity.iri)})"
+        for entity in candidate.entities
+    )
+    scores = {factor: round(score, 3) for factor, score in candidate.scores.items()}
+    return f"[{entities}] scores {scores}"
 
 
 def _geo_db_search_status(matched_name: MatchedName) -> str:
@@ -180,9 +206,14 @@ def _geonames_iri(geonames_id) -> Optional[str]:
 
 
 def _extract_entity_texts(row, prefix: str) -> dict[str, Optional[str]]:
+    # The regex parser's own "Unknown" group marks a location left
+    # unspecified (e.g. "unbekannt", see regex_patterns.UNKNOWN_PATTERN), not
+    # a place name of unknown type, so is never read as an Unknown entity;
+    # those only come from _single_word_regex_city_as_unknown.
     return {
         entity_type: _clean_optional_str(row.get(f"{prefix}.{entity_type}.text"))
         for entity_type in ENTITY_TYPE_COLUMNS
+        if entity_type != GeographicalEntityType.Unknown.name
     }
 
 
@@ -231,6 +262,44 @@ def _hotfix_truncated_regex_city(row, prefix: str):
     fixed_text = raw_address[city_start:fixed_end]
     logger.debug("Hotfix: widened truncated regex City %r to %r in %r", city_text, fixed_text, raw_address)
     return {**row, f"{prefix}.City.text": fixed_text, f"{prefix}.City.end": float(fixed_end)}
+
+
+# As stored in the "{prefix}.global_regex" column by regex_patterns.regex_parse.
+_CITY_SOMETHING_GLOBAL_REGEX = CITY_SOMETHING_REGEX.pattern.replace('\n', ' ')
+
+
+def _single_word_regex_city_as_unknown(row, prefix: str, entity_texts: dict[str, Optional[str]]) -> dict[str, Optional[str]]:
+    """
+    A single-word address the regex parser could not match against any
+    pattern ends up entirely as City (see regex_patterns.regex_parse), though
+    it is sometimes a Country instead (e.g. "Polen"). Such a City is
+    relabelled Unknown, which search and disambiguation treat as a wildcard
+    matching any entity type.
+
+    Only applies to regex (not LLM) parses whose City came from neither a
+    common-name pattern nor a global regex (as in _hotfix_truncated_regex_city)
+    and carries no direct geonames link. The exception is the generic
+    "City[/AboveCity]" global regex (CITY_SOMETHING_REGEX): on a single word
+    it just captures the whole word as City, no more telling of its type.
+    Most single-word addresses end up there instead of in regex_parse's own
+    single-word branch, since get_words_left splits every word after its
+    first letter. Returns `entity_texts` unchanged
+    when it does not apply, otherwise a copy with the City text moved to
+    Unknown.
+    """
+    raw_address = _clean_optional_str(row.get(f"{prefix}.raw"))
+    city_text = entity_texts.get("City")
+    if (
+        raw_address is None or city_text is None
+        or row.get(f"{prefix}.status") != "fully_parsed"
+        or _clean_optional_str(row.get(f"{prefix}.global_regex")) not in (None, _CITY_SOMETHING_GLOBAL_REGEX)
+        or _clean_optional_str(row.get(f"{prefix}.City.special_regex")) is not None
+        or _clean_optional_str(row.get(f"{prefix}.City.geonames_id")) is not None
+        or len(_WORD_PATTERN.findall(raw_address)) != 1
+    ):
+        return entity_texts
+    logger.debug("Relabelled single-word regex City %r as Unknown in %r", city_text, raw_address)
+    return {**entity_texts, "City": None, GeographicalEntityType.Unknown.name: city_text}
 
 
 def _pre_linked_iris(row, prefix: str) -> dict[str, str]:
@@ -446,6 +515,10 @@ class LinkingOutcome:
     # winning candidate.
     disambiguation_scores: dict = field(default_factory=dict)
     total_time : Optional[float] = None
+    # The address as it was when linking stopped (after disambiguation, when
+    # it got that far), with every scored candidate; only kept when
+    # link_field is called with keep_address=True, for debugging.
+    address: Optional[AddressProcessingData] = field(default=None, repr=False, compare=False)
 
 
 def _matching_metadata(matched_name: MatchedName) -> dict:
@@ -491,17 +564,33 @@ def link_field(
     camp_matcher: CampReferenceMatcher,
     geo_db_searcher: GeoDBSearch,
     disambiguator: Disambiguator,
+    keep_address: bool = False,
 ) -> LinkingOutcome:
     """
     Run the full linking pipeline for a single address field of a single row.
+    With keep_address=True, the returned outcome also carries the address
+    as it was when linking stopped (see LinkingOutcome.address).
     """
+    outcome, address = _link_field(row, prefix, camp_matcher, geo_db_searcher, disambiguator)
+    if keep_address:
+        outcome = replace(outcome, address=address)
+    return outcome
+
+
+def _link_field(
+    row,
+    prefix: str,
+    camp_matcher: CampReferenceMatcher,
+    geo_db_searcher: GeoDBSearch,
+    disambiguator: Disambiguator,
+) -> tuple[LinkingOutcome, AddressProcessingData]:
     start = time.monotonic()
     def _elapsed():
         nonlocal start
         return time.monotonic() - start
     row = _hotfix_truncated_regex_city(row, prefix)
     raw_address = _clean_optional_str(row.get(f"{prefix}.raw"))
-    entity_texts = _extract_entity_texts(row, prefix)
+    entity_texts = _single_word_regex_city_as_unknown(row, prefix, _extract_entity_texts(row, prefix))
     above_city_text = _clean_optional_str(row.get(f"{prefix}.AboveCity.text"))
     pre_linked_iris = _pre_linked_iris(row, prefix)
     missed_words = _missed_words(raw_address, _assigned_texts(row, prefix))
@@ -513,28 +602,40 @@ def link_field(
         bzk_field_name=FIELD_PREFIXES[prefix],
         entities=entities,
     )
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            "Linking address %s (%r), field %s, parse status %s: entities %s",
+            address.id, raw_address, address.bzk_field_name, _clean_optional_str(row.get(f"{prefix}.status")),
+            [_describe_raw_entity(entity) for entity in entities])
 
     pre_linked = _pre_linked_finest_entity(pre_linked_iris, entity_texts)
     if pre_linked is not None:
         entity_type, iri = pre_linked
+        logger.debug(
+            "Address %s: parsing already linked the finest entity (%s) to %s; skipping search",
+            address.id, entity_type, iri)
         return LinkingOutcome(
             iri=iri, entity_type=entity_type, tags=(),
             search_status=SearchStatus.PRE_LINKED_DURING_PARSING,
             disambiguation_status=DisambiguationStatus.NOT_APPLICABLE,
             linked_entities=(LinkedEntityMetadata(entity_type=entity_type, iri=iri),),
             total_time=_elapsed()
-        )
+        ), address
 
-    
-    address_tags = tag_address(raw_address or entity_texts.get("City"))
+    tagged_text = raw_address or entity_texts.get("City")
+    address_tags = tag_address(tagged_text)
+    logger.debug("Address %s: tagged %r as %s", address.id, tagged_text, sorted(address_tags))
     if "location_unspecified" in address_tags:
+        logger.debug(
+            "Address %s: nothing resembling a place name is left after stripping the tagged terms, "
+            "filler words and punctuation; treating it as not a location", address.id)
         reasons = sorted(address_tags - {"location_unspecified"})
         return LinkingOutcome(
             iri=None, entity_type=None, tags=("unresolved", *sorted(address_tags)),
             search_status=f"{SearchStatus.NO_LOCATION} ({', '.join(reasons)})" if reasons else SearchStatus.NO_LOCATION,
             disambiguation_status=DisambiguationStatus.NOT_APPLICABLE,
             total_time=_elapsed()
-        )
+        ), address
     # Tags that describe the value without ruling out a location (e.g.
     # "displaced_persons_camp" for "DP-Lager Foehrenwald"); carried over
     # regardless of how the rest of the pipeline resolves the location.
@@ -546,6 +647,9 @@ def link_field(
     # cleaned of surrounding words (e.g. "deportiert nach Auschwitz").
     camp_match = camp_matcher.match(address, extra_tags)
     if camp_match is not None:
+        logger.debug(
+            "Address %s: matched camp/ghetto %r -> %s (wikidata %s, tags %s); skipping search",
+            address.id, camp_match.label, camp_match.iri, camp_match.wikidata_iri, sorted(camp_match.tags))
         camp_tags = set(camp_match.tags)
         camp_tags.update(extra_tags)
         camp_tags = tuple(sorted(camp_tags))
@@ -555,15 +659,16 @@ def link_field(
             disambiguation_status=DisambiguationStatus.NOT_APPLICABLE,
             linked_entities=(LinkedEntityMetadata(entity_type="Camp", iri=camp_match.iri),),
             total_time=_elapsed()
-        )
+        ), address
     
     if len(entities) == 0:
+        logger.debug("Address %s: parsing yielded no entities to search for", address.id)
         return LinkingOutcome(
             iri=None, entity_type=None, tags=("unresolved", *extra_tags),
             search_status=SearchStatus.NO_ENTITIES,
             disambiguation_status=DisambiguationStatus.NOT_APPLICABLE,
             total_time=_elapsed()
-        )
+        ), address
 
     address = AddressProcessingData(
         card_id=row.get("card_id"),
@@ -578,6 +683,12 @@ def link_field(
         for entity in address.entities
         if isinstance(entity, MatchedEntity) and entity.matches is not None
     }
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            "Address %s: GeoDBSearch candidates per entity: %s", address.id,
+            [f"{entity.entity_type.name} {entity.raw_text!r}: "
+             f"{len(entity.matches) if isinstance(entity, MatchedEntity) and entity.matches is not None else 0}"
+             for entity in address.entities])
     address = disambiguator.disambiguate(address)
     possible_links_count = len(address.possible_links or ())
     likely_links_count = len(address.likely_links or ())
@@ -587,24 +698,35 @@ def link_field(
         linked_entities = _linked_entities_metadata(linked_address, search_candidate_counts)
         finest_type = linked_address.finest_grain_entity.entity_type.name
         finest_iri = next(m.iri for m in linked_entities if m.entity_type == finest_type)
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "Address %s: linked to %s out of %d possible link(s)",
+                address.id, _describe_candidate(linked_address), possible_links_count)
+        disambiguation_status = _resolved_disambiguation_status(address)
         return LinkingOutcome(
             iri=finest_iri,
             entity_type=finest_type,
             tags=extra_tags,
             search_status=_geo_db_search_status(linked_address.finest_grain_entity.linked_to),
-            disambiguation_status=_resolved_disambiguation_status(address),
+            disambiguation_status=disambiguation_status,
             linked_entities=linked_entities,
             possible_links_count=possible_links_count,
             likely_links_count=likely_links_count,
             disambiguation_scores=dict(linked_address.scores),
             total_time=_elapsed()
-        )
+        ), address
     if likely_links_count > 1:
         first_candidate = address.likely_links[0]
         ambiguous_iris = [
             normalize_iri(candidate.finest_grain_entity.linked_to.geographical_name.entity.iri)
             for candidate in address.likely_links
         ]
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "Address %s: disambiguation could not choose between %d likely candidates "
+                "(within the %s ambiguity threshold of each other) out of %d possible link(s): %s",
+                address.id, likely_links_count, disambiguator.score_threshold, possible_links_count,
+                [_describe_candidate(candidate) for candidate in address.likely_links])
         return LinkingOutcome(
             iri=None,
             entity_type=first_candidate.finest_grain_entity.entity_type.name,
@@ -617,14 +739,17 @@ def link_field(
             likely_links_count=likely_links_count,
             disambiguation_scores=dict(first_candidate.scores),
             total_time=_elapsed()
-        )
+        ), address
+    logger.debug(
+        "Address %s: no candidates left after search and disambiguation (%d possible link(s))",
+        address.id, possible_links_count)
     return LinkingOutcome(
         iri=None, entity_type=None, tags=("unresolved", *extra_tags),
         search_status=SearchStatus.GEO_DB_NO_CANDIDATES,
         disambiguation_status=DisambiguationStatus.NO_CANDIDATES,
         possible_links_count=possible_links_count, likely_links_count=likely_links_count,
         total_time=_elapsed()
-    )
+    ), address
 
 
 def apply_outcome_to_row(row: dict, prefix: str, outcome: LinkingOutcome) -> dict:

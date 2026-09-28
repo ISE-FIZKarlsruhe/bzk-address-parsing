@@ -416,7 +416,7 @@ class TantivySearchIndex(GeoSearchIndex):
 
         # extra fields for search restriction
         for entity_type in GeographicalEntityType:
-            if entity_type == GeographicalEntityType.AboveCity:
+            if entity_type in (GeographicalEntityType.AboveCity, GeographicalEntityType.Unknown):
                 continue
             schema_builder.add_boolean_field(entity_type.entity_type, fast=True, indexed=True)
         schema_builder.add_text_field("country_code", fast=True, **text_field_options)
@@ -1007,16 +1007,23 @@ SEARCHABLE_ENTITY_TYPES = [
     GeographicalEntityType.City,
     GeographicalEntityType.Neighborhood,
     GeographicalEntityType.AboveCity,
+    GeographicalEntityType.Unknown,
 ]
 
 
+# Every real (searchable) feature type, i.e. what Unknown (a wildcard with
+# no dedicated feature type of its own) expands to when searched.
+ANY_ENTITY_TYPES = tuple(
+    entity_type for entity_type in SEARCHABLE_ENTITY_TYPES
+    if entity_type not in (GeographicalEntityType.AboveCity, GeographicalEntityType.Unknown)
+)
 
 # Every real feature type coarser than City, i.e. what AboveCity (a
 # parsing-time hint with no dedicated feature type of its own) expands to
 # when searched: District, Region, State, Country.
 ABOVE_CITY_ENTITY_TYPES = tuple(
-    entity_type for entity_type in GeographicalEntityType
-    if entity_type != GeographicalEntityType.AboveCity and entity_type < GeographicalEntityType.City
+    entity_type for entity_type in ANY_ENTITY_TYPES
+    if entity_type < GeographicalEntityType.City
 )
 
 class GeoDBSearch(LinkingStep):
@@ -1122,15 +1129,19 @@ class GeoDBSearch(LinkingStep):
                 "Restricting search for %r (%s) strictly to already resolved countries %s",
                 entity.raw_text, entity_type, country_codes)
             country_strict = True
-        # AboveCity has no dedicated feature type of its own; search for it
-        # as a disjunction over every real type coarser than City instead
-        # (the search index already treats multiple entity_types as an OR).
-        search_entity_types = (
-            ABOVE_CITY_ENTITY_TYPES if entity_type == GeographicalEntityType.AboveCity else [entity_type]
-        )
+        # AboveCity and Unknown have no dedicated feature type of their own;
+        # search for them as a disjunction over every real type coarser than
+        # City, or over every real type at all, respectively (the search index
+        # already treats multiple entity_types as an OR).
         if entity_type == GeographicalEntityType.AboveCity:
+            search_entity_types = ABOVE_CITY_ENTITY_TYPES
+        elif entity_type == GeographicalEntityType.Unknown:
+            search_entity_types = ANY_ENTITY_TYPES
+        else:
+            search_entity_types = [entity_type]
+        if entity_type in (GeographicalEntityType.AboveCity, GeographicalEntityType.Unknown):
             self.logger.debug(
-                "Expanding AboveCity entity %r to entity types %s", entity.raw_text, search_entity_types)
+                "Expanding %s entity %r to entity types %s", entity_type.name, entity.raw_text, search_entity_types)
         index_matches = self.search_index.search(
             query_string=entity.raw_text,
             distance_threshold=self.cleaned_distance_threshold,
