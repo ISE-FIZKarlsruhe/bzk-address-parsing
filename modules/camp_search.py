@@ -13,6 +13,7 @@ import pandas as pd
 
 from modules.address_tagging import GHETTO_TERM_PATTERN
 from modules.geo_db_search import ENTITY_LINKING_LOGGER, ascii_normalize, german_normalize, similarity_and_distance
+from modules.pipeline.geographical_entity import GeographicalEntityType
 from modules.pipeline.linked_data import AddressProcessingData, BZKFieldName
 
 DEFAULT_CAMPS_REFERENCE_PATH = Path("reference_data/wikidata_camps_and_ghettos.csv")
@@ -282,7 +283,7 @@ class CampReferenceMatcher:
         # hypothesis should be considered as well. The current address is not relevant for this case.
         queries = [address.full_address]
         for entity in address.entities:
-            if entity.entity_type == "City":
+            if entity.entity_type == GeographicalEntityType.City:
                 queries.append(entity.raw_text)
                 break
         self.logger.debug("Camp search for address %s with queries %s (tags %s)", address.id, queries, tags)
