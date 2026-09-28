@@ -551,7 +551,7 @@ class TantivySearchIndex(GeoSearchIndex):
         # dropped candidate word, where the shared words may well be the
         # place's own name (e.g. "Tiefenbach" in "Kleinwalsertal Tiefenbach")
         for words, unmatched_idx, keeps_region_words in (
-                (query_words, unmatched_query_idx, True), (candidate_words, unmatched_candidate_idx, False)):
+                (query_words, unmatched_query_idx, True), (candidate_words, unmatched_candidate_idx, True)):
             last_content_idx = max(
                 (i for i, w in enumerate(words) if w not in _STOP_WORDS), default=len(words) - 1)
             for i in unmatched_idx:
