@@ -521,6 +521,25 @@ class TantivySearchIndex(GeoSearchIndex):
                     "contained in query (unpaired query words: %s)",
                     query_words, candidate_words, unmatched_query)
                 return True, []
+        # IDF is taken on the candidate side, since the candidate word is
+        # known to be in the index while the query word may be a typo.
+        paired_idfs = [(cword, self._word_idf(searcher, cword)) for _, cword in pairs]
+        # unpaired words all less informative than every informative paired
+        # word are mere qualifiers of the shared name, however many or
+        # wherever they are, so the rules below no longer apply
+        informative_paired_idfs = [
+            idf for _, idf in paired_idfs if idf > self.partial_match_idf_threshold]
+        if len(informative_paired_idfs) > 0:
+            unmatched_idfs = [
+                (w, self._word_idf(searcher, w)) for w in unmatched_query + unmatched_candidate]
+            min_paired_idf = min(informative_paired_idfs)
+            if all(idf < min_paired_idf for _, idf in unmatched_idfs):
+                self.logger.debug(
+                    "Partial word match %s vs %s accepted: unpaired words (%s) all less informative "
+                    "than the paired informative words (min idf %.4f)",
+                    query_words, candidate_words,
+                    ", ".join(f"{w!r} idf {idf:.4f}" for w, idf in unmatched_idfs), min_paired_idf)
+                return True, []
         # at most one word may be missing/added/substituted on either side
         if len(unmatched_query) > 1 or len(unmatched_candidate) > 1:
             self.logger.debug(
@@ -529,10 +548,7 @@ class TantivySearchIndex(GeoSearchIndex):
             return False, []
         # the shared words must include at least one informative word: names
         # sharing only a common qualifier (e.g. "Bad Homburg" vs "Bad Tölz")
-        # are unrelated places. IDF is taken on the candidate side, since the
-        # candidate word is known to be in the index while the query word may
-        # be a typo.
-        paired_idfs = [(cword, self._word_idf(searcher, cword)) for _, cword in pairs]
+        # are unrelated places.
         if all(idf <= self.partial_match_idf_threshold for _, idf in paired_idfs):
             self.logger.debug(
                 "Partial word match %s vs %s rejected: only non-informative words paired "
