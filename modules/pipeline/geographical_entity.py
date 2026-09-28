@@ -151,7 +151,7 @@ class GeographicalEntity:
 
     @property
     def all_country_iso_codes(self) -> list[str]:
-        if self.country is not None:
+        if self.country is not None and self.country.iso_code is not None and self.country.iso_code != "":
             return [self.country.iso_code, *self.alternate_iso_country_codes]
         else:
             return list(self.alternate_iso_country_codes)

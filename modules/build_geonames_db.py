@@ -101,12 +101,57 @@ CREATE TABLE IF NOT EXISTS country_data (
     neighboring_countries_iso_codes TEXT[]
 );
 
+-- Manually curated data for historical countries (e.g. Yugoslavia, USSR) not present in countryInfo.txt
+CREATE TABLE IF NOT EXISTS historical_country_data (
+    iri TEXT PRIMARY KEY,
+    iso_code TEXT,
+    country_name TEXT,
+    continent TEXT,
+    geonames_id INTEGER,
+    iso_languages TEXT[],
+    neighboring_countries_iso_codes TEXT[]
+);
+
+INSERT OR REPLACE INTO historical_country_data
+SELECT
+    iri,
+    iso_code AS iso_code,
+    country_name,
+    continent,
+    geonames_id,
+    iso_languages,
+    neighboring_countries_iso_codes
+FROM read_json('reference_data/geonames_historical_relevant_countries_data.json',
+    columns = {
+        'iri' : 'TEXT',
+        'iso_code' : 'TEXT',
+        'country_name' : 'TEXT',
+        'iso_languages' : 'TEXT[]',
+        'neighboring_countries_iso_codes' : 'TEXT[]',
+        'continent' : 'TEXT',
+        'geonames_id' : 'INTEGER'
+    }
+);
+
 CREATE OR REPLACE VIEW geographical_entities_with_countries AS
-SELECT 
-    geographical_entities.* EXCLUDE (iso_country_code), 
-    country_data as country 
-FROM geographical_entities 
-    JOIN country_data ON geographical_entities.iso_country_code = country_data.iso_code;
+SELECT
+    geographical_entities.* EXCLUDE (iso_country_code),
+    -- Historical countries are matched by iri and take precedence over the iso code match
+    CASE
+        WHEN historical_country_data.iri IS NOT NULL THEN struct_pack(
+            iso_code := historical_country_data.iso_code,
+            country_name := historical_country_data.country_name,
+            continent := historical_country_data.continent,
+            geonames_id := historical_country_data.geonames_id,
+            iso_languages := historical_country_data.iso_languages,
+            neighboring_countries_iso_codes := historical_country_data.neighboring_countries_iso_codes
+        )
+        ELSE country_data
+    END AS country
+FROM geographical_entities
+    LEFT JOIN country_data ON geographical_entities.iso_country_code = country_data.iso_code
+    LEFT JOIN historical_country_data ON geographical_entities.iri = historical_country_data.iri
+WHERE country_data.iso_code IS NOT NULL OR historical_country_data.iri IS NOT NULL;
 
 CREATE OR REPLACE VIEW geographical_names_with_entities AS
 SELECT geographical_names.* EXCLUDE (iri), geographical_entities_with_countries AS entity 

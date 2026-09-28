@@ -1359,8 +1359,17 @@ class GeoDBSearch(LinkingStep):
                     "Entity %r is authoritative; its matches restrict countries/admin codes of later searches",
                     entity.raw_text)
                 for matched_name in matched_names:
+                    if matched_name.geographical_name.entity.classification == "A.PCLH":
+                        self.logger.debug(
+                            "Entity %r is an historical country; its country code %s will not be used to restrict later searches",
+                            entity.raw_text, matched_name.geographical_name.entity.all_country_iso_codes)
+                        continue
+                    self.logger.debug("Entity %r adds country codes %s to later searches", 
+                                      entity.raw_text, matched_name.geographical_name.entity.all_country_iso_codes)
                     country_codes.update(matched_name.geographical_name.entity.all_country_iso_codes)
                     if matched_name.geographical_name.entity.admin_codes:
+                        self.logger.debug("Entity %r adds admin codes %s to later searches", 
+                                          entity.raw_text, matched_name.geographical_name.entity.admin_codes)
                         admin_codes.add(matched_name.geographical_name.entity.admin_codes)
             new_entities.append(entity.with_matches(tuple(matched_names)))
         return dataclasses.replace(

@@ -1,0 +1,38 @@
+[
+    {
+        "iri" : "https://sws.geonames.org/7500737",
+        "iso_code" : "YU",
+        "country_name" : "Yugoslavia",
+        "iso_languages" : ["sh", "sr", "hr", "sl", "mk", "sq", "hu"],
+        "neighboring_countries_iso_codes" : ["IT", "AT", "HU", "RO", "BG", "GR", "AL"],
+        "continent" : "EU",
+        "geonames_id" : 7500737
+    },
+    {
+        "iri" : "https://sws.geonames.org/8505031",
+        "iso_code" : "",
+        "country_name" : "Czechoslovakia",
+        "iso_languages" : ["cs", "sk", "hu"],
+        "neighboring_countries_iso_codes" : ["DE", "PL", "UA", "HU", "AT"],
+        "continent" : "EU",
+        "geonames_id" : 8505031
+    },
+    {
+        "iri" : "https://sws.geonames.org/8505033",
+        "iso_code" : "",
+        "country_name" : "Serbia and Montenegro",
+        "iso_languages" : ["sr", "hu", "bs", "sq", "rom"],
+        "neighboring_countries_iso_codes" : ["HU", "RO", "BG", "MK", "AL", "BA", "HR"],
+        "continent" : "EU",
+        "geonames_id" : 8505033
+    },
+    {
+        "iri" : "https://sws.geonames.org/8354411",
+        "iso_code" : "",
+        "country_name" : "Union of Soviet Socialist Republics",
+        "iso_languages" : ["ru", "uk", "be", "uz", "kk", "ka", "az", "lt", "ro", "lv", "ky", "tg", "hy", "tk", "et"],
+        "neighboring_countries_iso_codes" : ["NO", "FI", "PL", "SK", "HU", "RO", "TR", "IR", "AF", "CN", "MN", "KP"],
+        "continent" : "EU",
+        "geonames_id" : 8354411
+    }
+]
