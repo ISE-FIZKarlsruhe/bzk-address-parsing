@@ -35,6 +35,7 @@ from modules.regex_patterns import regex_parse
 from modules.utils import format_time
 from parse_with_llms import _rename_llm_output_columns, prepare_llm
 from parse_with_regex import PLACE_COLS_PREFIX, flatten_dict
+from IPython.display import Markdown, display
 
 
 # ---------------------------------------------------------------------------
@@ -297,18 +298,6 @@ def print_slowest_addresses(outcomes: list[entity_linking.LinkingOutcome], parse
         print(f"    {parsed_row['address_id']} {address} ({format_time(outcome.total_time)})")
 
 
-def effective_likely_links_count(outcome: entity_linking.LinkingOutcome) -> int:
-    """
-    likely_links_count is only set once GeoDBSearch + disambiguation actually
-    ran. A camp/ghetto reference match or a pre-linked id is as unambiguous
-    as a single surviving candidate, and anything that never reached search
-    (not a place, no entities, ...) has none.
-    """
-    if outcome.likely_links_count is not None:
-        return outcome.likely_links_count
-    return 1 if outcome.iri is not None else 0
-
-
 def finest_entity(outcome: entity_linking.LinkingOutcome):
     return next((e for e in outcome.linked_entities if e.entity_type == outcome.entity_type), None)
 
@@ -318,6 +307,41 @@ def get_entity_for(outcome: entity_linking.LinkingOutcome, entity_type):
         if entity.entity_type == entity_type:
             return entity
     return None
+
+
+class LinkStatus:
+    """How a predicted IRI compares to the ground truth (see link_status)."""
+    CORRECTLY_LINKED = "Correctly Linked"
+    PARTIALLY_LINKED = "Partially Linked"
+    INCORRECTLY_LINKED = "Incorrectly Linked"
+    FAILED_TO_LINK = "Failed to link"
+    NOT_A_LOCATION = "Not a location"
+
+
+def link_status(pred_iri: Optional[str], true_row: pd.Series) -> str:
+    """
+    Categorizes a prediction against its ground-truth row, consistently with
+    eval_entity_linking: a partial link is a wrong prediction that is still an
+    ancestor of the true location in its full_hierarchy (some_granularity_loss),
+    any other wrong prediction is incorrect (the rest of fp), a missing
+    prediction is a failure where a link was expected (fn), and "not a location"
+    where none was (tn).
+    """
+    pred_iri = normalize_iri(pred_iri)
+    true_iri = None if pd.isna(true_row["iri"]) else normalize_iri(true_row["iri"])
+    if pred_iri is None:
+        return LinkStatus.FAILED_TO_LINK if true_iri is not None else LinkStatus.NOT_A_LOCATION
+    if pred_iri == true_iri:
+        return LinkStatus.CORRECTLY_LINKED
+    hierarchy = true_row["full_hierarchy"]
+    if isinstance(hierarchy, list) and pred_iri in [normalize_iri(h) for h in hierarchy]:
+        return LinkStatus.PARTIALLY_LINKED
+    return LinkStatus.INCORRECTLY_LINKED
+
+
+def link_statuses(outcomes: list[entity_linking.LinkingOutcome], ground_truth: pd.DataFrame) -> list[str]:
+    """link_status of every outcome, row-aligned with `ground_truth`."""
+    return [link_status(outcome.iri, true_row) for outcome, (_, true_row) in zip(outcomes, ground_truth.iterrows())]
 
 
 # ---------------------------------------------------------------------------
@@ -371,6 +395,7 @@ def build_incorrect_or_missing_links_df(
     incorrect_or_missing_links = []
     for row, outcome, parsed_row in zip(addresses.itertuples(), outcomes, parsed_rows):
         true_row = indexed_gt.loc[str(row.address_id)]
+        status = link_status(outcome.iri, true_row)
         true_iri = true_row["iri"]
         if pd.isna(true_iri):
             true_iri = None
@@ -394,18 +419,22 @@ def build_incorrect_or_missing_links_df(
             )
         else:
             pred_raw_text = None
-        if true_iri != pred_iri:
+        if status not in (LinkStatus.CORRECTLY_LINKED, LinkStatus.NOT_A_LOCATION):
             record = dict(
                 address_id=row.address_id,
                 card_id=row.card_id,
                 bzk_field_name=row.field,
                 full_address=row.FullAddress,
+                link_status=status,
                 true_iri=true_iri,
                 pred_iri=pred_iri,
                 true_entity_type=true_entity_type,
                 true_raw_text=true_raw_text,
                 pred_raw_text=pred_raw_text,
-                pred_status=outcome.search_status
+                parsing_status=entity_linking._clean_optional_str(parsed_row.get(f"{parsed_row['prefix']}.status")),
+                pred_status=outcome.search_status,
+                true_tags=list(true_row["tags"]),
+                pred_tags=list(outcome.tags),
             )
             finest = finest_entity(outcome)
             if finest is not None:
@@ -416,6 +445,40 @@ def build_incorrect_or_missing_links_df(
                 ))
             incorrect_or_missing_links.append(record)
     return pd.DataFrame(incorrect_or_missing_links)
+
+
+def split_by_link_status(links: pd.DataFrame) -> dict[str, pd.DataFrame]:
+    """Splits a dataframe with a "link_status" column into one dataframe per status."""
+    return {
+        status: group.reset_index(drop=True)
+        for status, group in links.groupby("link_status", sort=False)
+    }
+
+
+def _aligned_table(df: pd.DataFrame) -> str:
+    """Every row and column of `df` as a left-aligned plain-text table."""
+    def _cell(value) -> str:
+        return str(value).replace("\n", "\\n")
+    columns = [str(c) for c in df.columns]
+    rows = [[_cell(v) for v in row] for row in df.itertuples(index=False)]
+    widths = [max([len(c)] + [len(r[i]) for r in rows]) for i, c in enumerate(columns)]
+    lines = [
+        "  ".join(c.ljust(w) for c, w in zip(columns, widths)),
+        "  ".join("-" * w for w in widths),
+    ]
+    lines += ["  ".join(v.ljust(w) for v, w in zip(r, widths)).rstrip() for r in rows]
+    return "\n".join(lines) + "\n"
+
+
+def save_result_table(df: pd.DataFrame, results_dir: Path, name: str) -> None:
+    """Writes `df` to `{results_dir}/{name}.jsonl` and as an aligned table to `{results_dir}/{name}.txt`."""
+    results_dir.mkdir(parents=True, exist_ok=True)
+    df.to_json(results_dir / f"{name}.jsonl", orient="records", lines=True, force_ascii=False)
+    (results_dir / f"{name}.txt").write_text(_aligned_table(df), encoding="utf-8")
+    display(Markdown(
+        f"Saved {len(df)} rows to {(results_dir / name)}.jsonl\n\n"
+        f"Saved {len(df)} rows to [{(results_dir / name)}.txt]({(results_dir / name)}.txt)"
+    ))
 
 
 def build_unmatched_entities_df(addresses: pd.DataFrame, outcomes: list[entity_linking.LinkingOutcome]) -> pd.DataFrame:
@@ -471,53 +534,28 @@ def print_ambiguous_example(ambiguous_addresses: pd.DataFrame) -> None:
 # ---------------------------------------------------------------------------
 
 CATEGORY_COLORS = {
-    "Correctly Linked": "tab:green",
-    "Partially Linked": "tab:blue",
-    "Incorrectly Linked": "tab:red",
-    "Ambiguity Unresolved": "gold",
-    "Name not found": "tab:orange",
-    "Failed to link": "tab:orange",
-    "Not a location": "tab:gray"
+    LinkStatus.CORRECTLY_LINKED: "tab:green",
+    LinkStatus.PARTIALLY_LINKED: "tab:blue",
+    LinkStatus.INCORRECTLY_LINKED: "tab:red",
+    LinkStatus.FAILED_TO_LINK: "tab:orange",
+    LinkStatus.NOT_A_LOCATION: "tab:gray",
 }
 
 
-def _status_order(c):
-    if c == "Correctly Linked":
-        return 0
-    elif c.startswith("Partially Linked"):
-        return 1
-    elif c == "Incorrectly Linked":
-        return 2
-    elif c == "Name not found" or c == "Failed to link":
-        return 3
-    elif c == "Ambiguity Unresolved":
-        return 4
-    elif c == "Not a location":
-        return 5
-    else:
-        return 6
+_STATUS_ORDER = [
+    LinkStatus.CORRECTLY_LINKED,
+    LinkStatus.PARTIALLY_LINKED,
+    LinkStatus.INCORRECTLY_LINKED,
+    LinkStatus.FAILED_TO_LINK,
+    LinkStatus.NOT_A_LOCATION,
+]
 
 
-def linking_status_counts(outcomes: list[entity_linking.LinkingOutcome], metrics: dict) -> pd.Series:
-    """Number of addresses per linking status (Correctly/Partially/Incorrectly Linked, Failed to link)."""
-    ambiguity_levels = pd.Series(
-        [effective_likely_links_count(outcome) for outcome in outcomes]
-    ).value_counts()
-    ambiguity_levels.sort_index(inplace=True)
-    counts = ambiguity_levels[ambiguity_levels.index <= 1].copy()
-
-    counts.rename(lambda x: "Correctly Linked" if x == 1 else "Name not found" if x == 0 else f"{x} candidates", inplace=True)
-    counts["Ambiguity Unresolved"] = ambiguity_levels[ambiguity_levels.index > 1].sum()
-    counts["Name not found"] -= metrics["tn"]
-    counts["Failed to link"] = counts["Ambiguity Unresolved"] + counts["Name not found"]
-    counts.drop(["Ambiguity Unresolved", "Name not found"], inplace=True)
-    counts["Not a location"] = metrics["tn"]
-    counts["Correctly Linked"] -= metrics["fp"]
-    counts["Incorrectly Linked"] = metrics["fp"] - metrics["some_granularity_loss"]
-    counts["Partially Linked"] = metrics["some_granularity_loss"]
-    counts.drop("Not a location", inplace=True)
-    counts.sort_index(key=lambda index: [_status_order(c) for c in index], inplace=True)
-    return counts
+def linking_status_counts(outcomes: list[entity_linking.LinkingOutcome], ground_truth: pd.DataFrame) -> pd.Series:
+    """Number of addresses per link_status, excluding those that are not a location."""
+    counts = pd.Series(link_statuses(outcomes, ground_truth)).value_counts()
+    counts = counts.drop(LinkStatus.NOT_A_LOCATION, errors="ignore")
+    return counts.sort_index(key=lambda index: [_STATUS_ORDER.index(c) for c in index])
 
 
 def print_linking_status_legend() -> None:
