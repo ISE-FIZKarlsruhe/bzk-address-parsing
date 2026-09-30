@@ -26,9 +26,9 @@ DISAMBIGUATION_FACTOR_PRIORITY = [
     "child_parent_likelihood",
     "fuzzy_similarity_score",
     "entity_types_matching_preferred",
-    "phonetic_score",
     "regional_term_match",
     "population_order_of_magnitude",
+    "phonetic_score",
     "country_likelihood_rank", # general rank of country likelihood based on observation
     "entity_types_matching",
     "is_preferred_name",

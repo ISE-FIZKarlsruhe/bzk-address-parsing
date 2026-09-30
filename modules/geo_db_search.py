@@ -941,19 +941,32 @@ class TantivySearchIndex(GeoSearchIndex):
                 yield "abbreviation", self._search_inner(
                     abbrev_pattern=abbrev_pattern, query_strings=[], distance_threshold=0, **other_params), ()
             
-            # phonetic matches next: catches names that were misheard/misspelled
-            # in a way plain edit distance on the raw string would not
+            # phonetic and edit distance 1 fuzzy matches next, together in the
+            # same phase with their results concatenated: phonetic matching
+            # catches names that were misheard/misspelled in a way plain edit
+            # distance on the raw string would not, and vice versa, so neither
+            # should preempt the other
+            phonetic_phase_name = "phonetic"
+            phonetic_phase_matches = []
             if phonetic_query_string.strip() != "":
                 self.logger.debug(
                     "Phase 'phonetic' for %r: phonetic key %r", expanded_query, phonetic_query_string)
-                yield "phonetic", self._search_inner(
+                phonetic_phase_matches.extend(self._search_inner(
                     query_strings=[phonetic_query_string], distance_threshold=0,
-                    field="phonetic_key", is_phonetic=True, **other_params), ()
+                    field="phonetic_key", is_phonetic=True, **other_params))
             else:
                 self.logger.debug("Phase 'phonetic' for %r skipped: empty phonetic key", expanded_query)
-            # fuzzy matches next, only tried once exact, abbreviation and
-            # phonetic matching have failed to find anything
-            for i in range(1, distance_threshold + 1):
+            if distance_threshold >= 1:
+                phonetic_phase_name = "phonetic+fuzzy(distance=1)"
+                self.logger.debug(
+                    "Phase 'phonetic' for %r: query strings %s, edit distance 1", expanded_query, query_strings)
+                phonetic_phase_matches.extend(self._search_inner(
+                    query_strings=query_strings, distance_threshold=1, **other_params))
+            yield phonetic_phase_name, phonetic_phase_matches, ()
+            # larger edit distance fuzzy matches next, only tried once exact,
+            # abbreviation, phonetic and distance 1 fuzzy matching have failed
+            # to find anything
+            for i in range(2, distance_threshold + 1):
                 self.logger.debug(
                     "Phase 'fuzzy' for %r: query strings %s, edit distance %d",
                     expanded_query, query_strings, i)
