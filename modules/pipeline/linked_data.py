@@ -83,12 +83,17 @@ class RawEntity:
     # a text search, and propagates it (e.g. for country restriction) the
     # same way a resolved search match would be.
     pre_linked_iri: Optional[str] = field(default=None, kw_only=True)
+    # Entity not identified by parsing but recovered from the words it left
+    # unassigned (see entity_linking._missed_words). Being only a guess, the
+    # Disambiguator leaves it out of a candidate address whenever including
+    # it would lower the candidate's scores.
+    is_missed_word: bool = field(default=False, kw_only=True)
 
     @classmethod
     def with_parsed(
         cls, raw_text: str, entity_type: GeographicalEntityType | str,
         span: Optional[AddressSpan] = None, nearby: Optional[str | Literal['unspecified']] = None,
-        pre_linked_iri: Optional[str] = None,
+        pre_linked_iri: Optional[str] = None, is_missed_word: bool = False,
     ) -> 'RawEntity':
         if isinstance(entity_type, str):
             entity_type = GeographicalEntityType[entity_type]
@@ -98,7 +103,8 @@ class RawEntity:
             entity_type=entity_type,
             span=span,
             nearby=nearby,
-            pre_linked_iri=pre_linked_iri
+            pre_linked_iri=pre_linked_iri,
+            is_missed_word=is_missed_word,
         )
 
     def with_matches(self, matches: tuple[MatchedName, ...]) -> 'MatchedEntity':
@@ -109,6 +115,7 @@ class RawEntity:
             span=self.span,
             nearby=self.nearby,
             pre_linked_iri=self.pre_linked_iri,
+            is_missed_word=self.is_missed_word,
             matches=matches
         )
 
@@ -122,6 +129,7 @@ class RawEntity:
             span=self.span,
             nearby=self.nearby,
             pre_linked_iri=self.pre_linked_iri,
+            is_missed_word=self.is_missed_word,
             linked_to=matched_name,
             scores=scores
         )

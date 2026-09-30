@@ -348,7 +348,7 @@ def _normalize_for_dedup(text: str) -> str:
 _WORD_PATTERN = re.compile(r"[^\s/,;()\[\]<>\"]+")
 # Only words with more than this many letters (digits and punctuation not
 # counting) are recovered as missed AboveCity words.
-_MISSED_WORD_MIN_LETTERS = 5
+_MISSED_WORD_MIN_LETTERS = 4
 # Words that commonly go unassigned by parsing but are not a broader place
 # around the City (administrative qualifiers, institutions, ...), so are
 # never recovered as missed AboveCity words; nor are geo_db_search's stop
@@ -492,7 +492,7 @@ def _build_entities(
         # two-word addresses (ignoring stop words): City plus the missed word.
         for text, span in missed_words:
             entities.append(RawEntity.with_parsed(
-                entity_type=GeographicalEntityType.AboveCity, raw_text=text, span=span))
+                entity_type=GeographicalEntityType.AboveCity, raw_text=text, span=span, is_missed_word=True))
     return entities
 
 

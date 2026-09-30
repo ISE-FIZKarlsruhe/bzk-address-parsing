@@ -24,9 +24,9 @@ DISAMBIGUATION_FACTOR_PRIORITY = [
     "regional_term_match",
     "fuzzy_similarity_score",
     "entity_types_matching_preferred",
+    "phonetic_score",
     "population_order_of_magnitude",
     "country_likelihood_rank", # general rank of country likelihood based on observation
-    "phonetic_score",
     "entity_types_matching",
     "is_preferred_name",
     "population_count"
@@ -41,6 +41,13 @@ WEIGHTED_DISAMBIGUATION_FACTORS = {
 }
 
 NA_SCORE = AnnotatedScore(0.0, "Not applicable")
+
+# Weight, relative to the other entities (weighing 1), of a missed word entity
+# (see RawEntity.is_missed_word) in the average of a candidate address' scores.
+# Being only a guess, it should establish a preference between candidates that
+# match it and candidates that don't (or match it poorly), without outweighing
+# the entities identified by parsing.
+MISSED_WORD_ENTITY_WEIGHT = 0.5
 
 # "entity_types_matching_preferred" for Unknown entities (see
 # _score_individual_match), which match any entity type but, coming from
@@ -93,14 +100,19 @@ def _compare_scores(
                 return "lt"
     return "eq"
 
-def _average_scores(scored_matches : list[ScoredMatch]) -> dict[str, float]:
+def _average_scores(
+        scored_matches : list[ScoredMatch], weights : Optional[list[float]] = None
+    ) -> dict[str, float]:
+    if weights is None:
+        weights = [1.0] * len(scored_matches)
     sums = defaultdict(lambda: 0.0)
-    for scored_match in scored_matches:
+    for scored_match, weight in zip(scored_matches, weights):
         for factor, score in scored_match.scores.items():
             if isinstance(score, AnnotatedScore):
                 score = score.score
-            sums[factor] += score
-    return {factor: score / len(scored_matches) for factor, score in sums.items()}
+            sums[factor] += score * weight
+    weight_sum = sum(weights)
+    return {factor: score / weight_sum for factor, score in sums.items()}
 
 def _describe_linked_address(linked_address : LinkedAddress) -> str:
     """
@@ -499,7 +511,11 @@ class Disambiguator:
                     entity.entity_type.name,
                     [s for s in matched.values()]
                 )
-            scored_match = FrozenDict(_average_scores([s for s in matched.values()]))
+            entity_weights = {
+                id(e): MISSED_WORD_ENTITY_WEIGHT if e.is_missed_word else 1.0 for e in address.entities
+            }
+            scored_match = FrozenDict(_average_scores(
+                list(matched.values()), [entity_weights[key] for key in matched]))
             self.logger.debug(
                 "Final average scores for %r (%r) of type %r: %r",
                 match.nfc_alt_name, match.geographical_name.entity.iri,
