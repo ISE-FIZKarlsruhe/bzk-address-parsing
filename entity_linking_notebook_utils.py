@@ -60,6 +60,8 @@ def cleanup_previous_run(namespace: dict) -> None:
         namespace["conn"].close()
     if "search_executor" in namespace:
         namespace["search_executor"].shutdown()
+    if "disambiguator" in namespace:
+        namespace["disambiguator"].close()
 
 
 def build_geo_db_searcher(index_path: str, prune_score_threshold: float) -> geo_db_search.GeoDBSearch:

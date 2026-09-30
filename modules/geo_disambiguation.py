@@ -4,11 +4,14 @@ from os import name
 import pprint
 from typing import Literal, Optional, NamedTuple
 
-from modules.pipeline.geographical_entity import GeographicalEntityType
+from modules.pipeline.geographical_entity import GeographicalBranch, GeographicalEntityType, GeographicalName
 from modules.geo_db_search import ABOVE_CITY_ENTITY_TYPES, ENTITY_LINKING_LOGGER
-from modules.pipeline.linked_data import BZKFieldName, AddressProcessingData, LinkedEntity, MatchedEntity, MatchedName, LinkedAddress, RegionHintEntity
+from modules.pipeline.linked_data import BZKFieldName, AddressProcessingData, LinkedEntity, MatchedEntity, MatchedName, LinkedAddress, RawEntity, RegionHintEntity
+from modules.pipeline.storage.encoding_util import decode_from_dict
 import dataclasses
+import duckdb
 import logging
+import threading
 from collections import defaultdict
 from modules.pipeline.linked_data import AnnotatedScore
 from modules.pipeline.storage.frozendict import FrozenDict
@@ -137,7 +140,8 @@ class Disambiguator:
             score_weights: list[str] = WEIGHTED_DISAMBIGUATION_FACTORS,
             population_rounding_factor: int = 10_000,
             min_population_order_of_magnitude: int = 500_000,
-            score_prune_thresholds : dict[str, float] = defaultdict(float)
+            score_prune_thresholds : dict[str, float] = defaultdict(float),
+            geo_db_path : str = "geo.duckdb"
         ):
         self.score_threshold = score_diff_threshold
         self.priority = priority
@@ -145,11 +149,182 @@ class Disambiguator:
         self.population_rounding_factor = population_rounding_factor
         self.min_population_order_of_magnitude = min_population_order_of_magnitude
         self.score_prune_thresholds = score_prune_thresholds
+        self.geo_db_path = geo_db_path
+        # Read only connection to the geo duckdb, only needed to look up the
+        # entity of a common parent branch (see _link_to_common_parent). Opened
+        # lazily, and every use (and cache miss) goes through _geo_db_lock since
+        # the Disambiguator is shared across worker threads while a duckdb
+        # connection is not safe to use from several threads at once. Lookups
+        # are few (bounded by the distinct branches) and cached, so serializing
+        # them costs little.
+        self._geo_db_connection : Optional[duckdb.DuckDBPyConnection] = None
+        self._geo_db_lock = threading.Lock()
+        self._common_parent_cache : dict[GeographicalBranch, Optional[GeographicalName]] = {}
         self.logger.info(
             "Initialized with score diff threshold %s, priority %s, population rounding factor %d, "
-            "min population order of magnitude %d, score prune thresholds %s",
+            "min population order of magnitude %d, score prune thresholds %s, geo db %s",
             self.score_threshold, self.priority, self.population_rounding_factor,
-            self.min_population_order_of_magnitude, dict(self.score_prune_thresholds))
+            self.min_population_order_of_magnitude, dict(self.score_prune_thresholds), self.geo_db_path)
+
+    def __getstate__(self):
+        # Neither the connection nor the lock can be pickled (e.g. when sent to
+        # a worker process); each copy opens its own connection when needed.
+        state = self.__dict__.copy()
+        state["_geo_db_connection"] = None
+        state["_geo_db_lock"] = None
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._geo_db_lock = threading.Lock()
+
+    def close(self):
+        with self._geo_db_lock:
+            if self._geo_db_connection is not None:
+                self._geo_db_connection.close()
+                self._geo_db_connection = None
+
+    def _find_branch_entity(self, branch : GeographicalBranch) -> Optional[GeographicalName]:
+        """
+        Look up the entity representing a branch of the geographical hierarchy:
+        the country itself if the branch has no admin codes, otherwise the
+        (preferably current, not historical) ADM{n} division with exactly the
+        branch's n admin codes. If there is no such division, the branch is
+        walked up until one is found. Results are cached. Must be called while
+        holding _geo_db_lock.
+        """
+        if branch in self._common_parent_cache:
+            return self._common_parent_cache[branch]
+        if self._geo_db_connection is None:
+            self.logger.debug("Opening read only connection to geo db %s", self.geo_db_path)
+            self._geo_db_connection = duckdb.connect(self.geo_db_path, read_only=True)
+        connection = self._geo_db_connection
+        level = len(branch.admin_codes)
+        if level == 0:
+            row = connection.execute(
+                "SELECT iri FROM geographical_entities WHERE iso_country_code = ? AND classification LIKE 'A.PCL%' "
+                "ORDER BY classification = 'A.PCLI' DESC, classification LIKE '%H' ASC, population DESC NULLS LAST "
+                "LIMIT 1",
+                [branch.country_iso_code]
+            ).fetchone()
+        else:
+            code_conditions = " AND ".join(f"admin_codes.admin{i + 1}_code = ?" for i in range(level))
+            null_next_code = (
+                f" AND coalesce(ltrim(admin_codes.admin{level + 1}_code, '0'), '') = ''" if level < 5 else "")
+            row = connection.execute(
+                "SELECT iri FROM geographical_entities WHERE iso_country_code = ? "
+                f"AND classification IN ('A.ADM{level}', 'A.ADM{level}H') AND {code_conditions}{null_next_code} "
+                f"ORDER BY classification = 'A.ADM{level}' DESC, population DESC NULLS LAST LIMIT 1",
+                [branch.country_iso_code, *branch.admin_codes]
+            ).fetchone()
+        geographical_name = None
+        if row is not None:
+            name_row = connection.execute(
+                "SELECT * FROM geographical_names_with_entities WHERE entity.iri = ? "
+                "ORDER BY is_preferred_name DESC NULLS LAST, name_id LIMIT 1",
+                [row[0]]
+            ).fetchone()
+            if name_row is not None:
+                columns = [description[0] for description in connection.description]
+                geographical_name = decode_from_dict(dict(zip(columns, name_row)), GeographicalName)
+        if geographical_name is None and level > 0:
+            self.logger.debug("No entity found for branch %s; walking up the branch", branch)
+            geographical_name = self._find_branch_entity(
+                GeographicalBranch(branch.country_iso_code, branch.admin_codes[:-1]))
+        self.logger.debug(
+            "Branch %s resolved to %s", branch,
+            geographical_name.entity.iri if geographical_name is not None else None)
+        self._common_parent_cache[branch] = geographical_name
+        return geographical_name
+
+    def _branch_entity(self, branch : GeographicalBranch) -> Optional[GeographicalName]:
+        # Checked without the lock first: reading a dict is thread safe, and
+        # cache hits are by far the most common case.
+        if branch in self._common_parent_cache:
+            return self._common_parent_cache[branch]
+        with self._geo_db_lock:
+            return self._find_branch_entity(branch)
+
+    def _common_branch(self, candidates : list[LinkedAddress]) -> Optional[GeographicalBranch]:
+        """
+        The deepest branch of the geographical hierarchy (country, then the
+        leading non-null admin codes) common to the finest entity of every
+        candidate, or None if they are not even in the same country.
+        """
+        common : Optional[GeographicalBranch] = None
+        for candidate in candidates:
+            entity = candidate.finest_grain_entity.linked_to.geographical_name.entity
+            country_code = entity.country.iso_code if entity.country is not None else None
+            if not country_code:
+                return None
+            codes = []
+            for code in (entity.admin_codes or ()):
+                if _is_admin_code_null(code):
+                    break
+                codes.append(code)
+            if common is None:
+                common = GeographicalBranch(country_code, tuple(codes))
+                continue
+            if common.country_iso_code != country_code:
+                return None
+            common_length = 0
+            for a, b in zip(common.admin_codes, codes):
+                if a != b:
+                    break
+                common_length += 1
+            common = GeographicalBranch(country_code, common.admin_codes[:common_length])
+        return common
+
+    def _link_to_common_parent(
+            self, address : AddressProcessingData, likely_addresses : list[LinkedAddress]
+        ) -> Optional[LinkedAddress]:
+        """
+        For likely candidates that could not be told apart, a candidate address
+        linked to the entity at the branch of the geographical hierarchy common
+        to all of them (e.g. the state in Germany all of them lie in), or None
+        if there is no such branch or no entity was found for it.
+        """
+        branch = self._common_branch(likely_addresses)
+        if branch is None:
+            self.logger.debug("Address %s: likely candidates share no common branch", address.id)
+            return None
+        geographical_name = self._branch_entity(branch)
+        if geographical_name is None:
+            self.logger.debug(
+                "Address %s: no entity found for the likely candidates' common branch %s", address.id, branch)
+            return None
+        entity_types = geographical_name.entity.possible_entity_types
+        entity_type = min(entity_types) if len(entity_types) > 0 else GeographicalEntityType.Country
+        matched_name = MatchedName(
+            geographical_name=geographical_name,
+            nfc_query=address.full_address,
+            nfc_alt_name=geographical_name.name,
+            cleaned_query=None,
+            cleaned_alt_name=None,
+            cleaned_edit_distance=None,
+            matching_method="common_parent",
+            matching_score=0.0,
+            fuzzy_score=0.0,
+            phonetic_score=0.0,
+            abbreviation_pattern=None,
+            edit_distance=None,
+            is_abbreviation_match=False,
+            is_phonetic_match=False,
+            is_partial_word_match=False,
+        )
+        linked_entity = RawEntity.with_parsed(
+            raw_text=address.full_address, entity_type=entity_type
+        ).link_to(matched_name, {})
+        self.logger.debug(
+            "Address %s: likely candidates share branch %s; linking to its entity %r (%s) of type %s",
+            address.id, branch, geographical_name.name, geographical_name.entity.iri, entity_type.name)
+        return LinkedAddress(
+            finest_grain_entity=linked_entity,
+            reference_entity=linked_entity,
+            entities=(linked_entity,),
+            # the candidates are tied, so any of their scores stands for all
+            scores=likely_addresses[0].scores
+        )
 
     def _drop_duplicates(self, entity : MatchedEntity, matches: list[MatchedName], bzk_field: BZKFieldName) -> list[MatchedName]:
         """
@@ -609,11 +784,16 @@ class Disambiguator:
                             reference_iris.add(other_address.finest_grain_entity.linked_to.geographical_name.entity.iri)
                             likely_addresses.append(other_address)
                 
+                linked_to_common_parent = False
                 if len(reference_iris) > 1:
                     self.logger.debug(
-                        "Address %s is ambiguous: %d distinct candidates tie with the best (%s); leaving unlinked",
+                        "Address %s is ambiguous: %d distinct candidates tie with the best (%s); "
+                        "trying their common parent",
                         address.id, len(reference_iris), reference_iris)
-                    best_address = None
+                    best_address = self._link_to_common_parent(address, likely_addresses)
+                    linked_to_common_parent = best_address is not None
+                    if best_address is None:
+                        self.logger.debug("Address %s left unlinked", address.id)
                 elif self.logger.isEnabledFor(logging.DEBUG):
                     self.logger.debug(
                         "Address %s linked to %s", address.id, _describe_linked_address(best_address))
@@ -621,7 +801,8 @@ class Disambiguator:
                 return dataclasses.replace(address,
                     possible_links=possible_addresses,
                     likely_links=likely_addresses,
-                    linked_to=best_address
+                    linked_to=best_address,
+                    linked_to_common_parent=linked_to_common_parent
                 )
         self.logger.debug("Address %s has no candidates; leaving unlinked", address.id)
         return dataclasses.replace(address,

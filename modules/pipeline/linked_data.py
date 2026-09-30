@@ -197,6 +197,10 @@ class AddressProcessingData:
     possible_links: Optional[tuple[LinkedAddress, ...]] = None
     likely_links: Optional[tuple[LinkedAddress, ...]] = None
     linked_to : Optional[LinkedAddress] = None
+    # True when the likely links stayed ambiguous and linked_to is instead the
+    # entity at the branch of the geographical hierarchy they all share (e.g.
+    # the state all of them lie in); see Disambiguator._link_to_common_parent.
+    linked_to_common_parent : bool = False
     # kept apart from entities, which are all expected to be real entities
     region_hints : tuple[RegionHintEntity, ...] = ()
 

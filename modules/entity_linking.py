@@ -107,6 +107,10 @@ class DisambiguationStatus:
     # only by using the remaining criteria, e.g. population, country, ...;
     # this is the most error-prone case.
     DISAMBIGUATED_HEURISTICALLY = "DISAMBIGUATED_HEURISTICALLY"
+    # Disambiguation could not settle on one of several candidates, but they
+    # all lie within the same branch of the geographical hierarchy (e.g. the
+    # same state), so the entity at that branch was linked instead.
+    DISAMBIGUATED_BY_COMMON_PARENT = "DISAMBIGUATED_BY_COMMON_PARENT"
 
     AMBIGUOUS = "AMBIGUOUS"
     NO_CANDIDATES = "NO_CANDIDATES"
@@ -128,6 +132,8 @@ def _resolved_disambiguation_status(address: AddressProcessingData) -> str:
     see DisambiguationStatus.UNAMBIGUOUS/DISAMBIGUATED_BY_CONTEXT/DISAMBIGUATED_HEURISTICALLY.
     Only meaningful when address.linked_to is not None.
     """
+    if address.linked_to_common_parent:
+        return DisambiguationStatus.DISAMBIGUATED_BY_COMMON_PARENT
     possible_links = address.possible_links or ()
     if len(possible_links) <= 1:
         return DisambiguationStatus.UNAMBIGUOUS
@@ -729,13 +735,24 @@ def _link_field(
                 "Address %s: linked to %s out of %d possible link(s)",
                 address.id, _describe_candidate(linked_address), possible_links_count)
         disambiguation_status = _resolved_disambiguation_status(address)
+        ambiguous_iris = None
+        search_status_match = linked_address.finest_grain_entity.linked_to
+        if address.linked_to_common_parent:
+            # The linked entity was not itself found by search, but inferred
+            # from the ambiguous candidates, which are kept for reference.
+            ambiguous_iris = [
+                normalize_iri(candidate.finest_grain_entity.linked_to.geographical_name.entity.iri)
+                for candidate in address.likely_links
+            ]
+            search_status_match = address.likely_links[0].finest_grain_entity.linked_to
         return LinkingOutcome(
             iri=finest_iri,
             entity_type=finest_type,
             tags=extra_tags,
-            search_status=_geo_db_search_status(linked_address.finest_grain_entity.linked_to),
+            search_status=_geo_db_search_status(search_status_match),
             disambiguation_status=disambiguation_status,
             linked_entities=linked_entities,
+            ambiguous_iris=ambiguous_iris,
             possible_links_count=possible_links_count,
             likely_links_count=likely_links_count,
             disambiguation_scores=dict(linked_address.scores),
@@ -867,7 +884,7 @@ def main(argv=None):
     search_index = TantivySearchIndex(args.search_index_path)
     geo_db_searcher = GeoDBSearch(args.search_cache_db, search_index=search_index, geo_db_path=args.geo_db_path)
     geo_db_searcher.initialize()
-    disambiguator = Disambiguator()
+    disambiguator = Disambiguator(geo_db_path=args.geo_db_path)
 
     input_path = Path(args.input_path)
     output_path = Path(args.output_path)
@@ -880,6 +897,7 @@ def main(argv=None):
                 out_f.write(json.dumps(output_row, ensure_ascii=False) + "\n")
     finally:
         geo_db_searcher.finalize()
+        disambiguator.close()
 
 
 if __name__ == "__main__":
