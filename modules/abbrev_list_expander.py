@@ -243,6 +243,11 @@ ABBREV_EXPANSIONS = [
         re.compile(r"\bProv" + _optional_suffix("ince") + _ABBREV_END, re.IGNORECASE),
         Expansion("Province")
     ),
+    (
+        re.compile(r"\bSt" + _ABBREV_END, re.IGNORECASE),
+        Expansion("Saint")
+    ),
+     
 ]
 
 def expand_abbreviations(text: str) -> tuple[str, Optional[str]]:
