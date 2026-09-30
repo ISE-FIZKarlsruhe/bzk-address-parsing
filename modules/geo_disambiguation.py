@@ -21,10 +21,10 @@ def _is_admin_code_null(code : Optional[str]) -> bool:
 DISAMBIGUATION_FACTOR_PRIORITY = [
     "weighted_score",
     "child_parent_likelihood",
-    "regional_term_match",
     "fuzzy_similarity_score",
     "entity_types_matching_preferred",
     "phonetic_score",
+    "regional_term_match",
     "population_order_of_magnitude",
     "country_likelihood_rank", # general rank of country likelihood based on observation
     "entity_types_matching",
@@ -35,8 +35,9 @@ DISAMBIGUATION_FACTOR_PRIORITY = [
 # Higher value means more impact in the decision
 WEIGHTED_DISAMBIGUATION_FACTORS = {
     "child_parent_likelihood" : 3,
-    "phonetic_score" : 1,
-    "fuzzy_similarity_score" : 1,
+    "phonetic_score" : 2,
+    "fuzzy_similarity_score" : 2,
+    "regional_term_match" : 1,
     "entity_types_matching_preferred" : 1
 }
 

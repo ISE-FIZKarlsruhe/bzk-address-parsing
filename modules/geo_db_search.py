@@ -124,19 +124,30 @@ _STOP_WORDS = frozenset((
     r"regier[uü]ngsbezirk", "region", r"reg\W*bez\.?"
 ))
 
+# A stop word is delimited by the start/end of the string or by non word
+# characters other than periods (e.g. spaces, dashes as in "Frankfurt-am-Main"),
+# which are consumed along with it. Periods are excluded so as not to break up
+# abbreviations (e.g. "y" in "N.Y."). The boundaries are checked with
+# lookarounds, which see the original string, so that adjacent stop words
+# (e.g. "von der") are all matched even though the separator between them
+# is consumed by the first.
 _compiled_stop_words = [
-    re.compile(w, re.IGNORECASE) for w in _STOP_WORDS
+    re.compile(rf"[^\w.]*(?<![\w.])(?:{w})(?![\w.])[^\w.]*", re.IGNORECASE) for w in _STOP_WORDS
 ]
 
 def _remove_stop_words(normalized_string : str) -> str:
     """
-    Removes stop words from a string. If every word is a stop word, the string is returned
-    unchanged rather than reduced to an empty search key.
+    Removes stop words from a string, along with the non word characters around
+    them, which are replaced by a single space. If every word is a stop word, the
+    string is returned unchanged rather than reduced to an empty search key.
     """
-    words = [w for w in normalized_string.split(" ") if not any(regex.fullmatch(w) for regex in _compiled_stop_words)]
-    if not words:
+    result = normalized_string
+    for regex in _compiled_stop_words:
+        result = regex.sub(" ", result)
+    result = _DEDUPE_WHITESPACE_REGEX.sub(" ", result).strip()
+    if not result:
         return normalized_string
-    return " ".join(words)
+    return result
 
 def normalize_for_phonetics(nfc_string : str):
     result = _remove_stop_words(nfc_string)
