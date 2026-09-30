@@ -12,7 +12,7 @@ import re
 import pandas as pd
 
 from modules.address_tagging import GHETTO_TERM_PATTERN
-from modules.geo_db_search import ENTITY_LINKING_LOGGER, ascii_normalize, german_normalize, similarity_and_distance
+from modules.geo_db_search import ENTITY_LINKING_LOGGER, ascii_normalize, german_normalize, similarity_and_distance, _remove_stop_words
 from modules.pipeline.geographical_entity import GeographicalEntityType
 from modules.pipeline.linked_data import AddressProcessingData, BZKFieldName
 
@@ -233,6 +233,7 @@ class CampReferenceMatcher:
 
     @staticmethod
     def _normalized_keys(label: str) -> set[str]:
+        label = _remove_stop_words(label)
         keys = set((
             label,
             KZ_REGEX.sub("", label),
