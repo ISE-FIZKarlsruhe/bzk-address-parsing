@@ -34,6 +34,7 @@ link was produced (see LinkedEntityMetadata and apply_outcome_to_row).
 """
 
 import argparse
+from collections import defaultdict
 import json
 import logging
 import re
@@ -69,6 +70,22 @@ ENTITY_TYPE_COLUMNS = [entity_type.name for entity_type in GeographicalEntityTyp
 # Finest to coarsest; used to pick which pre-existing geonames id to respect
 # when several are given for the same address field.
 PRE_LINKED_ENTITY_ORDER = ["Neighborhood", "City", "District", "Region", "State", "Country"]
+
+# Parameters of the pipeline's components, shared by main() and the
+# entity_linking notebook (through the build_* functions below) so that
+# production runs with the same configuration that was evaluated.
+SEARCH_PRUNE_SCORE_THRESHOLD = 0.2
+# Minimum difference between two candidates' scores on a disambiguation factor
+# for that factor to decide between them (see geo_disambiguation._compare_scores).
+DEFAULT_SIGNIFICANCE_THRESHOLD = 0.05
+SIGNIFICANCE_THRESHOLDS = {
+
+}
+DISAMBIGUATION_POPULATION_ROUNDING_FACTOR = 1
+DISAMBIGUATION_SCORE_PRUNE_THRESHOLDS = {
+    "fuzzy_similarity_score": 0.4,
+    "child_parent_likelihood": 0.4,
+}
 
 
 class SearchStatus:
@@ -870,6 +887,47 @@ def process_row(
     return output_row
 
 
+def _default_significance_threshold() -> float:
+    # A module level function rather than a lambda keeps the Disambiguator picklable.
+    return DEFAULT_SIGNIFICANCE_THRESHOLD
+
+
+def build_camp_matcher(camps_reference_path: str | Path = DEFAULT_CAMPS_REFERENCE_PATH) -> CampReferenceMatcher:
+    logger.info("Loading camp/ghetto reference matcher...")
+    camp_matcher = CampReferenceMatcher(camps_reference_path)
+    camp_matcher.initialize()
+    return camp_matcher
+
+
+def build_geo_db_searcher(
+    search_index_path: str,
+    search_cache_db: str = ":memory:",
+    geo_db_path: str = "geo.duckdb",
+) -> GeoDBSearch:
+    logger.info("Initializing GeoDB searcher...")
+    search_index = TantivySearchIndex(search_index_path)
+    geo_db_searcher = GeoDBSearch(
+        search_cache_db,
+        search_index=search_index,
+        prune_score_threshold=SEARCH_PRUNE_SCORE_THRESHOLD,
+        geo_db_path=geo_db_path,
+    )
+    geo_db_searcher.initialize()
+    return geo_db_searcher
+
+
+def build_disambiguator(geo_db_path: str = "geo.duckdb") -> Disambiguator:
+    significance_theresholds = defaultdict(_default_significance_threshold)
+    for k, v in SIGNIFICANCE_THRESHOLDS:
+        significance_theresholds[k] = v
+    return Disambiguator(
+        significance_thresholds=significance_theresholds,
+        population_rounding_factor=DISAMBIGUATION_POPULATION_ROUNDING_FACTOR,
+        score_prune_thresholds=dict(DISAMBIGUATION_SCORE_PRUNE_THRESHOLDS),
+        geo_db_path=geo_db_path,
+    )
+
+
 def _iter_input_rows(input_path: Path, file_pattern: str) -> Iterable[dict]:
     files = sorted(input_path.glob(file_pattern)) if input_path.is_dir() else [input_path]
     for file in files:
@@ -893,15 +951,9 @@ def main(argv=None):
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-    logging.info("Loading camp/ghetto reference matcher...")
-    camp_matcher = CampReferenceMatcher(args.camps_reference)
-    camp_matcher.initialize()
-
-    logging.info("Initializing GeoDB searcher...")
-    search_index = TantivySearchIndex(args.search_index_path)
-    geo_db_searcher = GeoDBSearch(args.search_cache_db, search_index=search_index, geo_db_path=args.geo_db_path)
-    geo_db_searcher.initialize()
-    disambiguator = Disambiguator(geo_db_path=args.geo_db_path)
+    camp_matcher = build_camp_matcher(args.camps_reference)
+    geo_db_searcher = build_geo_db_searcher(args.search_index_path, args.search_cache_db, args.geo_db_path)
+    disambiguator = build_disambiguator(args.geo_db_path)
 
     input_path = Path(args.input_path)
     output_path = Path(args.output_path)

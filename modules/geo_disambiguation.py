@@ -37,10 +37,9 @@ DISAMBIGUATION_FACTOR_PRIORITY = [
 
 # Higher value means more impact in the decision
 WEIGHTED_DISAMBIGUATION_FACTORS = {
-    "child_parent_likelihood" : 3,
+    "child_parent_likelihood" : 2,
     "phonetic_score" : 2,
     "fuzzy_similarity_score" : 2,
-    "regional_term_match" : 1,
     "entity_types_matching_preferred" : 1
 }
 
@@ -89,15 +88,17 @@ def _compare_scores(
         s1 : dict[str, AnnotatedScore | float], 
         s2 : dict[str, AnnotatedScore | float], 
         priority : list[str],
-        threshold : float
+        significance_thresholds : dict[str, float]
     ) -> Literal["gt", "lt", "eq"]:
     """
-    Returns true if the difference between the two score dictionaries is under the given threshold.
+    Compares two score dictionaries factor by factor in priority order: the
+    first factor whose difference exceeds its significance threshold decides
+    ("gt" or "lt"); "eq" if no factor does.
     """
     t1 = _score_dict_to_tuple(s1, priority)
     t2 = _score_dict_to_tuple(s2, priority)
-    for a, b in zip(t1, t2):
-        if abs(a - b) > threshold:
+    for factor, a, b in zip(priority, t1, t2):
+        if abs(a - b) > significance_thresholds[factor]:
             if a > b:
                 return "gt"
             else:
@@ -135,7 +136,7 @@ class Disambiguator:
 
     def __init__(
             self, 
-            score_diff_threshold: float = 0.0, 
+            significance_thresholds: dict[str, float] = defaultdict(float),
             priority: list[str] = DISAMBIGUATION_FACTOR_PRIORITY,
             score_weights: list[str] = WEIGHTED_DISAMBIGUATION_FACTORS,
             population_rounding_factor: int = 10_000,
@@ -143,7 +144,7 @@ class Disambiguator:
             score_prune_thresholds : dict[str, float] = defaultdict(float),
             geo_db_path : str = "geo.duckdb"
         ):
-        self.score_threshold = score_diff_threshold
+        self.significance_thresholds = significance_thresholds
         self.priority = priority
         self.score_weights = score_weights
         self.population_rounding_factor = population_rounding_factor
@@ -161,9 +162,9 @@ class Disambiguator:
         self._geo_db_lock = threading.Lock()
         self._common_parent_cache : dict[GeographicalBranch, Optional[GeographicalName]] = {}
         self.logger.info(
-            "Initialized with score diff threshold %s, priority %s, population rounding factor %d, "
+            "Initialized with significance thresholds %s, priority %s, population rounding factor %d, "
             "min population order of magnitude %d, score prune thresholds %s, geo db %s",
-            self.score_threshold, self.priority, self.population_rounding_factor,
+            self.significance_thresholds, self.priority, self.population_rounding_factor,
             self.min_population_order_of_magnitude, dict(self.score_prune_thresholds), self.geo_db_path)
 
     def __getstate__(self):
@@ -773,13 +774,13 @@ class Disambiguator:
             if len(possible_addresses) > 0:
                 best_address = possible_addresses[0]
                 for other_address in possible_addresses[1:]:
-                    if _compare_scores(best_address.scores, other_address.scores, self.priority, self.score_threshold) == "lt":
+                    if _compare_scores(best_address.scores, other_address.scores, self.priority, self.significance_thresholds) == "lt":
                         best_address = other_address
                 reference_iris = set()
                 reference_iris.add(best_address.finest_grain_entity.linked_to.geographical_name.entity.iri)
                 likely_addresses = [best_address]
                 for other_address in possible_addresses:
-                    if _compare_scores(best_address.scores, other_address.scores, self.priority, self.score_threshold) == "eq":
+                    if _compare_scores(best_address.scores, other_address.scores, self.priority, self.significance_thresholds) == "eq":
                         if not other_address.finest_grain_entity.linked_to.geographical_name.entity.iri in reference_iris:
                             reference_iris.add(other_address.finest_grain_entity.linked_to.geographical_name.entity.iri)
                             likely_addresses.append(other_address)

@@ -52,7 +52,7 @@ def setup_logging() -> None:
         "%(asctime)s.%(msecs)03d %(log_color)s%(levelname)-8s%(reset)s %(blue)s%(name)s %(filename)s:%(lineno)d%(reset)s %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     ))
-    logging.basicConfig(handlers=[handler], force=True)
+    logging.basicConfig(handlers=[handler], force=True, level=logging.INFO)
 
 
 def cleanup_previous_run(namespace: dict) -> None:
@@ -63,21 +63,6 @@ def cleanup_previous_run(namespace: dict) -> None:
         namespace["search_executor"].shutdown()
     if "disambiguator" in namespace:
         namespace["disambiguator"].close()
-
-
-def build_geo_db_searcher(index_path: str, prune_score_threshold: float) -> geo_db_search.GeoDBSearch:
-    tantivy = geo_db_search.TantivySearchIndex(index_path)
-    geo_db_searcher = geo_db_search.GeoDBSearch(":memory:", search_index=tantivy, prune_score_threshold=prune_score_threshold)
-    print("Initializing GeoDB searcher...")
-    geo_db_searcher.initialize()
-    return geo_db_searcher
-
-
-def build_camp_matcher() -> CampReferenceMatcher:
-    print("Initializing camp/ghetto reference matcher...")
-    camp_matcher = CampReferenceMatcher()
-    camp_matcher.initialize()
-    return camp_matcher
 
 
 class SerializedGeoDBSearch:
@@ -371,6 +356,37 @@ def build_disambiguated_addresses_df(addresses: pd.DataFrame, outcomes: list[ent
             child_parent_likelihood=outcome.disambiguation_scores.get("child_parent_likelihood"),
         ))
     return pd.DataFrame(disambiguated_addresses)
+
+
+def build_recovered_missed_words_df(
+    parsed_rows: list[dict], outcomes: list[entity_linking.LinkingOutcome]
+) -> pd.DataFrame:
+    """
+    Every address with words parsing left unassigned and linking recovered as
+    extra entities (see entity_linking._missed_words), alongside the parsed
+    entities and which of the recovered words ended up linked.
+    """
+    recovered = []
+    for parsed_row, outcome in zip(parsed_rows, outcomes):
+        parsed = entity_linking.parse_field_entities(parsed_row, parsed_row["prefix"])
+        missed_words = [entity.raw_text for entity in parsed.entities if entity.is_missed_word]
+        if not missed_words:
+            continue
+        linked_texts = {entity.raw_text for entity in outcome.linked_entities}
+        recovered.append(dict(
+            address_id=parsed_row["address_id"],
+            parse_status = entity_linking._clean_optional_str(parsed_row.get(f"{parsed_row['prefix']}.status")),
+            bzk_field_name=entity_linking.FIELD_PREFIXES[parsed_row["prefix"]],
+            raw_address=parsed.raw_address,
+            parsed_entities={
+                entity.entity_type.name: entity.raw_text for entity in parsed.entities if not entity.is_missed_word
+            },
+            recovered_missed_words=missed_words,
+            linked_missed_words=[word for word in missed_words if word in linked_texts],
+            iri=outcome.iri,
+            entity_type=outcome.entity_type,
+        ))
+    return pd.DataFrame(recovered)
 
 
 def evaluate_outcomes(outcomes: list[entity_linking.LinkingOutcome], ground_truth: pd.DataFrame) -> dict:
@@ -949,7 +965,7 @@ class DisambiguationErrorExplainer:
             true_score = true_candidate.scores.get(factor, 0.0)
 
             marker = ""
-            if deciding_factor is None and abs(pred_score - true_score) > self.disambiguator.score_threshold:
+            if deciding_factor is None and abs(pred_score - true_score) > self.disambiguator.significance_thresholds[factor]:
                 deciding_factor = factor
                 marker = "**← decides the ranking**"
             table.append(f"| `{factor}` | {pred_score:.3f} | {true_score:.3f} | {marker} |")
