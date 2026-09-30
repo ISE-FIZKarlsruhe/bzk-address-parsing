@@ -48,7 +48,7 @@ def setup_logging() -> None:
     # instead of stacking duplicates.
     handler = colorlog.StreamHandler(sys.stdout)
     handler.setFormatter(colorlog.ColoredFormatter(
-        "%(asctime)s.%(msecs)03d %(log_color)s%(levelname)-8s%(reset)s %(filename)s:%(lineno)d %(message)s",
+        "%(asctime)s.%(msecs)03d %(log_color)s%(levelname)-8s%(reset)s %(blue)s%(name)s %(filename)s:%(lineno)d%(reset)s %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     ))
     logging.basicConfig(handlers=[handler], force=True)
@@ -609,6 +609,11 @@ def _describe_camp_match(match) -> str:
     return f"{match.label!r} -> {normalize_iri(match.iri)} (wikidata {match.wikidata_iri}, tags {sorted(match.tags)})"
 
 
+def _display_block(lines: list[str]) -> None:
+    """Displays `lines` as one preformatted output block (keeps the column alignment)."""
+    display(Markdown("\n\n".join(lines)))
+
+
 class DisambiguationErrorExplainer:
     """
     Explains, for a single address, why the full entity linking pipeline
@@ -672,36 +677,37 @@ class DisambiguationErrorExplainer:
         true_iri, true_entity_type, true_raw_text = self._ground_truth(address_id)
         parsed_row = self.indexed_parsed.loc[str(address_id)]
         prefix = parsed_row["prefix"]
-
-        print(f"Address {address_id!r} ({parsed_row.get(f'{prefix}.raw')!r}), field {entity_linking.FIELD_PREFIXES[prefix]}")
+        sb = []
+        sb.append(f"Address {address_id!r} ({parsed_row.get(f'{prefix}.raw')!r}), field {entity_linking.FIELD_PREFIXES[prefix]}")
         if true_iri is None:
-            print(f"  ground truth: not a linkable location")
+            sb.append(f"  ground truth: not a linkable location")
         else:
-            print(f"  ground truth: {true_entity_type} {true_raw_text!r} -> {true_iri}")
+            sb.append(f"  ground truth: {true_entity_type} {true_raw_text!r} -> {true_iri}")
         differences = self._parse_differences(address_id, parsed_row, prefix)
         if differences:
-            print("  parse result differences from the ground-truth annotation:")
-            print(f"    {'entity type':<13} {'parsed':<30} {'ground truth':<30}")
+            sb.append("  parse result differences from the ground-truth annotation:")
+            sb.append(f"    {'entity type':<13} {'parsed':<30} {'ground truth':<30}")
             for entity_type, parsed_text, true_text in differences:
                 marker = "  <- linked entity" if entity_type == true_entity_type else ""
-                print(f"    {entity_type:<13} {parsed_text!r:<30} {true_text!r:<30}{marker}")
+                sb.append(f"    {entity_type:<13} {parsed_text!r:<30} {true_text!r:<30}{marker}")
         else:
-            print("  parse result agrees with the ground-truth annotation")
-        print()
+            sb.append("  parse result agrees with the ground-truth annotation")
+        _display_block(sb)
+        sb.clear()
 
         row = {**parsed_row.to_dict(), "address_id": str(address_id)}
         outcome = entity_linking.link_field(
             row, prefix, self.camp_matcher, self.search_executor, self.disambiguator, keep_address=True
         )
 
-        print()
         pred_iri = normalize_iri(outcome.iri)
-        print(f"  predicted:    {outcome.entity_type} -> {pred_iri}")
-        print(f"  search status: {outcome.search_status}, disambiguation status: {outcome.disambiguation_status}, tags: {list(outcome.tags)}")
+        sb.append(f"  predicted:    {outcome.entity_type} -> {pred_iri}")
+        sb.append(f"  search status: {outcome.search_status}, disambiguation status: {outcome.disambiguation_status}, tags: {list(outcome.tags)}")
         if pred_iri == true_iri:
-            print("The pipeline already links this address correctly.")
-            return
-        self._explain_outcome(outcome, true_iri, true_entity_type, true_raw_text)
+            sb.append("The pipeline already links this address correctly.")
+        else:
+            self._explain_outcome(sb, outcome, true_iri, true_entity_type, true_raw_text)
+        _display_block(sb)
 
     def _camp_reference_keys_for(self, iri: str) -> dict[str, "CampMatch"]:
         """Every key of the camp/ghetto reference index that resolves to `iri` (geonames or wikidata)."""
@@ -754,7 +760,7 @@ class DisambiguationErrorExplainer:
             differences.append(("AboveCity", above_city, None))
         return differences
 
-    def _explain_geo_db_outcome(self, address, true_iri, true_entity_type, true_raw_text) -> None:
+    def _explain_geo_db_outcome(self, sb: list[str], address, true_iri, true_entity_type, true_raw_text) -> None:
         """
         Compares the GeoDBSearch + disambiguation candidates (already logged by
         link_field) against the ground truth: whether the true IRI was among
@@ -766,10 +772,10 @@ class DisambiguationErrorExplainer:
         predicted = address.linked_to
         if predicted is None:
             if any(_entity_iri(c.finest_grain_entity) == true_iri for c in address.likely_links):
-                print(f"  true IRI {true_iri} is among the tied likely candidates.")
+                sb.append(f"  true IRI {true_iri} is among the tied likely candidates.")
             else:
                 in_possible = any(_entity_iri(c.finest_grain_entity) == true_iri for c in address.possible_links)
-                print(f"  true IRI {true_iri} is not among the tied likely candidates"
+                sb.append(f"  true IRI {true_iri} is not among the tied likely candidates"
                       + (" (it is among the lower-ranked possible_links)." if in_possible
                          else f" nor among the {len(address.possible_links)} possible_links."))
             return
@@ -783,24 +789,23 @@ class DisambiguationErrorExplainer:
             as_other_entity = [
                 (c, e) for c in address.possible_links for e in c.entities if _entity_iri(e) == true_iri
             ]
-            print(f"  raw text searched: {predicted.finest_grain_entity.raw_text!r} "
+            sb.append(f"  raw text searched: {predicted.finest_grain_entity.raw_text!r} "
                   f"(ground truth: {true_entity_type} {true_raw_text!r})")
             if as_other_entity:
                 c, e = as_other_entity[0]
-                print(f"  true IRI {true_iri} was only found as the {e.entity_type.name} of a candidate "
+                sb.append(f"  true IRI {true_iri} was only found as the {e.entity_type.name} of a candidate "
                       f"whose finest entity is {c.finest_grain_entity.entity_type.name} {_entity_iri(c.finest_grain_entity)} "
                       f"(granularity mismatch).")
             else:
-                print(f"  true IRI {true_iri} is not among the {len(address.possible_links)} candidate(s) GeoDBSearch found.")
+                sb.append(f"  true IRI {true_iri} is not among the {len(address.possible_links)} candidate(s) GeoDBSearch found.")
             return
 
-        print(f"  predicted: {_entity_iri(predicted.finest_grain_entity)} ({predicted.finest_grain_entity.linked_to.geographical_name.name})")
-        print(f"  true:      {true_iri} ({true_candidate.finest_grain_entity.linked_to.geographical_name.name})")
-        print()
+        sb.append(f"  predicted: {_entity_iri(predicted.finest_grain_entity)} ({predicted.finest_grain_entity.linked_to.geographical_name.name})")
+        sb.append(f"  true:      {true_iri} ({true_candidate.finest_grain_entity.linked_to.geographical_name.name})")
+        _display_block(sb)
+        sb.clear()
 
-        header = f"  {'factor':<32}{'predicted':>12}{'true':>12}"
-        print(header)
-        print("  " + "-" * (len(header) - 2))
+        table = ["| factor | predicted | true | |", "|---|--:|--:|---|"]
         deciding_factor = None
         for factor in self.disambiguator.priority:
             pred_score = predicted.scores.get(factor, 0.0)
@@ -809,56 +814,56 @@ class DisambiguationErrorExplainer:
             marker = ""
             if deciding_factor is None and abs(pred_score - true_score) > self.disambiguator.score_threshold:
                 deciding_factor = factor
-                marker = "  <- decides the ranking"
-            print(f"  {factor:<32}{pred_score:>12.3f}{true_score:>12.3f}{marker}")
-        print()
+                marker = "**← decides the ranking**"
+            table.append(f"| `{factor}` | {pred_score:.3f} | {true_score:.3f} | {marker} |")
+        display(Markdown("\n".join(table)))
         if deciding_factor is not None:
-            print(f"  The predicted candidate ranked higher because of '{deciding_factor}'.")
+            sb.append(f"  The predicted candidate ranked higher because of '{deciding_factor}'.")
         else:
-            print("  Both candidates have identical average scores across all factors; "
+            sb.append("  Both candidates have identical average scores across all factors; "
                   "see the per-entity scores below for the actual tie-breaker.")
 
-        print("\n  Per-entity scores:")
+        sb.append("\n  Per-entity scores:")
         for label, candidate in [("predicted", predicted), ("true", true_candidate)]:
-            print(f"    {label}:")
+            sb.append(f"    {label}:")
             for entity in candidate.entities:
                 entity_scores = {
                     factor: round(entity.scores[factor].score, 3)
                     for factor in self.disambiguator.priority
                     if factor in entity.scores
                 }
-                print(f"      {entity.entity_type.name:<13} {_entity_iri(entity):<45} {entity.linked_to.geographical_name.name:<25} {entity_scores}")
+                sb.append(f"      {entity.entity_type.name:<13} {_entity_iri(entity):<45} {entity.linked_to.geographical_name.name:<25} {entity_scores}")
 
-    def _explain_outcome(self, outcome, true_iri, true_entity_type, true_raw_text) -> None:
+    def _explain_outcome(self, sb: list[str], outcome, true_iri, true_entity_type, true_raw_text) -> None:
         """Why the step at which link_field stopped (see outcome.search_status) disagrees with the ground truth."""
         address = outcome.address
         status = outcome.search_status
         if true_entity_type is not None and not any(
             e.entity_type.name in (true_entity_type, "Unknown") for e in address.entities
         ):
-            print(f"  !! parsing did not extract a {true_entity_type} entity, which the ground truth links "
+            sb.append(f"  !! parsing did not extract a {true_entity_type} entity, which the ground truth links "
                   f"({true_raw_text!r}); later steps can at best link a coarser entity.")
 
         if status == SearchStatus.PRE_LINKED_DURING_PARSING:
-            print("  the id pre-linked during parsing is wrong.")
+            sb.append("  the id pre-linked during parsing is wrong.")
             return
         if status.startswith(SearchStatus.NO_LOCATION):
-            print("  tagging treated a linkable location as not a location.")
+            sb.append("  tagging treated a linkable location as not a location.")
             return
 
         true_camp_keys = self._camp_reference_keys_for(true_iri) if true_iri is not None else {}
         true_camp = next(iter(true_camp_keys.values()), None)
         if status == SearchStatus.CAMP_REFERENCE:
             if true_iri is None:
-                print("  the camp/ghetto match is wrong: the ground truth says this is not a linkable location.")
+                sb.append("  the camp/ghetto match is wrong: the ground truth says this is not a linkable location.")
             elif true_camp is not None:
-                print(f"  the true camp/ghetto is {_describe_camp_match(true_camp)}, indexed under keys {sorted(true_camp_keys)}.")
+                sb.append(f"  the true camp/ghetto is {_describe_camp_match(true_camp)}, indexed under keys {sorted(true_camp_keys)}.")
             else:
-                print(f"  the true IRI {true_iri} is not a camp/ghetto in the reference list: "
+                sb.append(f"  the true IRI {true_iri} is not a camp/ghetto in the reference list: "
                       f"this camp match hijacked an address that should have gone through GeoDBSearch.")
             return
         if true_camp is not None:
-            print(f"  !! no camp match, but the true IRI is the camp/ghetto {_describe_camp_match(true_camp)}, "
+            sb.append(f"  !! no camp match, but the true IRI is the camp/ghetto {_describe_camp_match(true_camp)}, "
                   f"indexed under keys {sorted(true_camp_keys)}; see the CampReferenceMatcher logs for why it was missed.")
         if status != SearchStatus.NO_ENTITIES:
-            self._explain_geo_db_outcome(address, true_iri, true_entity_type, true_raw_text)
+            self._explain_geo_db_outcome(sb, address, true_iri, true_entity_type, true_raw_text)

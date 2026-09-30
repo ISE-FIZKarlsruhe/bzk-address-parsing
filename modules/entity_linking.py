@@ -47,7 +47,7 @@ from tqdm.auto import tqdm
 
 from modules.address_tagging import tag_address
 from modules.camp_search import DEFAULT_CAMPS_REFERENCE_PATH, CampReferenceMatcher
-from modules.geo_db_search import _STOP_WORDS, GeoDBSearch, TantivySearchIndex, ascii_normalize, german_normalize
+from modules.geo_db_search import _STOP_WORDS, _compiled_stop_words, GeoDBSearch, TantivySearchIndex, ascii_normalize, german_normalize
 from modules.geo_disambiguation import DISAMBIGUATION_FACTOR_PRIORITY, Disambiguator
 from modules.entity_linking_eval_metrics import normalize_iri
 from modules.pipeline.geographical_entity import GeographicalEntityType
@@ -348,7 +348,7 @@ def _normalize_for_dedup(text: str) -> str:
 _WORD_PATTERN = re.compile(r"[^\s/,;()\[\]<>\"]+")
 # Only words with more than this many letters (digits and punctuation not
 # counting) are recovered as missed AboveCity words.
-_MISSED_WORD_MIN_LETTERS = 3
+_MISSED_WORD_MIN_LETTERS = 5
 # Words that commonly go unassigned by parsing but are not a broader place
 # around the City (administrative qualifiers, institutions, ...), so are
 # never recovered as missed AboveCity words; nor are geo_db_search's stop
@@ -362,6 +362,11 @@ MISSED_WORD_EXCLUSION_LIST = (
     "DP-Lager",
     "Parz.",
     "Maria",
+    "Haus",
+    "Rh.",
+    "Strasse",
+    "Street",
+    "St."
 )
 _NORMALIZED_MISSED_WORD_EXCLUSIONS = frozenset(
     normalized
@@ -371,10 +376,30 @@ _NORMALIZED_MISSED_WORD_EXCLUSIONS = frozenset(
 
 
 def _is_excluded_missed_word(word: str) -> bool:
+    ascii_normalized = ascii_normalize(word)
+    german_normalized = german_normalize(word)
     return (
-        ascii_normalize(word) in _NORMALIZED_MISSED_WORD_EXCLUSIONS
-        or german_normalize(word) in _NORMALIZED_MISSED_WORD_EXCLUSIONS
+        ascii_normalized in _NORMALIZED_MISSED_WORD_EXCLUSIONS
+        or german_normalized in _NORMALIZED_MISSED_WORD_EXCLUSIONS
     )
+
+
+def _count_non_stop_words(raw_address: Optional[str]) -> int:
+    """Number of words in `raw_address`, ignoring geo_db_search's stop words."""
+    if not raw_address:
+        return 0
+    count = 0
+    for word_match in _WORD_PATTERN.finditer(raw_address):
+        inner = re.search(r"[^\W_](?:.*[^\W_])?\.?", word_match.group())
+        if inner is None:
+            continue
+        # Also match the raw word: normalization drops the period some stop
+        # words (e.g. "i.") are written with.
+        forms = (inner.group(), ascii_normalize(inner.group()))
+        if any(stop_word.fullmatch(form) for stop_word in _compiled_stop_words for form in forms):
+            continue
+        count += 1
+    return count
 
 
 def _assigned_texts(row, prefix: str) -> list[str]:
@@ -434,7 +459,7 @@ def _missed_words(raw_address: Optional[str], assigned_texts: list[str]) -> list
 
 def _build_entities(
     entity_texts: dict[str, Optional[str]], above_city_text: Optional[str], pre_linked_iris: dict[str, str],
-    missed_words: list[tuple[str, AddressSpan]] = (),
+    missed_words: list[tuple[str, AddressSpan]] = (), raw_address: Optional[str] = None,
 ) -> list[RawEntity]:
     entities = [
         RawEntity.with_parsed(
@@ -463,7 +488,8 @@ def _build_entities(
     if entity_texts.get("City"):
         # Words parsing left unassigned next to an identified City (e.g.
         # "Weinheim/Bergstr." parsed as just City="Weinheim") are most often
-        # a broader place around it; see _missed_words.
+        # a broader place around it; see _missed_words. Only trusted for
+        # two-word addresses (ignoring stop words): City plus the missed word.
         for text, span in missed_words:
             entities.append(RawEntity.with_parsed(
                 entity_type=GeographicalEntityType.AboveCity, raw_text=text, span=span))
@@ -594,7 +620,7 @@ def _link_field(
     above_city_text = _clean_optional_str(row.get(f"{prefix}.AboveCity.text"))
     pre_linked_iris = _pre_linked_iris(row, prefix)
     missed_words = _missed_words(raw_address, _assigned_texts(row, prefix))
-    entities = _build_entities(entity_texts, above_city_text, pre_linked_iris, missed_words)
+    entities = _build_entities(entity_texts, above_city_text, pre_linked_iris, missed_words, raw_address)
     address = AddressProcessingData(
         card_id=row.get("card_id"),
         id=str(row.get("address_id", row.get("filename"))),

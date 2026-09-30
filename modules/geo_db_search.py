@@ -116,31 +116,42 @@ _DEDUPE_WHITESPACE_REGEX = re.compile(r'\s+')
 # those languages instead.
 _STOP_WORDS = frozenset((
     "der", "die", "das", "des", "dem", "den",
-    "und", "oder", "in", "im", "am", "an", "auf", "bei",
+    "und", "oder", "in", "im", "am", "an", "auf", r"[ia]\.", "bei",
     "zu", "zum", "zur", "von", "vom", "nach", "fuer", "fur",
     "the", "and", "of", "at",
     "el", "la", "los", "las", "de", "del", "y", "en",
+    "kreis", r"kr\.?", r"krs\.?", "prov", r"provinz\.?", "province", 
+    r"regier[uü]ngsbezirk", "region", r"reg\W*bez\.?"
 ))
+
+_compiled_stop_words = [
+    re.compile(w, re.IGNORECASE) for w in _STOP_WORDS
+]
 
 def _remove_stop_words(normalized_string : str) -> str:
     """
-    Removes stop words from an already normalized (lowercase, accent/punctuation
-    stripped) string. If every word is a stop word, the string is returned
+    Removes stop words from a string. If every word is a stop word, the string is returned
     unchanged rather than reduced to an empty search key.
     """
-    words = [w for w in normalized_string.split(" ") if w.lower() not in _STOP_WORDS]
+    words = [w for w in normalized_string.split(" ") if not any(regex.fullmatch(w) for regex in _compiled_stop_words)]
     if not words:
         return normalized_string
     return " ".join(words)
 
-def ascii_normalize(nfc_string : str) -> str:
+def normalize_for_phonetics(nfc_string : str):
+    result = _remove_stop_words(nfc_string)
+    result = ascii_normalize(result, preserve_german_diacritics=True)
+    return result
+
+def ascii_normalize(nfc_string : str, preserve_german_diacritics : bool = False) -> str:
     """
     Converts a string to lowercase, strips accents and punctuation.
     This is used for matching against similarly normalized names in the database.
     """
     result = nfc_string.lower()
-    # Converts non ascii characters to ascii equivalents, e.g. "é" -> "e"
-    result = unidecode.unidecode(result)
+    if not (preserve_german_diacritics and all(c in _GERMAN_DIACRITICS or c.isascii() for c in result)):
+        # Converts non ascii characters to ascii equivalents, e.g. "é" -> "e"
+        result = unidecode.unidecode(result)
     # strip periods to normalize abbreviations, e.g. "U.S.A." -> "USA"
     result = _STRIP_PERIODS_ABBREV_REGEX.sub('', result)
     # replace other punctuations with spaces eg. 
@@ -168,6 +179,7 @@ def normalize_for_scoring(name : str) -> str:
     Casing is also preserved.
     """
     nfc = unicodedata.normalize('NFC', name)
+    nfc = _remove_stop_words(nfc)
     if all(c in _GERMAN_DIACRITICS or c.isascii() for c in nfc):
         return nfc
     return unidecode.unidecode_expect_nonascii(name)
@@ -363,7 +375,7 @@ class TantivySearchIndex(GeoSearchIndex):
                             continue
                         doc.add_text("search_key", search_key)
                         doc.add_text("search_words", search_key)
-                    phonetic_key = cologne_phonetic_normalize(nfc_name)
+                    phonetic_key = cologne_phonetic_normalize(normalize_for_phonetics(nfc_name))
                     if phonetic_key.strip() != "":
                         doc.add_text("phonetic_key", phonetic_key)
                     # blob with the complete data of every entity known under this name; not indexed
@@ -876,7 +888,7 @@ class TantivySearchIndex(GeoSearchIndex):
         #         )]
         #     )
         query_strings = normalized_search_strings(_remove_stop_words(expanded_query))
-        phonetic_query_string = cologne_phonetic_normalize(expanded_query)
+        phonetic_query_string = cologne_phonetic_normalize(normalize_for_phonetics(expanded_query))
         if expand_abbreviations:
             abbrev_pattern = abbreviation_pattern_to_regexes(expanded_query)
         else: abbrev_pattern = None
@@ -1175,8 +1187,8 @@ class GeoDBSearch(LinkingStep):
                 "Computed edit distance %d and fuzzy score %.3f for query %r vs alt name %r",
                 edit_distance, fuzzy_score, query_for_scoring, alt_name_for_scoring
             )
-            query_phonetic_key = phonetics_for_scoring(index_result.nfc_query)
-            alt_name_phonetic_key = phonetics_for_scoring(nfc_alt_name)
+            query_phonetic_key = phonetics_for_scoring(normalize_for_phonetics(index_result.nfc_query))
+            alt_name_phonetic_key = phonetics_for_scoring(normalize_for_phonetics(nfc_alt_name))
             phonetic_dist, phonetic_score = similarity_and_distance(query_phonetic_key, alt_name_phonetic_key, 10)
             self.logger.debug(
                 "Computed phonetic distance %d and score %.3f for query phonetic key %r vs alt name phonetic key %r",

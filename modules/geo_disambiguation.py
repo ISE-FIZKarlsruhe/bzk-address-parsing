@@ -32,10 +32,12 @@ DISAMBIGUATION_FACTOR_PRIORITY = [
     "population_count"
 ]
 
+# Higher value means more impact in the decision
 WEIGHTED_DISAMBIGUATION_FACTORS = {
-    "child_parent_likelihood" : 1,
-    "phonetic_score" : 2,
-    "fuzzy_similarity_score" : 2
+    "child_parent_likelihood" : 3,
+    "phonetic_score" : 1,
+    "fuzzy_similarity_score" : 1,
+    "entity_types_matching_preferred" : 1
 }
 
 NA_SCORE = AnnotatedScore(0.0, "Not applicable")
@@ -166,12 +168,19 @@ class Disambiguator:
             score_value = scores.get(score_name)
             if isinstance(score_value, AnnotatedScore):
                 score_value = score_value.score
-            if score_value:
-                score_sum += score_value * score_weight
+            if score_value is not None:
+                score_contrib = score_value * score_weight
+                score_sum += score_contrib
                 weight_sum += score_weight
+                self.logger.debug(
+                    "Factor %s with weight of %.2f and score of %.2f contributes %.2f to the weighted score", 
+                    score_name, score_weight, score_value, score_contrib
+                )
         if weight_sum == 0:
-            return 0
-        return AnnotatedScore(score_sum / weight_sum, "Weighted sum")
+            return AnnotatedScore(0, "No factors match")
+        weighted_score = score_sum / weight_sum
+        self.logger.debug("Final weighted score: %.2f / %.2f = %.2f", score_sum, weight_sum, weighted_score)
+        return AnnotatedScore(weighted_score, "Weighted sum")
 
 
     def _score_individual_match(self, entity: MatchedEntity, name: MatchedName, bzk_field : BZKFieldName) -> ScoredMatch:
@@ -246,22 +255,78 @@ class Disambiguator:
         """
         parent_entity = parent.geographical_name.entity
         child_entity = child.geographical_name.entity
+        logger = self.logger.getChild("parent_child_scoring")
+        logger.debug(
+            "Scoring hierarchical likelihood between parent %r (%r) and child %r (%r)", 
+            parent.cleaned_alt_name, parent.geographical_name.entity.iri,
+            child.cleaned_alt_name, child.geographical_name.entity.iri
+        )
         if parent_entity.iri in child_entity.other_parent_iris:
+            logger.debug(
+                "An explicit informal relationship is set between parent %r (%r) and child %r (%r), setting score to 1", 
+                parent.cleaned_alt_name, parent.geographical_name.entity.iri,
+                child.cleaned_alt_name, child.geographical_name.entity.iri
+            )
             return AnnotatedScore(1, "Informal relationship")
         if min(parent_entity.possible_entity_types) <= max(child_entity.possible_entity_types):
             not_null_codes = 1
             if parent_entity.country.iso_code == child_entity.country.iso_code:
+                logger.debug(
+                    "Country code %r matches between parent %r (%r) and child %r (%r)",
+                    parent_entity.country.iso_code,
+                    parent.cleaned_alt_name, parent.geographical_name.entity.iri,
+                    child.cleaned_alt_name, child.geographical_name.entity.iri
+                )
                 codes_in_common = 1 
             else:
+                logger.debug(
+                    "Country codes %r and %r differ between parent %r (%r) and child %r (%r)",
+                    parent_entity.country.iso_code, child_entity.country.iso_code,
+                    parent.cleaned_alt_name, parent.geographical_name.entity.iri,
+                    child.cleaned_alt_name, child.geographical_name.entity.iri
+                )
                 return AnnotatedScore(0, "Different countries")
-            for parent_code, child_code in zip(parent_entity.admin_codes, child_entity.admin_codes):
+            for i, (parent_code, child_code) in enumerate(zip(parent_entity.admin_codes, child_entity.admin_codes)):
                 if _is_admin_code_null(parent_code):
-                    break
+                    logger.debug(
+                        "Admin %d code %r is considered null on the parent %r (%r); all codes match up to the parent's level, setting score to 1",
+                        i, parent_code,
+                        parent.cleaned_alt_name, parent.geographical_name.entity.iri
+                    )
+                    return AnnotatedScore(1, "Administrative Codes match up to parent's level")
                 not_null_codes += 1
                 if parent_code == child_code:
+                    logger.debug(
+                        "Admin %d codes %r match between parent %r (%r) and child %r (%r)",
+                        i, parent_code,
+                        parent.cleaned_alt_name, parent.geographical_name.entity.iri,
+                        child.cleaned_alt_name, child.geographical_name.entity.iri
+                    )
                     codes_in_common += 1
-            return AnnotatedScore(codes_in_common / not_null_codes, "Administrative Code match ratio")
+                else:
+                    score = codes_in_common / not_null_codes
+                    logger.debug(
+                        "Admin %d codes %r and %r differ between parent %r (%r) and child %r (%r), setting score to %.2f",
+                        i, parent_code, child_code,
+                        parent.cleaned_alt_name, parent.geographical_name.entity.iri,
+                        child.cleaned_alt_name, child.geographical_name.entity.iri,
+                        score
+                    )
+                    return AnnotatedScore(score, "Administrative Code match ratio")
+            logger.debug(
+                "Full admin code match between parent %r (%r) and child %r (%r), setting score to 1",
+                parent.cleaned_alt_name, parent.geographical_name.entity.iri,
+                child.cleaned_alt_name, child.geographical_name.entity.iri,
+                score
+            )
+            return AnnotatedScore(1, "Administrative Code full match")
         else:
+            logger.debug(
+                "Entity type mismatch between parent %r (%r) and child %r (%r): parent with entity types %r cannot possibly outrank child with entity types %r; setting score to 0",
+                parent.cleaned_alt_name, parent.geographical_name.entity.iri,
+                child.cleaned_alt_name, child.geographical_name.entity.iri,
+                parent_entity.possible_entity_types, child_entity.possible_entity_types
+            )
             return AnnotatedScore(0, "Entity type mismatch")
         
     def _score_regional_term_match(
@@ -357,6 +422,11 @@ class Disambiguator:
         for region_hint in address.region_hints:
             region_hints[region_hint.source_entity_id].append(region_hint)
         for match in entity.matches:
+            self.logger.debug(
+                "Cross matching %r (%r) of type %r to other entities", 
+                match.nfc_alt_name, match.geographical_name.entity.iri,
+                entity.entity_type.name
+            )
             matched = {id(e): ScoredMatch(None, {}) for e in address.entities if e.entity_type in [GeographicalEntityType.Neighborhood, GeographicalEntityType.City, GeographicalEntityType.Region, GeographicalEntityType.State, GeographicalEntityType.Country, GeographicalEntityType.AboveCity, GeographicalEntityType.Unknown]}
             matched[id(entity)] = self._score_individual_match(entity, match, bzk_field)
             matched[id(entity)].scores["child_parent_likelihood"] = AnnotatedScore(1.0, "Reference match")
@@ -368,8 +438,19 @@ class Disambiguator:
             for other_entity in address.entities:
                 if other_entity is entity or not isinstance(other_entity, MatchedEntity) or other_entity.matches is None or len(other_entity.matches) == 0:
                     continue
+                self.logger.debug(
+                    "Cross matching %r (%r) to entities of type %r", 
+                    match.nfc_alt_name, match.geographical_name.entity.iri,
+                    other_entity.entity_type.name
+                )
                 best_other_match_scored = ScoredMatch(None, {})
                 for other_match in other_entity.matches:
+                    self.logger.debug(
+                        "Scoring potential cross match %r (%r) of type %r against reference entity %r (%s)",
+                        other_match.nfc_alt_name, other_match.geographical_name.entity.iri,
+                        entity.entity_type.name,
+                        match.nfc_alt_name, match.geographical_name.entity.iri,
+                    )
                     scored_match = self._score_individual_match(other_entity, other_match, bzk_field)
                     if entity.entity_type < other_entity.entity_type:
                         scored_match.scores["child_parent_likelihood"] = self._score_parent_child(match, other_match)
@@ -380,15 +461,51 @@ class Disambiguator:
                     if regional_term_match is not None:
                         scored_match.scores["regional_term_match"] = regional_term_match
                     scored_match.scores["weighted_score"] = self._calculate_weighted_score(scored_match.scores)
+                    self.logger.debug(
+                        "Scores for other entity %r (%r) set: %r",
+                        other_match.nfc_alt_name, other_match.geographical_name.entity.iri,
+                        scored_match.scores
+                    )
                     if self._prune_match(match, other_entity, scored_match):
+                        self.logger.debug(
+                            "Pruning entity %r (%r)",
+                            other_match.nfc_alt_name, other_match.geographical_name.entity.iri
+                        )
                         continue
                     old_scores = best_other_match_scored.scores
                     if best_other_match_scored.match == None or _score_dict_to_tuple(scored_match, self.priority) > _score_dict_to_tuple(old_scores, self.priority):
                         best_other_match_scored = ScoredMatch(other_match, scored_match.scores)
+                        self.logger.debug(
+                            "Best match for entity %r set to %r (%r)",
+                            other_entity.entity_type.name,
+                            best_other_match_scored.match.nfc_alt_name, best_other_match_scored.match.geographical_name.entity.iri
+                        )
                         if other_entity.entity_type > finest_entity.entity_type:
                             finest_entity = other_entity
+                if best_other_match_scored.match is None:
+                    self.logger.debug("No match for entity %r", other_entity.entity_type.name)
+                else:
+                    self.logger.debug(
+                        "Match %r (%r) with scores (%r) selected for entity %r", 
+                        best_other_match_scored.match.nfc_alt_name, best_other_match_scored.match.geographical_name.entity.iri,
+                        best_other_match_scored.scores,
+                        other_entity.entity_type.name
+                    )
                 matched[id(other_entity)] = best_other_match_scored
+            if self.logger.isEnabledFor(logging.DEBUG):
+                self.logger.debug(
+                    "Cross matching complete for %r (%r) of type %r. Matches: %r",
+                    match.nfc_alt_name, match.geographical_name.entity.iri,
+                    entity.entity_type.name,
+                    [s for s in matched.values()]
+                )
             scored_match = FrozenDict(_average_scores([s for s in matched.values()]))
+            self.logger.debug(
+                "Final average scores for %r (%r) of type %r: %r",
+                match.nfc_alt_name, match.geographical_name.entity.iri,
+                entity.entity_type.name,
+                scored_match
+            )
             possible_addresses.append(LinkedAddress(
                 finest_grain_entity=finest_entity.link_to(matched[id(finest_entity)].match, matched[id(finest_entity)].scores),
                 reference_entity=entity.link_to(match, matched[id(entity)].scores),
