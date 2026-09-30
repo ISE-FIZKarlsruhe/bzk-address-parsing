@@ -580,6 +580,72 @@ def plot_linking_status_pie(counts: pd.Series, title: str) -> None:
     counts.plot(kind='pie', title=title, autopct='%1.1f%%', ylabel='', figsize=(6, 6), colors=[colors[label] for label in counts.index]).figure.tight_layout()
 
 
+# Coarsest to finest, to order the partial link entity types
+_ENTITY_TYPE_ORDER = ["Country", "State", "Region", "District", "AboveCity", "City", "Unknown", "Neighborhood"]
+
+
+def partial_link_entity_type_counts(outcomes: list[entity_linking.LinkingOutcome], ground_truth: pd.DataFrame) -> pd.Series:
+    """Number of partially linked addresses per entity type they were linked up to."""
+    entity_types = [
+        outcome.entity_type
+        for outcome, status in zip(outcomes, link_statuses(outcomes, ground_truth))
+        if status == LinkStatus.PARTIALLY_LINKED
+    ]
+    counts = pd.Series(entity_types, dtype=object).value_counts()
+    return counts.sort_index(key=lambda index: [
+        _ENTITY_TYPE_ORDER.index(t) if t in _ENTITY_TYPE_ORDER else len(_ENTITY_TYPE_ORDER) for t in index])
+
+
+class FailedToLinkReason:
+    NAME_NOT_MATCHED = "Name not matched"
+    STILL_AMBIGUOUS = "Still ambiguous"
+
+
+def failed_to_link_reason_counts(outcomes: list[entity_linking.LinkingOutcome], ground_truth: pd.DataFrame) -> pd.Series:
+    """
+    Number of addresses that failed to link, split between those left with
+    several candidates disambiguation could not choose from, and every other
+    failure (no candidate found for the name).
+    """
+    reasons = [
+        FailedToLinkReason.STILL_AMBIGUOUS
+        if outcome.disambiguation_status == entity_linking.DisambiguationStatus.AMBIGUOUS
+        else FailedToLinkReason.NAME_NOT_MATCHED
+        for outcome, status in zip(outcomes, link_statuses(outcomes, ground_truth))
+        if status == LinkStatus.FAILED_TO_LINK
+    ]
+    counts = pd.Series(reasons, dtype=object).value_counts()
+    order = [FailedToLinkReason.NAME_NOT_MATCHED, FailedToLinkReason.STILL_AMBIGUOUS]
+    return counts.sort_index(key=lambda index: [order.index(r) for r in index])
+
+
+def _pie_label_with_count(total: int) -> Callable[[float], str]:
+    return lambda pct: f"{pct:.1f}%\n({round(pct * total / 100)})"
+
+
+def plot_partial_and_failed_link_pies(
+    partial_link_counts: pd.Series, failed_to_link_counts: pd.Series, title: Optional[str] = None
+) -> None:
+    """Side by side pies: partial links by linked entity type (left), failed links by reason (right)."""
+    fig, (left, right) = plt.subplots(1, 2, figsize=(12, 6))
+    for ax, counts, ax_title, colormap in (
+        (left, partial_link_counts, f"{LinkStatus.PARTIALLY_LINKED}: linked up to", "Blues_r"),
+        (right, failed_to_link_counts, f"{LinkStatus.FAILED_TO_LINK}: reason", "Oranges_r"),
+    ):
+        if counts.empty:
+            ax.set_title(ax_title)
+            ax.text(0.5, 0.5, "No addresses", ha="center", va="center")
+            ax.axis("off")
+            continue
+        colors = plt.get_cmap(colormap)([0.2 + 0.6 * i / max(1, len(counts)) for i in range(len(counts))])
+        counts.plot(
+            kind="pie", ax=ax, title=f"{ax_title}\n({counts.sum()} addresses)", ylabel="",
+            autopct=_pie_label_with_count(counts.sum()), colors=colors)
+    if title:
+        fig.suptitle(title)
+    fig.tight_layout()
+
+
 def country_occurrences(outcomes: list[entity_linking.LinkingOutcome]) -> pd.Series:
     occurrences = defaultdict(int)
     for outcome in outcomes:
