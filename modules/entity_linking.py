@@ -40,7 +40,7 @@ import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 import time
-from typing import Iterable, Optional
+from typing import Iterable, NamedTuple, Optional
 
 import pandas as pd
 from tqdm.auto import tqdm
@@ -609,6 +609,29 @@ def link_field(
     return outcome
 
 
+class ParsedFieldEntities(NamedTuple):
+    # The row after the parsing hotfixes (see _hotfix_truncated_regex_city).
+    row: dict
+    raw_address: Optional[str]
+    entity_texts: dict[str, Optional[str]]
+    pre_linked_iris: dict[str, str]
+    # The entities linking searches for: the parsed ones plus AboveCity and
+    # the words recovered from those parsing left unassigned (see _build_entities).
+    entities: list[RawEntity]
+
+
+def parse_field_entities(row, prefix: str) -> ParsedFieldEntities:
+    """The entities to link for one address field of a parsed row, as link_field builds them."""
+    row = _hotfix_truncated_regex_city(row, prefix)
+    raw_address = _clean_optional_str(row.get(f"{prefix}.raw"))
+    entity_texts = _single_word_regex_city_as_unknown(row, prefix, _extract_entity_texts(row, prefix))
+    above_city_text = _clean_optional_str(row.get(f"{prefix}.AboveCity.text"))
+    pre_linked_iris = _pre_linked_iris(row, prefix)
+    missed_words = _missed_words(raw_address, _assigned_texts(row, prefix))
+    entities = _build_entities(entity_texts, above_city_text, pre_linked_iris, missed_words, raw_address)
+    return ParsedFieldEntities(row, raw_address, entity_texts, pre_linked_iris, entities)
+
+
 def _link_field(
     row,
     prefix: str,
@@ -620,13 +643,7 @@ def _link_field(
     def _elapsed():
         nonlocal start
         return time.monotonic() - start
-    row = _hotfix_truncated_regex_city(row, prefix)
-    raw_address = _clean_optional_str(row.get(f"{prefix}.raw"))
-    entity_texts = _single_word_regex_city_as_unknown(row, prefix, _extract_entity_texts(row, prefix))
-    above_city_text = _clean_optional_str(row.get(f"{prefix}.AboveCity.text"))
-    pre_linked_iris = _pre_linked_iris(row, prefix)
-    missed_words = _missed_words(raw_address, _assigned_texts(row, prefix))
-    entities = _build_entities(entity_texts, above_city_text, pre_linked_iris, missed_words, raw_address)
+    row, raw_address, entity_texts, pre_linked_iris, entities = parse_field_entities(row, prefix)
     address = AddressProcessingData(
         card_id=row.get("card_id"),
         id=str(row.get("address_id", row.get("filename"))),

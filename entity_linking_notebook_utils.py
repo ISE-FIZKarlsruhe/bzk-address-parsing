@@ -31,6 +31,7 @@ from modules.camp_search import CampReferenceMatcher
 from modules.entity_linking import SearchStatus
 from modules.entity_linking_eval_metrics import eval_entity_linking, normalize_iri
 from modules.geo_disambiguation import Disambiguator
+from modules.pipeline.linked_data import LinkedAddress
 from modules.regex_patterns import regex_parse
 from modules.utils import format_time
 from parse_with_llms import _rename_llm_output_columns, prepare_llm
@@ -760,6 +761,14 @@ class DisambiguationErrorExplainer:
                 sb.append(f"    {entity_type:<13} {parsed_text!r:<30} {true_text!r:<30}{marker}")
         else:
             sb.append("  parse result agrees with the ground-truth annotation")
+        missed_word_entities = [
+            entity for entity in entity_linking.parse_field_entities(parsed_row.to_dict(), prefix).entities
+            if entity.is_missed_word
+        ]
+        if missed_word_entities:
+            sb.append("  entities added from words parsing left unassigned (missed word recovery):")
+            for entity in missed_word_entities:
+                sb.append(f"    {entity.entity_type.name:<13} {entity.raw_text!r}")
         _display_block(sb)
         sb.clear()
 
@@ -771,11 +780,71 @@ class DisambiguationErrorExplainer:
         pred_iri = normalize_iri(outcome.iri)
         sb.append(f"  predicted:    {outcome.entity_type} -> {pred_iri}")
         sb.append(f"  search status: {outcome.search_status}, disambiguation status: {outcome.disambiguation_status}, tags: {list(outcome.tags)}")
+        _display_block(sb)
+        sb.clear()
+        self._display_address_entities(outcome.address)
         if pred_iri == true_iri:
             sb.append("The pipeline already links this address correctly.")
         else:
             self._explain_outcome(sb, outcome, true_iri, true_entity_type, true_raw_text)
         _display_block(sb)
+
+    @staticmethod
+    def _most_likely_candidate(address) -> tuple[Optional[str], Optional[LinkedAddress]]:
+        """
+        (description, candidate) of the most likely linked address: the linked
+        one, or else (still ambiguous, or linked to the candidates' common
+        parent, which is not one of them) the best ranked likely/possible one.
+        """
+        if address is None:
+            return None, None
+        if address.linked_to is not None and not address.linked_to_common_parent:
+            return "linked address", address.linked_to
+        if address.likely_links:
+            return "best ranked of the tied likely addresses", address.likely_links[0]
+        if address.possible_links:
+            return "best ranked possible address", address.possible_links[0]
+        return None, None
+
+    def _display_address_entities(self, address) -> None:
+        """
+        Every entity of the address, with its raw value and what it is linked
+        to in the most likely linked address (see _most_likely_candidate).
+        """
+        if address is None or not address.entities:
+            return
+        description, candidate = self._most_likely_candidate(address)
+        linked_by_id = {} if candidate is None else {e.address_entity_id: e for e in candidate.entities}
+        finest_id = None if candidate is None else candidate.finest_grain_entity.address_entity_id
+        reference_id = None if candidate is None else candidate.reference_entity.address_entity_id
+        lines = [
+            f"Entities, linked as in the {description}:" if candidate is not None
+            else "Entities (no candidate address to link them):",
+            "",
+            "| entity type | raw value | linked iri | linked name | country | |",
+            "|---|---|---|---|---|---|",
+        ]
+        for entity in address.entities:
+            notes = []
+            if entity.address_entity_id == reference_id:
+                notes.append("reference")
+            if entity.address_entity_id == finest_id:
+                notes.append("finest")
+            if entity.is_missed_word:
+                notes.append("missed word")
+            if entity.pre_linked_iri:
+                notes.append(f"pre-linked {entity.pre_linked_iri}")
+            linked = linked_by_id.get(entity.address_entity_id)
+            if linked is None:
+                iri = name = country = "—"
+            else:
+                geographical_entity = linked.linked_to.geographical_name.entity
+                iri = _entity_iri(linked)
+                name = linked.linked_to.geographical_name.name
+                country = geographical_entity.country.iso_code if geographical_entity.country is not None else "—"
+            lines.append(
+                f"| {entity.entity_type.name} | `{entity.raw_text!r}` | {iri} | {name} | {country} | {', '.join(notes)} |")
+        display(Markdown("\n".join(lines)))
 
     def _camp_reference_keys_for(self, iri: str) -> dict[str, "CampMatch"]:
         """Every key of the camp/ghetto reference index that resolves to `iri` (geonames or wikidata)."""
