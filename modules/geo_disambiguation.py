@@ -5,8 +5,9 @@ import pprint
 from typing import Literal, Optional, NamedTuple
 
 from modules.pipeline.geographical_entity import GeographicalBranch, GeographicalEntityType, GeographicalName
-from modules.geo_db_search import ABOVE_CITY_ENTITY_TYPES, ENTITY_LINKING_LOGGER
-from modules.pipeline.linked_data import BZKFieldName, AddressProcessingData, LinkedEntity, MatchedEntity, MatchedName, LinkedAddress, RawEntity, RegionHintEntity
+from modules.geo_db_search import ABOVE_CITY_ENTITY_TYPES, ENTITY_LINKING_LOGGER, partial_match_query_span, score_name_similarity
+from modules.pipeline.linked_data import AddressSpan, BZKFieldName, AddressProcessingData, LinkedEntity, MatchedEntity, MatchedName, LinkedAddress, RawEntity, RegionHintEntity
+import uuid
 from modules.pipeline.storage.encoding_util import decode_from_dict
 import dataclasses
 import duckdb
@@ -15,6 +16,7 @@ import threading
 from collections import defaultdict
 from modules.pipeline.linked_data import AnnotatedScore
 from modules.pipeline.storage.frozendict import FrozenDict
+import itertools
 import math
 
 def _is_admin_code_null(code : Optional[str]) -> bool:
@@ -709,7 +711,109 @@ class Disambiguator:
                 scores=scored_match
             ))
         return sorted(possible_addresses, key=lambda a: _score_dict_to_tuple(a.scores, self.priority), reverse=True)
-    
+
+    def _split_entity(
+            self, address : AddressProcessingData, entity : MatchedEntity
+        ) -> list[tuple[AddressProcessingData, tuple[MatchedEntity, ...]]]:
+        """
+        Phase 'split entity': cross matches the partial word matches of the
+        entity among themselves. Two of them matching different (non
+        overlapping) parts of the entity's text (e.g. "Ulm" and "Donau" in
+        "Ulm/Donau") hint that the entity names a place along with a
+        qualifier (a river, a region) rather than one place under a longer
+        name. For each such distinct pair of parts, the entity is split into
+        one entity per part, holding the partial matches within that part,
+        their fuzzy and phonetic scores recalculated against the part alone.
+        The leading part keeps the entity type, while the trailing one, being
+        the qualifier, is an AboveCity when the entity is finer than that.
+
+        Returns, for each split, the address with the entity replaced by its
+        parts, and those parts.
+        """
+        spans : dict[int, tuple[int, int]] = {}
+        for i, match in enumerate(entity.matches):
+            if not match.is_partial_word_match or match.cleaned_alt_name is None:
+                continue
+            span = partial_match_query_span(match.nfc_query, match.cleaned_alt_name)
+            if span is not None:
+                spans[i] = span
+        splits = {}
+        for i, j in itertools.combinations(spans, 2):
+            m1, m2 = entity.matches[i], entity.matches[j]
+            (s1, e1), (s2, e2) = sorted((spans[i], spans[j]))
+            if m1.nfc_query != m2.nfc_query or e1 > s2:
+                continue
+            key = (m1.nfc_query, (s1, e1), (s2, e2))
+            if key not in splits:
+                self.logger.debug(
+                    "Phase 'split entity' for %r: partial matches %r (%s) and %r (%s) match different parts "
+                    "%r and %r of the query %r",
+                    entity.raw_text, m1.nfc_alt_name, m1.geographical_name.entity.iri,
+                    m2.nfc_alt_name, m2.geographical_name.entity.iri,
+                    m1.nfc_query[s1:e1], m1.nfc_query[s2:e2], m1.nfc_query)
+                splits[key] = None
+        result = []
+        for nfc_query, *part_spans in splits:
+            parts = []
+            for part_index, (start, end) in enumerate(part_spans):
+                part_text = nfc_query[start:end]
+                part_matches = []
+                for i, span in spans.items():
+                    if span[0] < start or span[1] > end:
+                        continue
+                    match = entity.matches[i]
+                    edit_distance, fuzzy_score, phonetic_score = score_name_similarity(
+                        part_text, match.nfc_alt_name, self.logger)
+                    part_matches.append(dataclasses.replace(
+                        match, nfc_query=part_text, edit_distance=edit_distance,
+                        fuzzy_score=fuzzy_score, phonetic_score=phonetic_score))
+                entity_type = entity.entity_type
+                if part_index > 0 and entity_type > GeographicalEntityType.AboveCity:
+                    entity_type = GeographicalEntityType.AboveCity
+                # the span within the address is only known when the query
+                # is the entity's text as is (e.g. not abbreviation expanded)
+                span = None
+                if entity.span is not None and entity.raw_text == nfc_query:
+                    span = AddressSpan(entity.span.start + start, entity.span.start + end)
+                parts.append(dataclasses.replace(
+                    entity, address_entity_id=str(uuid.uuid4()), raw_text=part_text,
+                    entity_type=entity_type, span=span, matches=tuple(part_matches)))
+                self.logger.debug(
+                    "Phase 'split entity' for %r: part %r (%s) with %d matches",
+                    entity.raw_text, part_text, entity_type.name, len(part_matches))
+            split_address = dataclasses.replace(address, entities=[
+                part for e in address.entities for part in (parts if e is entity else [e])
+            ])
+            result.append((split_address, tuple(parts)))
+        return result
+
+    def _reference_entity_candidates(self, address : AddressProcessingData, entity : MatchedEntity) -> list[LinkedAddress]:
+        """
+        Every candidate address (not yet pruned) for entity as the reference
+        entity, best first, including those of the entity's splits (see
+        _split_entity) with any of its parts as the reference entity.
+        """
+        candidates = self._score_ambiguous_matches(address, entity, address.bzk_field_name)
+        for split_address, parts in self._split_entity(address, entity):
+            for part in parts:
+                candidates.extend(self._score_ambiguous_matches(split_address, part, address.bzk_field_name))
+        return sorted(candidates, key=lambda a: _score_dict_to_tuple(a.scores, self.priority), reverse=True)
+
+    def _prune_reason(self, candidate: LinkedAddress) -> Optional[str]:
+        """
+        Why the candidate address is pruned based on score thresholds, or None
+        if it is not.
+        """
+        score_dict = candidate.scores
+        for factor, threshold in self.score_prune_thresholds.items():
+            if score_dict.get(factor, 0.0) < threshold:
+                return f"{factor} score {score_dict.get(factor, 0.0)} below threshold {threshold}"
+        # finest_grain_entity = candidate.finest_grain_entity.linked_to.geographical_name.entity
+        # if finest_grain_entity.country.continent != "EU" and finest_grain_entity.country.iso_code not in ("IL", "US"):
+        #     if score_dict.get("parent_child_likelihood", 0.0) * score_dict.get("fuzzy_similarity_score", 0.0) < 0.5:
+        #         return True
+        return None
+
     def _prune(self, candidate: LinkedAddress) -> bool:
         """
         Prune possible addresses based on score thresholds.
@@ -719,19 +823,10 @@ class Disambiguator:
         Returns:
             bool: True if the scores should be pruned, False otherwise.
         """
-        score_dict = candidate.scores
-        for factor, threshold in self.score_prune_thresholds.items():
-            if score_dict.get(factor, 0.0) < threshold:
-                if self.logger.isEnabledFor(logging.DEBUG):
-                    self.logger.debug(
-                        "Pruned candidate %s: %s score %s below threshold %s",
-                        _describe_linked_address(candidate), factor, score_dict.get(factor, 0.0), threshold)
-                return True
-        # finest_grain_entity = candidate.finest_grain_entity.linked_to.geographical_name.entity
-        # if finest_grain_entity.country.continent != "EU" and finest_grain_entity.country.iso_code not in ("IL", "US"):
-        #     if score_dict.get("parent_child_likelihood", 0.0) * score_dict.get("fuzzy_similarity_score", 0.0) < 0.5:
-        #         return True
-        return False
+        reason = self._prune_reason(candidate)
+        if reason is not None and self.logger.isEnabledFor(logging.DEBUG):
+            self.logger.debug("Pruned candidate %s: %s", _describe_linked_address(candidate), reason)
+        return reason is not None
 
     def disambiguate(self, address : AddressProcessingData) -> AddressProcessingData:
         """
@@ -764,7 +859,7 @@ class Disambiguator:
             self.logger.debug(
                 "Phase 'reference entity' for address %s: entity %r (%s) with %d matches, field %s",
                 address.id, entity.raw_text, entity.entity_type, len(entity.matches), address.bzk_field_name)
-            result = self._score_ambiguous_matches(address, entity, address.bzk_field_name)
+            result = self._reference_entity_candidates(address, entity)
             result = [r for r in result if not self._prune(r)]
             if self.logger.isEnabledFor(logging.DEBUG):
                 self.logger.debug(

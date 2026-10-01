@@ -304,6 +304,103 @@ def abbreviation_pattern_to_regexes(part : str) -> str:
     else:
         return f"({ascii_regex_pattern})|({german_regex_pattern})"
 
+_NAME_SCORING_LOGGER = ENTITY_LINKING_LOGGER.getChild("NameScoring")
+
+class NameSimilarity(NamedTuple):
+    edit_distance : int
+    fuzzy_score : float
+    phonetic_score : float
+
+def score_name_similarity(
+        nfc_query : str, nfc_alt_name : str, logger : logging.Logger = _NAME_SCORING_LOGGER
+    ) -> NameSimilarity:
+    """
+    Similarity between a query and a retrieved name, as used to score search
+    matches (see GeoDBSearch._parse_data) and to rescore them against part of
+    the query (see Disambiguator._split_entity): the edit distance and fuzzy
+    score between the names normalized for scoring, and the phonetic score
+    between their phonetic keys.
+    """
+    query_for_scoring = normalize_for_scoring(nfc_query)
+    alt_name_for_scoring = normalize_for_scoring(nfc_alt_name)
+    edit_distance, fuzzy_score = similarity_and_distance(
+        query_for_scoring, alt_name_for_scoring, 10, distance_function=levenshtein_for_scoring)
+    logger.debug(
+        "Computed edit distance %d and fuzzy score %.3f for query %r vs alt name %r",
+        edit_distance, fuzzy_score, query_for_scoring, alt_name_for_scoring
+    )
+    query_phonetic_key = phonetics_for_scoring(normalize_for_phonetics(nfc_query))
+    alt_name_phonetic_key = phonetics_for_scoring(normalize_for_phonetics(nfc_alt_name))
+    phonetic_dist, phonetic_score = similarity_and_distance(query_phonetic_key, alt_name_phonetic_key, 10)
+    logger.debug(
+        "Computed phonetic distance %d and score %.3f for query phonetic key %r vs alt name phonetic key %r",
+        phonetic_dist, phonetic_score, query_phonetic_key, alt_name_phonetic_key
+    )
+    return NameSimilarity(edit_distance, fuzzy_score, phonetic_score)
+
+# Max per-word edit distance tolerated when pairing a query word against a
+# candidate word in the partial word match (character-level typo tolerance,
+# e.g. "Frankfrut" vs "Frankfurt").
+PARTIAL_MATCH_WORD_DISTANCE = 1
+
+def pair_words(
+        query_words : list[str], candidate_words : list[str], max_distance : int = PARTIAL_MATCH_WORD_DISTANCE
+    ) -> tuple[list[tuple[int, int]], list[int], list[int]]:
+    """
+    Greedily pairs up words between the two lists, closest edit distance
+    first (within max_distance), each word used in at most one pair. Returns
+    the (query word index, candidate word index) pairs and the indices of the
+    words on either side left unpaired.
+    """
+    candidate_pairs = []
+    for qi, qword in enumerate(query_words):
+        for ci, cword in enumerate(candidate_words):
+            distance = levenshtein(qword, cword, max_distance)
+            if distance <= max_distance:
+                candidate_pairs.append((distance, qi, ci))
+    candidate_pairs.sort(key=lambda p: p[0])
+    used_query, used_candidate = set(), set()
+    pairs = []
+    for _, qi, ci in candidate_pairs:
+        if qi in used_query or ci in used_candidate:
+            continue
+        used_query.add(qi)
+        used_candidate.add(ci)
+        pairs.append((qi, ci))
+    unmatched_query = [i for i in range(len(query_words)) if i not in used_query]
+    unmatched_candidate = [i for i in range(len(candidate_words)) if i not in used_candidate]
+    return pairs, unmatched_query, unmatched_candidate
+
+_WORD_REGEX = re.compile(r"\w+")
+
+def partial_match_query_span(nfc_query : str, matched_key : str) -> Optional[tuple[int, int]]:
+    """
+    The part of nfc_query, as a (start, end) character span, that a partial
+    word match (see TantivySearchIndex._is_partial_word_match) shares with
+    the name it retrieved, matched_key being that name's normalized search
+    string: from the first to the last query word paired with one of the
+    name's words (stop words aside). The query words are paired under both
+    the basic and the german ascii normalization, as when searching (see
+    normalized_search_strings), keeping whichever pairs more words. None if
+    no query word pairs with the name.
+    """
+    tokens = list(_WORD_REGEX.finditer(nfc_query))
+    candidate_words = [w for w in matched_key.split(" ") if w and w not in _STOP_WORDS]
+    best_paired_tokens : list[int] = []
+    for normalize in (ascii_normalize, german_normalize):
+        token_indices, query_words = [], []
+        for i, token in enumerate(tokens):
+            word = normalize(token.group())
+            if word and word not in _STOP_WORDS:
+                token_indices.append(i)
+                query_words.append(word)
+        pairs, _, _ = pair_words(query_words, candidate_words)
+        if len(pairs) > len(best_paired_tokens):
+            best_paired_tokens = [token_indices[qi] for qi, _ in pairs]
+    if len(best_paired_tokens) == 0:
+        return None
+    return tokens[min(best_paired_tokens)].start(), tokens[max(best_paired_tokens)].end()
+
 class IndexSearchMatch(NamedTuple):
     score : float # score as returned by the the specific index search, meaning differs
     matched_key: str
@@ -378,10 +475,8 @@ class TantivySearchIndex(GeoSearchIndex):
     # German place-name qualifiers, none of which should on their own be
     # treated as the "real" identifying word of a name.
     _PARTIAL_MATCH_IDF_REFERENCE_WORDS = ("Alt", "Neu", "Bad", "Main")
-    # Max per-word edit distance tolerated when pairing a query word against
-    # a candidate word in the partial word match (character-level typo
-    # tolerance, e.g. "Frankfrut" vs "Frankfurt").
-    _PARTIAL_MATCH_WORD_DISTANCE = 1
+    # see PARTIAL_MATCH_WORD_DISTANCE
+    _PARTIAL_MATCH_WORD_DISTANCE = PARTIAL_MATCH_WORD_DISTANCE
     # Max number of indexed names containing a word for their branches to
     # still be extracted as a region hint (see _region_branches_for_word); a
     # word shared by more names than this is too widespread to point at
@@ -523,34 +618,6 @@ class TantivySearchIndex(GeoSearchIndex):
             for word in self._PARTIAL_MATCH_IDF_REFERENCE_WORDS
         )
 
-    def _pair_words(
-            self, query_words : list[str], candidate_words : list[str]
-        ) -> tuple[list[tuple[str, str]], list[int], list[int]]:
-        """
-        Greedily pairs up words between the two lists, closest edit distance
-        first (within _PARTIAL_MATCH_WORD_DISTANCE), each word used in at
-        most one pair. Returns the (query word, candidate word) pairs and the
-        indices of the words on either side left unpaired.
-        """
-        candidate_pairs = []
-        for qi, qword in enumerate(query_words):
-            for ci, cword in enumerate(candidate_words):
-                distance = levenshtein(qword, cword, self._PARTIAL_MATCH_WORD_DISTANCE)
-                if distance <= self._PARTIAL_MATCH_WORD_DISTANCE:
-                    candidate_pairs.append((distance, qi, ci))
-        candidate_pairs.sort(key=lambda p: p[0])
-        used_query, used_candidate = set(), set()
-        pairs = []
-        for _, qi, ci in candidate_pairs:
-            if qi in used_query or ci in used_candidate:
-                continue
-            used_query.add(qi)
-            used_candidate.add(ci)
-            pairs.append((query_words[qi], candidate_words[ci]))
-        unmatched_query = [i for i in range(len(query_words)) if i not in used_query]
-        unmatched_candidate = [i for i in range(len(candidate_words)) if i not in used_candidate]
-        return pairs, unmatched_query, unmatched_candidate
-
     def _is_partial_word_match(
             self, searcher : tantivy.Searcher, query_words : list[str], candidate_words : list[str]
         ) -> tuple[bool, list[str]]:
@@ -566,7 +633,19 @@ class TantivySearchIndex(GeoSearchIndex):
             self.logger.debug(
                 "Partial word match %s vs %s rejected: empty word list", query_words, candidate_words)
             return False, []
-        pairs, unmatched_query_idx, unmatched_candidate_idx = self._pair_words(query_words, candidate_words)
+        # a candidate whose words appear verbatim and in order in the query
+        # is accepted regardless of how informative its words are (e.g.
+        # "Neustadt" in "Neustadt Weinstrasse"), as long as it is not made
+        # up only of stop words
+        if any(w not in _STOP_WORDS for w in candidate_words) and \
+                f" {' '.join(candidate_words)} " in f" {' '.join(query_words)} ":
+            self.logger.debug(
+                "Partial word match %s vs %s accepted: candidate fully contained in query",
+                query_words, candidate_words)
+            return True, []
+        index_pairs, unmatched_query_idx, unmatched_candidate_idx = pair_words(
+            query_words, candidate_words, self._PARTIAL_MATCH_WORD_DISTANCE)
+        pairs = [(query_words[qi], candidate_words[ci]) for qi, ci in index_pairs]
         if len(pairs) == 0:
             # nothing matched at all: not even a partial match
             self.logger.debug(
@@ -1252,20 +1331,8 @@ class GeoDBSearch(LinkingStep):
 
             geographical_name=decode_from_dict(index_match.retrieved_data, GeographicalName)
             nfc_alt_name = unicodedata.normalize("NFC", geographical_name.name)
-            query_for_scoring = normalize_for_scoring(index_result.nfc_query)
-            alt_name_for_scoring = normalize_for_scoring(nfc_alt_name)
-            edit_distance, fuzzy_score = similarity_and_distance(query_for_scoring, alt_name_for_scoring, 10, distance_function=levenshtein_for_scoring)
-            self.logger.debug(
-                "Computed edit distance %d and fuzzy score %.3f for query %r vs alt name %r",
-                edit_distance, fuzzy_score, query_for_scoring, alt_name_for_scoring
-            )
-            query_phonetic_key = phonetics_for_scoring(normalize_for_phonetics(index_result.nfc_query))
-            alt_name_phonetic_key = phonetics_for_scoring(normalize_for_phonetics(nfc_alt_name))
-            phonetic_dist, phonetic_score = similarity_and_distance(query_phonetic_key, alt_name_phonetic_key, 10)
-            self.logger.debug(
-                "Computed phonetic distance %d and score %.3f for query phonetic key %r vs alt name phonetic key %r",
-                phonetic_dist, phonetic_score, query_phonetic_key, alt_name_phonetic_key
-            )
+            edit_distance, fuzzy_score, phonetic_score = score_name_similarity(
+                index_result.nfc_query, nfc_alt_name, self.logger)
             matched_name = MatchedName(
                 geographical_name=geographical_name,
                 nfc_query=index_result.nfc_query,

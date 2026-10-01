@@ -31,7 +31,7 @@ from modules.camp_search import CampReferenceMatcher
 from modules.entity_linking import SearchStatus
 from modules.entity_linking_eval_metrics import eval_entity_linking, normalize_iri
 from modules.geo_disambiguation import Disambiguator
-from modules.pipeline.linked_data import LinkedAddress
+from modules.pipeline.linked_data import LinkedAddress, MatchedEntity
 from modules.regex_patterns import regex_parse
 from modules.utils import format_time
 from parse_with_llms import _rename_llm_output_columns, prepare_llm
@@ -800,7 +800,7 @@ class DisambiguationErrorExplainer:
         sb.clear()
         self._display_address_entities(outcome.address)
         if pred_iri == true_iri:
-            sb.append("The pipeline already links this address correctly.")
+            sb.append("✅ The pipeline already links this address correctly.")
         else:
             self._explain_outcome(sb, outcome, true_iri, true_entity_type, true_raw_text)
         _display_block(sb)
@@ -840,8 +840,15 @@ class DisambiguationErrorExplainer:
             "| entity type | raw value | linked iri | linked name | country | |",
             "|---|---|---|---|---|---|",
         ]
-        for entity in address.entities:
+        # entities the Disambiguator split from an address entity (see
+        # Disambiguator._split_entity) only exist in the candidate
+        address_entity_ids = {e.address_entity_id for e in address.entities}
+        split_parts = [] if candidate is None else [
+            e for e in candidate.entities if e.address_entity_id not in address_entity_ids]
+        for entity in [*address.entities, *split_parts]:
             notes = []
+            if entity in split_parts:
+                notes.append("split part")
             if entity.address_entity_id == reference_id:
                 notes.append("reference")
             if entity.address_entity_id == finest_id:
@@ -913,24 +920,70 @@ class DisambiguationErrorExplainer:
             differences.append(("AboveCity", above_city, None))
         return differences
 
+    def _explain_missing_true_candidate(self, sb: list[str], address, true_iri) -> None:
+        """
+        For a true IRI that is no candidate address' finest entity: whether
+        GeoDBSearch retrieved it at all, and if so, why disambiguation dropped
+        it (pruned, or never reached as a reference entity).
+        """
+        searched = [
+            (entity, match) for entity in address.entities
+            if isinstance(entity, MatchedEntity) and entity.matches
+            for match in entity.matches
+            if normalize_iri(match.geographical_name.entity.iri) == true_iri
+        ]
+        if not searched:
+            sb.append(f"❌ GeoDBSearch did not retrieve the true IRI {true_iri} for any entity.")
+            return
+        for entity, match in searched:
+            sb.append(f"  GeoDBSearch retrieved the true IRI for {entity.entity_type.name} {entity.raw_text!r} as "
+                      f"{match.nfc_alt_name!r} (fuzzy {match.fuzzy_score:.3f}, phonetic {match.phonetic_score:.3f}, "
+                      f"partial word match {match.is_partial_word_match}).")
+        # Rescoring would repeat the disambiguation debug logs already shown
+        current_level = geo_db_search.ENTITY_LINKING_LOGGER.level
+        geo_db_search.ENTITY_LINKING_LOGGER.setLevel(logging.WARNING)
+        try:
+            for entity in {id(entity): entity for entity, _ in searched}.values():
+                true_candidates = [
+                    c for c in self.disambiguator._reference_entity_candidates(address, entity)
+                    if _entity_iri(c.finest_grain_entity) == true_iri
+                ]
+                if not true_candidates:
+                    sb.append(f"❌ no candidate address with {entity.raw_text!r} as the reference entity has the true IRI "
+                              f"as its finest entity (cross matching linked a finer entity).")
+                elif all(self.disambiguator._prune_reason(c) is not None for c in true_candidates):
+                    sb.append(f"❌ the disambiguator pruned all {len(true_candidates)} candidate address(es) with the true IRI "
+                              f"(reference entity {entity.raw_text!r}); the best ranked one because its "
+                              f"{self.disambiguator._prune_reason(true_candidates[0])}.")
+                else:
+                    sb.append(f"❌ a candidate address with the true IRI survives pruning with {entity.raw_text!r} as the "
+                              f"reference entity, but disambiguation settled on an earlier reference entity.")
+        finally:
+            geo_db_search.ENTITY_LINKING_LOGGER.setLevel(current_level)
+
     def _explain_geo_db_outcome(self, sb: list[str], address, true_iri, true_entity_type, true_raw_text) -> None:
         """
         Compares the GeoDBSearch + disambiguation candidates (already logged by
         link_field) against the ground truth: whether the true IRI was among
         them, and if so which factor ranked the predicted candidate above it.
         """
-        if not address.possible_links or true_iri is None:
+        if true_iri is None:
+            return
+        if not address.possible_links:
+            self._explain_missing_true_candidate(sb, address, true_iri)
             return
 
         predicted = address.linked_to
         if predicted is None:
             if any(_entity_iri(c.finest_grain_entity) == true_iri for c in address.likely_links):
-                sb.append(f"  true IRI {true_iri} is among the tied likely candidates.")
+                sb.append(f"❌ true IRI {true_iri} is among the tied likely candidates.")
+            elif any(_entity_iri(c.finest_grain_entity) == true_iri for c in address.possible_links):
+                sb.append(f"❌ true IRI {true_iri} is not among the tied likely candidates "
+                          f"(it is among the lower-ranked possible_links).")
             else:
-                in_possible = any(_entity_iri(c.finest_grain_entity) == true_iri for c in address.possible_links)
-                sb.append(f"  true IRI {true_iri} is not among the tied likely candidates"
-                      + (" (it is among the lower-ranked possible_links)." if in_possible
-                         else f" nor among the {len(address.possible_links)} possible_links."))
+                sb.append(f"❌ true IRI {true_iri} is not among the tied likely candidates "
+                          f"nor among the {len(address.possible_links)} possible_links.")
+                self._explain_missing_true_candidate(sb, address, true_iri)
             return
 
         true_candidate = next(
@@ -950,7 +1003,9 @@ class DisambiguationErrorExplainer:
                       f"whose finest entity is {c.finest_grain_entity.entity_type.name} {_entity_iri(c.finest_grain_entity)} "
                       f"(granularity mismatch).")
             else:
-                sb.append(f"  true IRI {true_iri} is not among the {len(address.possible_links)} candidate(s) GeoDBSearch found.")
+                sb.append(f"❌ true IRI {true_iri} is not among the {len(address.possible_links)} candidate "
+                          f"address(es) left after disambiguation.")
+                self._explain_missing_true_candidate(sb, address, true_iri)
             return
 
         sb.append(f"  predicted: {_entity_iri(predicted.finest_grain_entity)} ({predicted.finest_grain_entity.linked_to.geographical_name.name})")
@@ -971,9 +1026,9 @@ class DisambiguationErrorExplainer:
             table.append(f"| `{factor}` | {pred_score:.3f} | {true_score:.3f} | {marker} |")
         display(Markdown("\n".join(table)))
         if deciding_factor is not None:
-            sb.append(f"  The predicted candidate ranked higher because of '{deciding_factor}'.")
+            sb.append(f"❌ The predicted candidate ranked higher because of '{deciding_factor}'.")
         else:
-            sb.append("  Both candidates have identical average scores across all factors; "
+            sb.append("❌ Both candidates have identical average scores across all factors; "
                   "see the per-entity scores below for the actual tie-breaker.")
 
         sb.append("\n  Per-entity scores:")
@@ -994,29 +1049,29 @@ class DisambiguationErrorExplainer:
         if true_entity_type is not None and not any(
             e.entity_type.name in (true_entity_type, "Unknown") for e in address.entities
         ):
-            sb.append(f"  !! parsing did not extract a {true_entity_type} entity, which the ground truth links "
+            sb.append(f"❌ !! parsing did not extract a {true_entity_type} entity, which the ground truth links "
                   f"({true_raw_text!r}); later steps can at best link a coarser entity.")
 
         if status == SearchStatus.PRE_LINKED_DURING_PARSING:
-            sb.append("  the id pre-linked during parsing is wrong.")
+            sb.append("❌ the id pre-linked during parsing is wrong.")
             return
         if status.startswith(SearchStatus.NO_LOCATION):
-            sb.append("  tagging treated a linkable location as not a location.")
+            sb.append("❌ tagging treated a linkable location as not a location.")
             return
 
         true_camp_keys = self._camp_reference_keys_for(true_iri) if true_iri is not None else {}
         true_camp = next(iter(true_camp_keys.values()), None)
         if status == SearchStatus.CAMP_REFERENCE:
             if true_iri is None:
-                sb.append("  the camp/ghetto match is wrong: the ground truth says this is not a linkable location.")
+                sb.append("❌ the camp/ghetto match is wrong: the ground truth says this is not a linkable location.")
             elif true_camp is not None:
-                sb.append(f"  the true camp/ghetto is {_describe_camp_match(true_camp)}, indexed under keys {sorted(true_camp_keys)}.")
+                sb.append(f"❌ the true camp/ghetto is {_describe_camp_match(true_camp)}, indexed under keys {sorted(true_camp_keys)}.")
             else:
-                sb.append(f"  the true IRI {true_iri} is not a camp/ghetto in the reference list: "
+                sb.append(f"❌ the true IRI {true_iri} is not a camp/ghetto in the reference list: "
                       f"this camp match hijacked an address that should have gone through GeoDBSearch.")
             return
         if true_camp is not None:
-            sb.append(f"  !! no camp match, but the true IRI is the camp/ghetto {_describe_camp_match(true_camp)}, "
+            sb.append(f"❌ !! no camp match, but the true IRI is the camp/ghetto {_describe_camp_match(true_camp)}, "
                   f"indexed under keys {sorted(true_camp_keys)}; see the CampReferenceMatcher logs for why it was missed.")
         if status != SearchStatus.NO_ENTITIES:
             self._explain_geo_db_outcome(sb, address, true_iri, true_entity_type, true_raw_text)
