@@ -26,10 +26,10 @@ DISAMBIGUATION_FACTOR_PRIORITY = [
     "child_parent_likelihood",
     "fuzzy_similarity_score",
     "entity_types_matching_preferred",
-    "regional_term_match",
+    #"regional_term_match",
     "population_order_of_magnitude",
-    "phonetic_score",
     "country_likelihood_rank", # general rank of country likelihood based on observation
+    "phonetic_score",
     "entity_types_matching",
     "is_preferred_name",
     "population_count"
@@ -637,7 +637,7 @@ class Disambiguator:
                     self.logger.debug(
                         "Scoring potential cross match %r (%r) of type %r against reference entity %r (%s)",
                         other_match.nfc_alt_name, other_match.geographical_name.entity.iri,
-                        entity.entity_type.name,
+                        other_entity.entity_type.name,
                         match.nfc_alt_name, match.geographical_name.entity.iri,
                     )
                     scored_match = self._score_individual_match(other_entity, other_match, bzk_field)

@@ -24,6 +24,7 @@ import tantivy
 from tqdm.auto import tqdm
 import unicodedata
 import re
+import string
 import os
 import editdistpy
 import sys
@@ -82,34 +83,80 @@ def similarity_and_distance(a : str, b : str, max_distance : int, distance_funct
     return edit_distance, similarity
 
 
-POP_LANGUAGE_FILTERED_NAMES_SELECT = """
-SELECT *
-FROM geo_db.geographical_names_with_entities
-WHERE (
+# Regional and minority languages of Germany whose names are indexed for every
+# entity, like german ones, since the addresses may use their exonyms (e.g. the
+# bavarian "Beer Scheva" for Beersheba)
+_GERMAN_REGIONAL_LANGUAGES = (
+    "nds", # Low German
+    "frs", # East Frisian Low Saxon
+    "bar", # Bavarian
+    "gsw", # Alemannic
+    "als", # Alemannic (wikipedia code)
+    "ksh", # Ripuarian (Kölsch)
+    "pfl", # Palatine German
+    "vmf", # Main-Franconian
+    "sxu", # Upper Saxon
+    "sli", # Lower Silesian
+    "frr", # North Frisian
+    "stq", # Saterland Frisian
+    "hsb", # Upper Sorbian
+    "dsb", # Lower Sorbian
+    "wen", # Sorbian
+)
+
+_NAME_LANGUAGE_FILTER = f"""(
     isolanguage == '' OR
     isolanguage LIKE 'en%' OR
     isolanguage LIKE 'de%' OR
+    isolanguage == 'ger' OR
+    isolanguage IN ({", ".join(f"'{language}'" for language in _GERMAN_REGIONAL_LANGUAGES)}) OR
     isolanguage == 'abbr' OR
     list_bool_or([(isolanguage IN lang) FOR lang IN entity.country.iso_languages])
-) AND len(entity.possible_entity_types) > 0
+)"""
+
+POP_LANGUAGE_FILTERED_NAMES_SELECT = f"""
+SELECT *
+FROM geo_db.geographical_names_with_entities
+WHERE {_NAME_LANGUAGE_FILTER} AND len(entity.possible_entity_types) > 0
 """
 
-OTHER_LANGUAGE_FILTERED_NAMES_SELECT = """
+OTHER_LANGUAGE_FILTERED_NAMES_SELECT = f"""
 SELECT *
 FROM geo_db.geographical_names_with_entities
-WHERE (
-    isolanguage == '' OR
-    isolanguage LIKE 'en%' OR
-    isolanguage LIKE 'de%' OR
-    isolanguage == 'abbr' OR
-    list_bool_or([(isolanguage IN lang) FOR lang IN entity.country.iso_languages])
-) AND len(entity.possible_entity_types) = 0
+WHERE {_NAME_LANGUAGE_FILTER} AND len(entity.possible_entity_types) = 0
 """
 
 # match periods follwoing an isolated letter
 _STRIP_PERIODS_ABBREV_REGEX = re.compile(r'((?<=\W\w)|(?<=^\w))\.')
 _STRIP_PUNCTUATION_REGEX = re.compile(r'[^\w\s]')
 _DEDUPE_WHITESPACE_REGEX = re.compile(r'\s+')
+# Punctuation that still separates words in phonetic keys, left for
+# ascii_normalize to replace by spaces (e.g. "Beer-Sheva", "Frankfurt/Main",
+# "St.Gallen"); any other punctuation is removed before phonetic encoding
+_PHONETIC_WORD_SEPARATORS = frozenset("./-")
+
+class _PhoneticPunctuationRemovalTable(dict):
+    r"""
+    str.translate table removing punctuation other than _PHONETIC_WORD_SEPARATORS,
+    so that e.g. apostrophes marking glottal stops in transliterations do not split
+    a word in two ("Be'er Sheva`" -> "Beer Sheva" rather than "Be er Sheva").
+    A character counts as punctuation when its ascii transliteration consists only
+    of ascii punctuation. This covers non ascii punctuation (e.g. "’", or "–" which
+    is kept as a separator), as well as modifier letters that \w considers letters
+    but unidecode turns into apostrophes (e.g. "ʾ", "ʿ" in "Biʾr as-Sabʿ").
+    Each character is classified on its first lookup and cached.
+    """
+    def __missing__(self, codepoint : int) -> Optional[int]:
+        transliteration = unidecode.unidecode(chr(codepoint))
+        is_punctuation = transliteration != "" and all(c in string.punctuation for c in transliteration)
+        if is_punctuation and not all(c in _PHONETIC_WORD_SEPARATORS for c in transliteration):
+            value = None
+        else:
+            value = codepoint
+        self[codepoint] = value
+        return value
+
+_PHONETIC_PUNCTUATION_REMOVAL_TABLE = _PhoneticPunctuationRemovalTable()
 
 # Most addresses are in german, so german stop words take priority, but a few
 # common spanish and english ones are included too since some addresses use
@@ -151,6 +198,7 @@ def _remove_stop_words(normalized_string : str) -> str:
 
 def normalize_for_phonetics(nfc_string : str):
     result = _remove_stop_words(nfc_string)
+    result = result.translate(_PHONETIC_PUNCTUATION_REMOVAL_TABLE)
     result = ascii_normalize(result, preserve_german_diacritics=True)
     return result
 
@@ -1351,6 +1399,16 @@ class GeoDBSearch(LinkingStep):
                 match.nfc_alt_name, match.geographical_name.entity.iri, entity.raw_text,
                 match.geographical_name.entity.country.iso_code, match.geographical_name.entity.country.continent,
                 country_codes, match.geographical_name.entity.population, match.fuzzy_score)
+            return True
+        elif (
+            entity.entity_type in (GeographicalEntityType.City, GeographicalEntityType.Neighborhood) and
+            not any(t in match.geographical_name.entity.possible_entity_types for t in (GeographicalEntityType.City, GeographicalEntityType.Neighborhood))
+        ):
+            self.logger.debug(
+                "Pruned %r (%s) for %r: expected entity type %r but the possible entity types %r do not include City or Neighborhood",
+                match.nfc_alt_name, match.geographical_name.entity.iri, entity.raw_text,
+                entity.entity_type, match.geographical_name.entity.possible_entity_types
+            )
             return True
         return False
 

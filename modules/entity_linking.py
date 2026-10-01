@@ -911,6 +911,7 @@ def build_geo_db_searcher(
         search_index=search_index,
         prune_score_threshold=SEARCH_PRUNE_SCORE_THRESHOLD,
         geo_db_path=geo_db_path,
+        topk=50
     )
     geo_db_searcher.initialize()
     return geo_db_searcher
