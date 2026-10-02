@@ -10,12 +10,10 @@ globals.
 import fnmatch
 import json
 import logging
-import os
 import pprint
 import sys
 import time
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -60,30 +58,10 @@ def cleanup_previous_run(namespace: dict) -> None:
     """Releases the resources a previous run of the notebook left in `namespace` (its globals()), allowing rerunning."""
     if "conn" in namespace:
         namespace["conn"].close()
-    if "search_executor" in namespace:
-        namespace["search_executor"].shutdown()
+    if "linking_pool" in namespace:
+        namespace["linking_pool"].close()
     if "disambiguator" in namespace:
         namespace["disambiguator"].close()
-
-
-class SerializedGeoDBSearch:
-    """
-    GeoDBSearch's duckdb connection and tantivy reader cannot be called
-    concurrently from multiple threads. Rather than have every caller take a
-    lock around geo_db_searcher.apply(), this routes every call (regardless
-    of which thread issues it) through a single dedicated worker thread, so
-    calls are serialized without blocking the rest of the pipeline (camp
-    matching, tagging, disambiguation) from running concurrently elsewhere.
-    """
-    def __init__(self, wrapped: geo_db_search.GeoDBSearch):
-        self._wrapped = wrapped
-        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="geo-db-search")
-
-    def apply(self, address):
-        return self._executor.submit(self._wrapped.apply, address).result()
-
-    def shutdown(self):
-        self._executor.shutdown(wait=True)
 
 
 def cache_df(name: str, gen_function: Callable[[], pd.DataFrame], overwrite: bool = False) -> pd.DataFrame:
@@ -233,38 +211,22 @@ async def load_or_build_parsed_addresses(addresses: pd.DataFrame, cache_path: Pa
 # ---------------------------------------------------------------------------
 
 def default_num_workers() -> int:
-    # Many worker threads for the cheap/safe steps (camp/ghetto matching, address
-    # tagging, disambiguation); GeoDBSearch itself stays serialized to 1 thread
-    # via search_executor regardless of this number.
-    return min(32, (os.cpu_count() or 4) * 4)
+    return entity_linking.DEFAULT_NUM_WORKERS
 
 
 def run_pipeline(
     rows: list[dict],
-    num_workers: int,
-    camp_matcher: CampReferenceMatcher,
-    search_executor: SerializedGeoDBSearch,
-    disambiguator: Disambiguator,
+    linking_pool: entity_linking.LinkingPool,
     estimated_total_addresses: Optional[int] = None,
 ) -> list[entity_linking.LinkingOutcome]:
     """
     Runs entity_linking.link_field for every parsed address row in `rows`
-    (the "{prefix}.*"-flattened rows build_parsed_addresses() produces), using
-    `num_workers` worker threads. Camp/ghetto matching, address tagging and
-    disambiguation all run concurrently across those threads; only the
-    GeoDBSearch step is serialized (via search_executor).
+    (the "{prefix}.*"-flattened rows build_parsed_addresses() produces), in
+    the worker processes of `linking_pool`.
     """
-    def link_parsed_row(row: dict, idx):
-        return entity_linking.link_field(row, row["prefix"], camp_matcher, search_executor, disambiguator), idx
-
-    print(f"Running full entity linking pipeline on regex+LLM parsed addresses (using {num_workers} worker threads, search serialized to 1)...")
+    print(f"Running full entity linking pipeline on regex+LLM parsed addresses (using {linking_pool.num_workers} worker processes)...")
     start = time.monotonic()
-    results: list[entity_linking.LinkingOutcome] = [None] * len(rows)
-    with ThreadPoolExecutor(max_workers=num_workers) as executor:
-        futures = [executor.submit(link_parsed_row, row, idx) for idx, row in enumerate(rows)]
-        for future in tqdm(as_completed(futures), total=len(futures)):
-            result, idx = future.result()
-            results[idx] = result
+    results = list(tqdm(linking_pool.link_fields(rows), total=len(rows)))
     elapsed = time.monotonic() - start
     print(f"Total pipeline time: {format_time(elapsed)}")
     if estimated_total_addresses is not None:
@@ -782,14 +744,12 @@ class DisambiguationErrorExplainer:
         indexed_gt: pd.DataFrame,
         indexed_parsed: pd.DataFrame,
         geo_db_searcher: geo_db_search.GeoDBSearch,
-        search_executor: SerializedGeoDBSearch,
         camp_matcher: CampReferenceMatcher,
         disambiguator: Disambiguator,
     ):
         self.indexed_gt = indexed_gt
         self.indexed_parsed = indexed_parsed
         self.geo_db_searcher = geo_db_searcher
-        self.search_executor = search_executor
         self.camp_matcher = camp_matcher
         self.disambiguator = disambiguator
         # Ground-truth columns that name geographical entities, in the same terms as
@@ -856,7 +816,7 @@ class DisambiguationErrorExplainer:
 
         row = {**parsed_row.to_dict(), "address_id": str(address_id)}
         outcome = entity_linking.link_field(
-            row, prefix, self.camp_matcher, self.search_executor, self.disambiguator, keep_address=True
+            row, prefix, self.camp_matcher, self.geo_db_searcher, self.disambiguator, keep_address=True
         )
 
         pred_iri = normalize_iri(outcome.iri)

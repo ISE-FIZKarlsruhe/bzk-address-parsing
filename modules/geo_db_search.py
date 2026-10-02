@@ -9,6 +9,8 @@ import duckdb
 import modules.build_geonames_db as build_geonames_db
 from typing import Collection, Iterable, NamedTuple, Optional, Literal, Callable, TYPE_CHECKING
 import contextlib
+import functools
+import threading
 import enum
 import dataclasses
 import textwrap
@@ -173,6 +175,23 @@ SELECT *
 FROM geo_db.geographical_names_with_entities
 WHERE {_NAME_LANGUAGE_FILTER} AND len(entity.possible_entity_types) = 0
 """
+
+def preferred_name_by_entity_iri_select(schema : str = "") -> str:
+    """
+    Query selecting, as from geographical_names_with_entities, the preferred
+    name of the entity with the iri given as parameter (the first name, if
+    none is preferred), from the tables of `schema` (e.g. "geo_db." for an
+    attached geo duckdb). Selecting from the view itself with a filter on
+    entity.iri would scan the whole of its join, duckdb not pushing the filter
+    down into it; filtering both sides of the join by iri is about ten times
+    faster, the names table holding no index on iri alone.
+    """
+    return f"""
+        SELECT n.* EXCLUDE (iri), e AS entity
+        FROM (SELECT * FROM {schema}geographical_names WHERE iri = $1) n
+        INNER JOIN (SELECT * FROM {schema}geographical_entities_with_countries WHERE iri = $1) e USING (iri)
+        ORDER BY is_preferred_name DESC NULLS LAST, name_id LIMIT 1
+    """
 
 # match periods follwoing an isolated letter
 _STRIP_PERIODS_ABBREV_REGEX = re.compile(r'((?<=\W\w)|(?<=^\w))\.')
@@ -920,9 +939,7 @@ def _regional_terms_from_entries(
         if entry["state_iri"] is not None:
             state_iri = entry["state_iri"]
             if state_iri not in state_names:
-                row = connection.execute(
-                    "SELECT * FROM geo_db.geographical_names_with_entities WHERE entity.iri = ? "
-                    "ORDER BY is_preferred_name DESC NULLS LAST, name_id LIMIT 1", [state_iri]).fetchone()
+                row = connection.execute(preferred_name_by_entity_iri_select("geo_db."), [state_iri]).fetchone()
                 columns = [description[0] for description in connection.description]
                 state_names[state_iri] = decode_from_dict(dict(zip(columns, row)), GeographicalName)
             state_name = state_names[state_iri]
@@ -1025,6 +1042,20 @@ class GeoSearchIndex(ABC):
         ) -> IndexSearchResult:
         pass
 
+def _serialized_searcher_access(method):
+    """
+    Serializes calls to a TantivySearchIndex method using a tantivy searcher,
+    which cannot be used from several threads at once, under the index's
+    _searcher_lock. Everything else about a search (query building, scoring
+    and the GeoDBSearch logic around it) runs concurrently.
+    """
+    @functools.wraps(method)
+    def wrapper(self : "TantivySearchIndex", *args, **kwargs):
+        with self._searcher_lock:
+            return method(self, *args, **kwargs)
+    return wrapper
+
+
 class TantivySearchIndex(GeoSearchIndex):
     index_descriptor = "tantivy"
     logger = ENTITY_LINKING_LOGGER.getChild("TantivySearchIndex")
@@ -1046,26 +1077,48 @@ class TantivySearchIndex(GeoSearchIndex):
         ):
         if read_threads == 'auto':
             read_threads = (max(1, getattr(os, "process_cpu_count", lambda : None)() or os.cpu_count() or 8) * 3) // 2
-        self.schema = self.create_schema()
+        self.logger.info("Initialized TantivySearchIndex object with %d read threads", read_threads)
         self.index_path = Path(index_path)
         self.already_exists = self.index_path.exists()
         if not self.already_exists:
             self.index_path.mkdir(parents=True)
         self.read_threads = read_threads
         self.write_threads = write_threads
+        # set by GeoDBSearch.initialize (see build_regional_terms)
+        self.regional_terms : RegionalTerms = RegionalTerms({})
+        self._open_index()
+
+    def _open_index(self):
+        """Opens the index on disk at index_path, along with what goes with it."""
         self.logger.info(
             "Opening tantivy index at %s (already exists: %s, read threads: %d, write threads: %d)",
             self.index_path, self.already_exists, self.read_threads, self.write_threads)
+        self.schema = self.create_schema()
         self.index = tantivy.Index(self.schema, path=str(self.index_path))
         self.index.config_reader(num_warmers=self.read_threads)
-        # set by GeoDBSearch.initialize (see build_regional_terms)
-        self.regional_terms : RegionalTerms = RegionalTerms({})
+        # see _serialized_searcher_access
+        self._searcher_lock = threading.Lock()
         self.index.register_tokenizer(
             "whitespace",
             tantivy.TextAnalyzerBuilder(
                 tantivy.Tokenizer.whitespace()
             ).build()
         )
+
+    def __getstate__(self):
+        # The index object only refers to the index on disk, and neither it
+        # nor the lock can be pickled (e.g. when sent to a worker process);
+        # each copy reopens the index instead. A copy is only ever searched
+        # from a single thread, hence a single warmer.
+        state = self.__dict__.copy()
+        for attribute in ("schema", "index", "_searcher_lock"):
+            del state[attribute]
+        state["read_threads"] = 1
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._open_index()
 
     def populate_index(self, row_retriever : Iterable[dict], skip_if_exists=True):
         if skip_if_exists and self.already_exists:
@@ -1288,6 +1341,7 @@ class TantivySearchIndex(GeoSearchIndex):
             query_words, candidate_words, unmatched_query, unmatched_candidate)
         return True
 
+    @_serialized_searcher_access
     def _partial_word_match(
             self,
             query_strings : list[str],
@@ -1437,6 +1491,7 @@ class TantivySearchIndex(GeoSearchIndex):
             return tantivy.Query.disjunction_max_query(disjuction)
 
 
+    @_serialized_searcher_access
     def _search_inner(
             self,
             limit : int,
@@ -1722,6 +1777,11 @@ class GeoDBSearch(LinkingStep):
         self.cache_dir = Path(cache_dir)
         self._pre_linked_cache_path = self.cache_dir / "pre_linked_entities.json"
         self._pre_linked_cache : dict[str, Optional[GeographicalName]] = {}
+        # apply runs concurrently from several threads, while the duckdb
+        # connection is not safe to use from several threads at once; cache
+        # misses of _retrieve_pre_linked, the only use of the connection
+        # during apply, go through this lock (see _retrieve_pre_linked)
+        self._pre_linked_lock = threading.Lock()
         # set by initialize (see build_regional_terms)
         self.regional_terms = RegionalTerms({})
 
@@ -1733,8 +1793,7 @@ class GeoDBSearch(LinkingStep):
             self.search_cache_db_path, self.geo_db_path, self.search_index.index_descriptor,
             self.cleaned_distance_threshold, self.prune_score_threshold, self.settle_score_threshold,
             self.topk, self.priority_countries)
-        self.connection = duckdb.connect(self.search_cache_db_path)
-        self.connection.execute(f"ATTACH DATABASE '{self.geo_db_path}' AS geo_db (READ_ONLY)")
+        self._connect()
         def row_retriever(sql_query : str) -> Iterable[dict]:
             total_rows = self.connection.execute("SELECT COUNT(*) FROM (" + sql_query + ")").fetchone()[0]
             self.logger.info(
@@ -1847,6 +1906,33 @@ class GeoDBSearch(LinkingStep):
         self.connection.close()
         return super().finalize()
 
+    def _connect(self, **settings):
+        self.connection = duckdb.connect(self.search_cache_db_path)
+        for name, value in settings.items():
+            self.connection.execute(f"SET {name} = {value}")
+        self.connection.execute(f"ATTACH DATABASE '{self.geo_db_path}' AS geo_db (READ_ONLY)")
+
+    def __getstate__(self):
+        # Neither the connection nor the lock can be pickled (e.g. when sent
+        # to a worker process); each copy opens its own connection instead,
+        # single threaded and without a progress bar since it only serves the
+        # lookups of _retrieve_pre_linked, alongside many other copies. Everything initialize built (e.g. the regional
+        # terms) is copied as is.
+        state = self.__dict__.copy()
+        for attribute in ("connection", "_pre_linked_lock"):
+            state.pop(attribute, None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._pre_linked_lock = threading.Lock()
+        if self.search_cache_db_path != ":memory:":
+            # the original's connection holds the file's lock
+            raise ValueError(
+                f"Cannot copy a GeoDBSearch whose search cache db is a file ({self.search_cache_db_path}); "
+                "use ':memory:'")
+        self._connect(threads=1, enable_progress_bar=False)
+
     def _load_pre_linked_cache(self):
         if not self._pre_linked_cache_path.exists():
             self.logger.info("No pre-linked cache found at %s", self._pre_linked_cache_path)
@@ -1866,8 +1952,15 @@ class GeoDBSearch(LinkingStep):
             iri: (encode_as_dict(geographical_name) if geographical_name is not None else None)
             for iri, geographical_name in self._pre_linked_cache.items()
         }
-        with self._pre_linked_cache_path.open("w", encoding="utf-8") as f:
+        # copies in other worker processes may save the cache at the same
+        # time: each writes its own temporary file first, then atomically
+        # replaces the cache with it, so that the cache is never left
+        # truncated (an entry only another copy looked up may get lost, to be
+        # looked up again)
+        temporary_path = self._pre_linked_cache_path.with_suffix(f".json.{os.getpid()}.tmp")
+        with temporary_path.open("w", encoding="utf-8") as f:
             json.dump(raw_cache, f, ensure_ascii=False)
+        temporary_path.replace(self._pre_linked_cache_path)
 
     def _search_entity(
         self, 
@@ -1969,9 +2062,23 @@ class GeoDBSearch(LinkingStep):
         (see _pre_linked_cache_path), since the duckdb lookup is comparatively
         slow and is otherwise repeated for the same handful of entities.
         """
+        # Checked without the lock first: reading a dict is thread safe, and
+        # cache hits are the common case
         if iri in self._pre_linked_cache:
             self.logger.debug("Pre-linked iri %s found in cache", iri)
             return self._pre_linked_cache[iri]
+        with self._pre_linked_lock:
+            # another thread may have looked it up while waiting for the lock
+            if iri in self._pre_linked_cache:
+                self.logger.debug("Pre-linked iri %s found in cache", iri)
+                return self._pre_linked_cache[iri]
+            return self._look_up_pre_linked(iri)
+
+    def _look_up_pre_linked(self, iri : str) -> Optional[GeographicalName]:
+        """
+        Cache miss of _retrieve_pre_linked: looks the iri up in the geo duckdb
+        and caches the result. Only called holding _pre_linked_lock.
+        """
         self.logger.debug("Pre-linked iri %s is not in the cache; looking it up in the geo database", iri)
         geonames_match = _GEONAMES_IRI_REGEX.match(iri)
         if geonames_match is not None:
@@ -1983,11 +2090,7 @@ class GeoDBSearch(LinkingStep):
             lookup_iri = f"https://sws.geonames.org/{geonames_match.group(1)}"
         else:
             lookup_iri = _normalize_iri(iri)
-        row = self.connection.execute(
-            "SELECT * FROM geo_db.geographical_names_with_entities WHERE entity.iri = ? "
-            "ORDER BY is_preferred_name DESC NULLS LAST, name_id LIMIT 1",
-            [lookup_iri]
-        ).fetchone()
+        row = self.connection.execute(preferred_name_by_entity_iri_select("geo_db."), [lookup_iri]).fetchone()
         if row is None:
             self.logger.debug("Pre-linked iri %s (looked up as %s) not found in the geo database", iri, lookup_iri)
             geographical_name = None

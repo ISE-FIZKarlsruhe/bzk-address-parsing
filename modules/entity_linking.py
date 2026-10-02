@@ -31,17 +31,26 @@ Output records keep the input schema (same "{prefix}.*" columns) and add new
 an overall "{prefix}.iri" for the address plus a "{prefix}.{EntityType}_iri" for
 every entity that was successfully linked, alongside metadata about how that
 link was produced (see LinkedEntityMetadata and apply_outcome_to_row).
+
+The steps are initialized once, in the main process, and addresses are then
+linked in parallel by worker processes, each with its own copy of the steps
+(see LinkingPool).
 """
 
 import argparse
-from collections import defaultdict
+from collections import defaultdict, deque
+from concurrent.futures import ProcessPoolExecutor
 import json
 import logging
 import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 import time
-from typing import Iterable, NamedTuple, Optional
+import logging.handlers
+import multiprocessing
+import os
+import pickle
+from typing import Callable, Iterable, Iterator, NamedTuple, Optional
 
 import pandas as pd
 from tqdm.auto import tqdm
@@ -934,6 +943,118 @@ def build_disambiguator(geo_db_path: str = "geo.duckdb") -> Disambiguator:
     )
 
 
+# Worker processes linking addresses in parallel (see LinkingPool): enough to
+# keep processing matches and disambiguating while others search, but few
+# enough not to compete over the cores the searches likely use (8 linked
+# about 3x faster than 1, while 32 were slower than 8)
+DEFAULT_NUM_WORKERS = min(8, os.process_cpu_count() or 4)
+
+# Tasks submitted to a LinkingPool ahead of the result it yields next, per
+# worker: enough to keep every worker busy while an address that takes long
+# holds up the results queued behind it, while bounding what is held in memory
+LINKING_POOL_TASKS_IN_FLIGHT_PER_WORKER = 8
+
+# The linking steps of a LinkingPool worker process (see _initialize_worker)
+_worker_steps: Optional[tuple[CampReferenceMatcher, GeoDBSearch, Disambiguator]] = None
+
+
+class _ParentLoggerHandler(logging.Handler):
+    """Hands the records forwarded by the worker processes over to the loggers of the main process."""
+    def emit(self, record: logging.LogRecord) -> None:
+        logging.getLogger(record.name).handle(record)
+
+
+def _initialize_worker(pickled_steps: bytes, log_queue, log_level: int) -> None:
+    """
+    Initializer of a LinkingPool worker process: its copy of the linking
+    steps, and its logging forwarded to the main process.
+    """
+    global _worker_steps
+    root_logger = logging.getLogger()
+    root_logger.handlers[:] = [logging.handlers.QueueHandler(log_queue)]
+    root_logger.setLevel(log_level)
+    _worker_steps = pickle.loads(pickled_steps)
+
+
+def _link_field_in_worker(row: dict) -> "LinkingOutcome":
+    return link_field(row, row["prefix"], *_worker_steps)
+
+
+def _process_row_in_worker(row: dict) -> dict:
+    return process_row(row, *_worker_steps)
+
+
+class LinkingPool:
+    """
+    Links addresses in parallel worker processes. The linking steps are
+    initialized once by the caller, in the main process, and each worker gets
+    a copy of them: the data they hold (e.g. the regional terms, the camp
+    reference) as is, while the tantivy index and the duckdb connections,
+    which only refer to files on disk, are reopened by each copy (see their
+    __getstate__). Each worker then links one address at a time, its log
+    records being forwarded to the loggers of the main process.
+
+    Workers are spawned rather than forked, the main process holding threads
+    (tantivy's, duckdb's) a fork would not carry over. The steps are copied
+    as they are when the pool is created: changes to them (or to the code,
+    e.g. by autoreload) only reach a new pool.
+    """
+    def __init__(
+        self,
+        camp_matcher: CampReferenceMatcher,
+        geo_db_searcher: GeoDBSearch,
+        disambiguator: Disambiguator,
+        num_workers: int = DEFAULT_NUM_WORKERS,
+    ):
+        self.num_workers = num_workers
+        context = multiprocessing.get_context("spawn")
+        self._log_queue = context.Queue()
+        self._log_listener = logging.handlers.QueueListener(self._log_queue, _ParentLoggerHandler())
+        self._log_listener.start()
+        # pickled once here rather than once per worker
+        pickled_steps = pickle.dumps((camp_matcher, geo_db_searcher, disambiguator))
+        logger.info(
+            "Starting %d linking worker processes (linking steps copied as %.1f MB)",
+            num_workers, len(pickled_steps) / 1e6)
+        self._executor = ProcessPoolExecutor(
+            max_workers=num_workers, mp_context=context, initializer=_initialize_worker,
+            initargs=(pickled_steps, self._log_queue, logging.getLogger().getEffectiveLevel()))
+
+    def _map(self, function: Callable, items: Iterable) -> Iterator:
+        """
+        `function` applied to every item by the workers, yielding the results
+        in the order of `items`, which may be a lazy iterable too large to hold
+        in memory (see LINKING_POOL_TASKS_IN_FLIGHT_PER_WORKER).
+        """
+        max_in_flight = self.num_workers * LINKING_POOL_TASKS_IN_FLIGHT_PER_WORKER
+        pending = deque()
+        for item in items:
+            pending.append(self._executor.submit(function, item))
+            if len(pending) >= max_in_flight:
+                yield pending.popleft().result()
+        while pending:
+            yield pending.popleft().result()
+
+    def link_fields(self, rows: Iterable[dict]) -> Iterator["LinkingOutcome"]:
+        """link_field for each row, of the address field named by its "prefix"."""
+        return self._map(_link_field_in_worker, rows)
+
+    def process_rows(self, rows: Iterable[dict]) -> Iterator[dict]:
+        """process_row for each row."""
+        return self._map(_process_row_in_worker, rows)
+
+    def close(self) -> None:
+        self._executor.shutdown(wait=True, cancel_futures=True)
+        self._log_listener.stop()
+        self._log_queue.close()
+
+    def __enter__(self) -> "LinkingPool":
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        self.close()
+
+
 def _iter_input_rows(input_path: Path, file_pattern: str) -> Iterable[dict]:
     files = sorted(input_path.glob(file_pattern)) if input_path.is_dir() else [input_path]
     for file in files:
@@ -953,6 +1074,7 @@ def main(argv=None):
     arg_parser.add_argument("--search-index-path", type=str, default=".geo_db_search_index/tantivy_index")
     arg_parser.add_argument("--geo-db-path", type=str, default="geo.duckdb")
     arg_parser.add_argument("--camps-reference", type=str, default=str(DEFAULT_CAMPS_REFERENCE_PATH))
+    arg_parser.add_argument("--num-workers", type=int, default=DEFAULT_NUM_WORKERS)
     args = arg_parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -966,9 +1088,10 @@ def main(argv=None):
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        with output_path.open("w", encoding="utf-8") as out_f:
-            for row in tqdm(_iter_input_rows(input_path, args.file_pattern), desc="Linking addresses"):
-                output_row = process_row(row, camp_matcher, geo_db_searcher, disambiguator)
+        with LinkingPool(camp_matcher, geo_db_searcher, disambiguator, args.num_workers) as linking_pool, \
+                output_path.open("w", encoding="utf-8") as out_f:
+            output_rows = linking_pool.process_rows(_iter_input_rows(input_path, args.file_pattern))
+            for output_row in tqdm(output_rows, desc="Linking addresses"):
                 out_f.write(json.dumps(output_row, ensure_ascii=False) + "\n")
     finally:
         geo_db_searcher.finalize()

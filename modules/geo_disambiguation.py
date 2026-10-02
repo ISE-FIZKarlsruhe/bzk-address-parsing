@@ -7,7 +7,8 @@ from typing import Literal, Optional, NamedTuple
 from modules.pipeline.geographical_entity import GeographicalBranch, GeographicalEntityType, GeographicalName
 from modules.geo_db_search import (
     ABOVE_CITY_ENTITY_TYPES, ENTITY_LINKING_LOGGER, REGIONAL_TERM_MATCHING_METHOD, distance_to_geometry_km,
-    geometries_distance_km, is_entity_type_ruled_out, is_regional_term_entity, partial_match_query_span, score_name_similarity)
+    geometries_distance_km, is_entity_type_ruled_out, is_regional_term_entity, partial_match_query_span,
+    preferred_name_by_entity_iri_select, score_name_similarity)
 from modules.pipeline.linked_data import AddressSpan, BZKFieldName, AddressProcessingData, LinkedEntity, MatchedEntity, MatchedName, LinkedAddress, RawEntity
 import uuid
 from modules.pipeline.storage.encoding_util import decode_from_dict
@@ -200,6 +201,8 @@ class Disambiguator:
         # are few (bounded by the distinct branches) and cached, so serializing
         # them costs little.
         self._geo_db_connection : Optional[duckdb.DuckDBPyConnection] = None
+        # duckdb settings of the connection (see __setstate__)
+        self._geo_db_connection_settings : dict = {}
         self._geo_db_lock = threading.Lock()
         self._common_parent_cache : dict[GeographicalBranch, Optional[GeographicalName]] = {}
         self.logger.info(
@@ -221,6 +224,9 @@ class Disambiguator:
     def __setstate__(self, state):
         self.__dict__.update(state)
         self._geo_db_lock = threading.Lock()
+        # a copy (e.g. in a worker process, see entity_linking.LinkingPool)
+        # runs alongside many others: single threaded, without a progress bar
+        self._geo_db_connection_settings = {"threads": 1, "enable_progress_bar": False}
 
     def close(self):
         with self._geo_db_lock:
@@ -242,6 +248,8 @@ class Disambiguator:
         if self._geo_db_connection is None:
             self.logger.debug("Opening read only connection to geo db %s", self.geo_db_path)
             self._geo_db_connection = duckdb.connect(self.geo_db_path, read_only=True)
+            for name, value in self._geo_db_connection_settings.items():
+                self._geo_db_connection.execute(f"SET {name} = {value}")
         connection = self._geo_db_connection
         level = len(branch.admin_codes)
         if level == 0:
@@ -263,11 +271,7 @@ class Disambiguator:
             ).fetchone()
         geographical_name = None
         if row is not None:
-            name_row = connection.execute(
-                "SELECT * FROM geographical_names_with_entities WHERE entity.iri = ? "
-                "ORDER BY is_preferred_name DESC NULLS LAST, name_id LIMIT 1",
-                [row[0]]
-            ).fetchone()
+            name_row = connection.execute(preferred_name_by_entity_iri_select(), [row[0]]).fetchone()
             if name_row is not None:
                 columns = [description[0] for description in connection.description]
                 geographical_name = decode_from_dict(dict(zip(columns, name_row)), GeographicalName)
