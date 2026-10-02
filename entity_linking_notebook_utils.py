@@ -7,6 +7,7 @@ needs lives here instead. Functions take their dependencies (searchers,
 dataframes, outcomes...) as explicit arguments rather than reading notebook
 globals.
 """
+import fnmatch
 import json
 import logging
 import os
@@ -597,20 +598,88 @@ def plot_linking_status_pie(counts: pd.Series, title: str) -> None:
     counts.plot(kind='pie', title=title, autopct='%1.1f%%', ylabel='', figsize=(6, 6), colors=[colors[label] for label in counts.index]).figure.tight_layout()
 
 
-# Coarsest to finest, to order the partial link entity types
-_ENTITY_TYPE_ORDER = ["Country", "State", "Region", "District", "AboveCity", "City", "Unknown", "Neighborhood"]
+# Human readable names for the classification of a linked entity (geonames
+# "feature_class.feature_code", the wikidata class IRI, or the classification
+# of the entities synthesized by the pipeline), as fnmatch wildcard patterns.
+# Patterns are tried in order and the first match wins, so finer names come
+# before the broader patterns they overlap with (P.PPLX before P.PPL*).
+# Consistent with the possible_entity_types of build_geonames_db and
+# build_geonames_db.WIKIDATA_TARGET_CLASSES. Listed coarsest to finest, which
+# is also the order of the pie slices.
+_CLASSIFICATION_NAME_PATTERNS = {
+    "Country": ["A.PCL*", "A.TERR", "A.LTER", "A.ZN", "A.PRSH"],
+    "State": ["A.ADM1", "A.ADM1H", "A.ADMD", "A.ADMDH"],
+    "Region": ["L.RGN*", "H.STM*", "H.LK*", "H.RSV", "*/Q82794", "REGIONAL_TERM"],
+    "District": ["A.ADM[2-5]", "A.ADM[2-5]H"],
+    "Neighborhood": ["P.PPLX", "*/Q253019", "*/Q123705"],
+    "City": ["P.PPL*", "*/Q486972", "*/Q262166"],
+}
+_CAMP_CLASSIFICATION_NAME = "Camp"
+_OTHER_CLASSIFICATION_NAME = "Other"
+_UNKNOWN_CLASSIFICATION_NAME = "No classification"
+_CLASSIFICATION_NAME_ORDER = [
+    *_CLASSIFICATION_NAME_PATTERNS, _CAMP_CLASSIFICATION_NAME, _OTHER_CLASSIFICATION_NAME, _UNKNOWN_CLASSIFICATION_NAME]
 
 
-def partial_link_entity_type_counts(outcomes: list[entity_linking.LinkingOutcome], ground_truth: pd.DataFrame) -> pd.Series:
-    """Number of partially linked addresses per entity type they were linked up to."""
-    entity_types = [
-        outcome.entity_type
+def classification_name(classification: Optional[str]) -> str:
+    """Human readable name of an entity classification, see _CLASSIFICATION_NAME_PATTERNS."""
+    if classification is None:
+        return _UNKNOWN_CLASSIFICATION_NAME
+    for name, patterns in _CLASSIFICATION_NAME_PATTERNS.items():
+        if any(fnmatch.fnmatchcase(classification, pattern) for pattern in patterns):
+            return name
+    return _OTHER_CLASSIFICATION_NAME
+
+
+def print_classification_names() -> None:
+    """Prints which classifications (fnmatch wildcards, first match wins) each human readable name stands for."""
+    print("Classification names (first matching name wins):")
+    for name, patterns in _CLASSIFICATION_NAME_PATTERNS.items():
+        print(f" - {name}: {', '.join(patterns)}")
+    print(f" - {_CAMP_CLASSIFICATION_NAME}: linked by the camp/ghetto reference matcher")
+    print(f" - {_OTHER_CLASSIFICATION_NAME}: any other classification")
+    print(f" - {_UNKNOWN_CLASSIFICATION_NAME}: the linked entity has no classification")
+
+
+def entity_classifications(connection, iris: list[str]) -> dict[str, Optional[str]]:
+    """
+    Classification of each of the given (normalized) IRIs in the GeoDB, keyed
+    by normalized IRI. Entities synthesized by the pipeline (regional terms)
+    are not in the GeoDB, and get the classification they are given there.
+    """
+    iris = {normalize_iri(iri) for iri in iris if iri is not None}
+    classifications = {
+        iri: "REGIONAL_TERM" for iri in iris if iri.startswith(geo_db_search.REGIONAL_TERM_IRI_PREFIX)}
+    # The GeoDB does not store IRIs normalized (wikidata ones are http://)
+    lookup_iris = [variant for iri in iris for variant in (iri, "http://" + iri.removeprefix("https://"))]
+    rows = connection.execute(
+        "SELECT iri, classification FROM geo_db.geographical_entities WHERE iri IN (SELECT unnest(?))",
+        [lookup_iris]).fetchall()
+    classifications.update({normalize_iri(iri): classification for iri, classification in rows})
+    return classifications
+
+
+def partial_link_classification_counts(
+    outcomes: list[entity_linking.LinkingOutcome], ground_truth: pd.DataFrame, connection
+) -> pd.Series:
+    """
+    Number of partially linked addresses per (human readable) classification
+    of the entity they were linked to, looked up in the GeoDB through
+    `connection` (with geo_db attached, e.g. GeoDBSearch.connection).
+    """
+    partial_outcomes = [
+        outcome
         for outcome, status in zip(outcomes, link_statuses(outcomes, ground_truth))
         if status == LinkStatus.PARTIALLY_LINKED
     ]
-    counts = pd.Series(entity_types, dtype=object).value_counts()
-    return counts.sort_index(key=lambda index: [
-        _ENTITY_TYPE_ORDER.index(t) if t in _ENTITY_TYPE_ORDER else len(_ENTITY_TYPE_ORDER) for t in index])
+    classifications = entity_classifications(connection, [outcome.iri for outcome in partial_outcomes])
+    names = [
+        _CAMP_CLASSIFICATION_NAME if outcome.entity_type == "Camp"
+        else classification_name(classifications.get(normalize_iri(outcome.iri)))
+        for outcome in partial_outcomes
+    ]
+    counts = pd.Series(names, dtype=object).value_counts()
+    return counts.sort_index(key=lambda index: [_CLASSIFICATION_NAME_ORDER.index(n) for n in index])
 
 
 class FailedToLinkReason:
@@ -643,7 +712,7 @@ def _pie_label_with_count(total: int) -> Callable[[float], str]:
 def plot_partial_and_failed_link_pies(
     partial_link_counts: pd.Series, failed_to_link_counts: pd.Series, title: Optional[str] = None
 ) -> None:
-    """Side by side pies: partial links by linked entity type (left), failed links by reason (right)."""
+    """Side by side pies: partial links by linked entity classification (left), failed links by reason (right)."""
     fig, (left, right) = plt.subplots(1, 2, figsize=(12, 6))
     for ax, counts, ax_title, colormap in (
         (left, partial_link_counts, f"{LinkStatus.PARTIALLY_LINKED}: linked up to", "Blues_r"),
