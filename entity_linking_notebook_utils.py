@@ -19,6 +19,7 @@ from typing import Callable, Optional
 
 import colorlog
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
 import pandas as pd
 from IPython.display import display
 from tqdm.auto import tqdm
@@ -26,6 +27,7 @@ from tqdm.auto import tqdm
 import modules.build_geonames_db as build_geonames_db
 import modules.entity_linking as entity_linking
 import modules.geo_db_search as geo_db_search
+import modules.geo_disambiguation as geo_disambiguation
 from modules.camp_search import CampReferenceMatcher
 from modules.entity_linking import SearchStatus
 from modules.entity_linking_eval_metrics import eval_entity_linking, normalize_iri
@@ -692,6 +694,187 @@ def plot_partial_and_failed_link_pies(
     if title:
         fig.suptitle(title)
     fig.tight_layout()
+
+
+# Link statuses the pies of plot_pies_by_link_status are split by
+_PIE_LINK_STATUSES = [LinkStatus.CORRECTLY_LINKED, LinkStatus.INCORRECTLY_LINKED]
+# Categories of the pies of plot_pies_by_link_status, each in a fixed order
+# that gives every category the same color in every pie it appears in (see
+# _pie_category_styles). The disambiguation factors are shared by the deciding
+# factor and the weighted score contribution pies.
+_DISAMBIGUATION_FACTOR_ORDER = [
+    entity_linking.UNAMBIGUOUS_DECIDING_FACTOR,
+    *geo_disambiguation.DISAMBIGUATION_FACTOR_PRIORITY,
+    entity_linking.COMMON_PARENT_DECIDING_FACTOR,
+]
+# Phases of TantivySearchIndex.search in the order they are tried (with the
+# phonetic and edit distance 1 matches of the same phase told apart), then the
+# matches obtained without a text search (see MatchedName.search_phase)
+_SEARCH_PHASE_ORDER = [
+    "exact", "abbreviation", geo_db_search.PHONETIC_SEARCH_PHASE, geo_db_search.FUZZY_DISTANCE_1_SEARCH_PHASE,
+    "fuzzy(distance=2)", "partial_word", "regional_term", "pre_linked",
+]
+# Human readable names of the "{prefix}.status" of a parsed address
+_PARSING_METHOD_NAMES = {"fully_parsed": "Regex", "llm_parsed": "LLM", "llm_error": "LLM (failed)"}
+_PARSING_METHOD_ORDER = list(_PARSING_METHOD_NAMES.values())
+# Categorical slots, in fixed order; past the last one, categories reuse the
+# slots' hues with the next hatch (hue x texture composite encoding)
+_PIE_CATEGORY_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"]
+_PIE_CATEGORY_HATCHES = ["", "//", "\\\\", "xx"]
+
+
+def _pie_category_styles(categories: list[str], order: list[str]) -> dict[str, tuple[str, str]]:
+    """
+    (color, hatch) of each category, by its position in `order` (then, for
+    categories not in it, after it), so that it does not depend on which
+    categories a given pie shows.
+    """
+    order = order + sorted(c for c in categories if c not in order)
+    styles = {}
+    for category in categories:
+        index = order.index(category)
+        slot, hatch = index % len(_PIE_CATEGORY_COLORS), index // len(_PIE_CATEGORY_COLORS)
+        styles[category] = (_PIE_CATEGORY_COLORS[slot], _PIE_CATEGORY_HATCHES[hatch % len(_PIE_CATEGORY_HATCHES)])
+    return styles
+
+
+def _counts_by_link_status(values: list[Optional[str]], statuses: list[str], order: list[str]) -> pd.DataFrame:
+    """
+    Number of correctly and incorrectly linked addresses (columns) per value
+    (rows, in `order`, then any value not in it) of `values`, aligned with
+    their `statuses`, skipping None values.
+    """
+    counts_by_status = defaultdict(lambda: defaultdict(int))
+    for value, status in zip(values, statuses):
+        if status in _PIE_LINK_STATUSES and value is not None:
+            counts_by_status[status][value] += 1
+    counts = pd.DataFrame(
+        {status: pd.Series(counts_by_status[status], dtype=int) for status in _PIE_LINK_STATUSES}
+    ).fillna(0).astype(int)
+    counts = counts.sort_index(key=lambda index: [order.index(v) if v in order else len(order) for v in index])
+    counts.attrs["category_order"] = order
+    return counts
+
+
+def deciding_factor_counts(outcomes: list[entity_linking.LinkingOutcome], ground_truth: pd.DataFrame) -> pd.DataFrame:
+    """
+    Number of correctly and incorrectly linked addresses per factor the
+    disambiguation between their candidates hinged on (see
+    entity_linking._deciding_factor), for the addresses linked through GeoDBSearch.
+    """
+    return _counts_by_link_status(
+        [outcome.deciding_factor for outcome in outcomes], link_statuses(outcomes, ground_truth),
+        _DISAMBIGUATION_FACTOR_ORDER)
+
+
+def weighted_score_contributions(outcomes: list[entity_linking.LinkingOutcome], ground_truth: pd.DataFrame) -> pd.DataFrame:
+    """
+    Average contribution of each weighted factor (rows) to the weighted score
+    of the linked candidate (see LinkingOutcome.weighted_score_contributions),
+    for the correctly and incorrectly linked addresses (columns) whose
+    disambiguation hinged on the weighted score.
+    """
+    contributions_by_status = defaultdict(list)
+    for outcome, status in zip(outcomes, link_statuses(outcomes, ground_truth)):
+        if status in _PIE_LINK_STATUSES and outcome.deciding_factor == "weighted_score":
+            contributions_by_status[status].append(outcome.weighted_score_contributions)
+    means = pd.DataFrame({
+        status: pd.DataFrame(contributions_by_status[status], dtype=float).fillna(0.0).mean()
+        for status in _PIE_LINK_STATUSES
+    }).fillna(0.0)
+    order = _DISAMBIGUATION_FACTOR_ORDER
+    means = means.sort_index(key=lambda index: [order.index(v) if v in order else len(order) for v in index])
+    means.attrs["category_order"] = order
+    means.attrs["address_counts"] = {status: len(contributions_by_status[status]) for status in _PIE_LINK_STATUSES}
+    return means
+
+
+def reference_search_phase_counts(outcomes: list[entity_linking.LinkingOutcome], ground_truth: pd.DataFrame) -> pd.DataFrame:
+    """
+    Number of correctly and incorrectly linked addresses per phase of
+    GeoDBSearch that retrieved the match of the linked candidate's reference
+    entity (see LinkingOutcome.reference_search_phase).
+    """
+    return _counts_by_link_status(
+        [outcome.reference_search_phase for outcome in outcomes], link_statuses(outcomes, ground_truth),
+        _SEARCH_PHASE_ORDER)
+
+
+def parsing_method_counts(
+    outcomes: list[entity_linking.LinkingOutcome], ground_truth: pd.DataFrame, parsed_rows: list[dict]
+) -> pd.DataFrame:
+    """
+    Number of correctly and incorrectly linked addresses per method that
+    parsed them (regex, or the LLM fallback), from the parsed rows the
+    outcomes were linked from (see run_pipeline).
+    """
+    methods = []
+    for parsed_row in parsed_rows:
+        status = entity_linking._clean_optional_str(parsed_row.get(f"{parsed_row['prefix']}.status"))
+        methods.append(_PARSING_METHOD_NAMES.get(status, status))
+    return _counts_by_link_status(methods, link_statuses(outcomes, ground_truth), _PARSING_METHOD_ORDER)
+
+
+def _plot_pie_row(axes, values: pd.DataFrame, styles: dict[str, tuple[str, str]], min_labeled_pct: float) -> None:
+    """One pie per link status column of `values` (see plot_pies_by_link_status) on `axes`."""
+    is_count = pd.api.types.is_integer_dtype(values.values.dtype)
+    address_counts = values.attrs.get("address_counts", values.sum().to_dict())
+    for ax, status in zip(axes, values.columns):
+        status_values = values[status][values[status] > 0]
+        total = status_values.sum()
+        subtitle = f"{address_counts[status]} addresses"
+        if not is_count:
+            subtitle += f", average total {total:.3f}"
+        ax.set_title(f"{status}\n({subtitle})")
+        if total == 0:
+            ax.text(0.5, 0.5, "No addresses", ha="center", va="center")
+            ax.axis("off")
+            continue
+        label = (
+            _pie_label_with_count(total) if is_count
+            else lambda pct: f"{pct:.1f}%\n({pct * total / 100:.3f})")
+        wedges, _, _ = ax.pie(
+            status_values, colors=[styles[c][0] for c in status_values.index],
+            autopct=lambda pct: label(pct) if pct >= min_labeled_pct else "",
+            startangle=90, counterclock=False, pctdistance=0.75,
+            wedgeprops=dict(edgecolor="white", linewidth=2), textprops=dict(color="#0b0b0b", fontsize=9))
+        for wedge, category in zip(wedges, status_values.index):
+            wedge.set_hatch(styles[category][1])
+        ax.axis("equal")
+
+
+def plot_pies_by_link_status(
+    values: pd.DataFrame | dict[str, pd.DataFrame], title: str, min_labeled_pct: float = 5.0
+) -> None:
+    """
+    Side by side pies of the rows of `values`, one per link status column:
+    address counts (as built by deciding_factor_counts,
+    reference_search_phase_counts and parsing_method_counts) or average
+    contributions (as built by weighted_score_contributions). Several of these
+    tables, keyed by a title for each, are stacked in rows of the same figure
+    sharing one legend. Each category keeps the same color in every pie (see
+    _pie_category_styles); slices under `min_labeled_pct` are left to the legend.
+    """
+    rows = values if isinstance(values, dict) else {None: values}
+    categories = list(dict.fromkeys(c for row_values in rows.values() for c in row_values.index))
+    order = list(dict.fromkeys(c for row_values in rows.values() for c in row_values.attrs.get("category_order", [])))
+    styles = _pie_category_styles(categories, order)
+    n_columns = max(len(row_values.columns) for row_values in rows.values())
+    fig = plt.figure(figsize=(6 * n_columns, 6 * len(rows) + 0.3 * ((len(styles) + 3) // 4)), layout="constrained")
+    subfigures = fig.subfigures(len(rows), 1, squeeze=False)[:, 0]
+    for subfigure, (row_title, row_values) in zip(subfigures, rows.items()):
+        if row_title is not None:
+            subfigure.suptitle(row_title, fontweight="bold")
+        _plot_pie_row(subfigure.subplots(1, n_columns, squeeze=False)[0], row_values, styles, min_labeled_pct)
+    fig.legend(
+        handles=[
+            Patch(facecolor=color, hatch=hatch, edgecolor="white", label=category)
+            for category, (color, hatch) in styles.items()
+        ],
+        loc="outside lower center", ncol=min(4, len(styles)), frameon=False)
+    fig.suptitle(title, fontsize="x-large")
+    # shown right away, so that several of these in one cell interleave with what it displays
+    plt.show()
 
 
 def country_occurrences(outcomes: list[entity_linking.LinkingOutcome]) -> pd.Series:

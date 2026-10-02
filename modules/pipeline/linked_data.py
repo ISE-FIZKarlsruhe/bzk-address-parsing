@@ -44,6 +44,10 @@ class MatchedName:
     is_abbreviation_match : bool
     is_phonetic_match : bool
     is_partial_word_match : bool
+    # The phase of TantivySearchIndex.search during which this match was
+    # retrieved (e.g. "exact", "phonetic", "partial_word"), or how it was
+    # otherwise obtained ("regional_term", "pre_linked", "common_parent")
+    search_phase : Optional[str] = None
     
     @cached_property
     def cleaned_similarity(self) -> float:

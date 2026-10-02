@@ -114,9 +114,27 @@ def _score_dict_to_tuple(scores : dict[str, AnnotatedScore | float], priority : 
             return score
     return tuple(floatify(scores.get(factor, 0.0)) for factor in priority)
 
+def deciding_factor(
+        s1 : dict[str, AnnotatedScore | float],
+        s2 : dict[str, AnnotatedScore | float],
+        priority : list[str],
+        significance_thresholds : dict[str, float]
+    ) -> Optional[tuple[str, float, float]]:
+    """
+    The first factor, in priority order, whose difference between two score
+    dictionaries exceeds its significance threshold, with both scores on it;
+    None if no factor does (the two are tied).
+    """
+    t1 = _score_dict_to_tuple(s1, priority)
+    t2 = _score_dict_to_tuple(s2, priority)
+    for factor, a, b in zip(priority, t1, t2):
+        if abs(a - b) > significance_thresholds[factor]:
+            return factor, a, b
+    return None
+
 def _compare_scores(
-        s1 : dict[str, AnnotatedScore | float], 
-        s2 : dict[str, AnnotatedScore | float], 
+        s1 : dict[str, AnnotatedScore | float],
+        s2 : dict[str, AnnotatedScore | float],
         priority : list[str],
         significance_thresholds : dict[str, float]
     ) -> Literal["gt", "lt", "eq"]:
@@ -125,15 +143,11 @@ def _compare_scores(
     first factor whose difference exceeds its significance threshold decides
     ("gt" or "lt"); "eq" if no factor does.
     """
-    t1 = _score_dict_to_tuple(s1, priority)
-    t2 = _score_dict_to_tuple(s2, priority)
-    for factor, a, b in zip(priority, t1, t2):
-        if abs(a - b) > significance_thresholds[factor]:
-            if a > b:
-                return "gt"
-            else:
-                return "lt"
-    return "eq"
+    decided = deciding_factor(s1, s2, priority, significance_thresholds)
+    if decided is None:
+        return "eq"
+    _, a, b = decided
+    return "gt" if a > b else "lt"
 
 def _average_scores(
         scored_matches : list[ScoredMatch], weights : Optional[list[float]] = None
@@ -351,6 +365,7 @@ class Disambiguator:
             cleaned_alt_name=None,
             cleaned_edit_distance=None,
             matching_method="common_parent",
+            search_phase="common_parent",
             matching_score=0.0,
             fuzzy_score=0.0,
             phonetic_score=0.0,
@@ -420,25 +435,34 @@ class Disambiguator:
                 entity.raw_text, len(matches) - len(country_matches))
         return country_matches
 
-    def _calculate_weighted_score(self, scores : dict[str, float]) -> AnnotatedScore:
-        weight_sum = 0
-        score_sum = 0
+    def weighted_score_contributions(self, scores : dict[str, AnnotatedScore | float]) -> dict[str, float]:
+        """
+        The contribution of each of the score_weights factors present in
+        `scores` to their weighted score (see _calculate_weighted_score), which
+        is the sum of these contributions.
+        """
+        weighted_scores = {}
         for score_name, score_weight in self.score_weights.items():
             score_value = scores.get(score_name)
             if isinstance(score_value, AnnotatedScore):
                 score_value = score_value.score
             if score_value is not None:
-                score_contrib = score_value * score_weight
-                score_sum += score_contrib
-                weight_sum += score_weight
+                weighted_scores[score_name] = score_value * score_weight
                 self.logger.debug(
                     "Factor %s with weight of %.2f and score of %.2f contributes %.2f to the weighted score", 
-                    score_name, score_weight, score_value, score_contrib
+                    score_name, score_weight, score_value, weighted_scores[score_name]
                 )
+        weight_sum = sum(self.score_weights[score_name] for score_name in weighted_scores)
         if weight_sum == 0:
+            return {}
+        return {score_name: score / weight_sum for score_name, score in weighted_scores.items()}
+
+    def _calculate_weighted_score(self, scores : dict[str, float]) -> AnnotatedScore:
+        contributions = self.weighted_score_contributions(scores)
+        if len(contributions) == 0:
             return AnnotatedScore(0, "No factors match")
-        weighted_score = score_sum / weight_sum
-        self.logger.debug("Final weighted score: %.2f / %.2f = %.2f", score_sum, weight_sum, weighted_score)
+        weighted_score = sum(contributions.values())
+        self.logger.debug("Final weighted score: %.2f", weighted_score)
         return AnnotatedScore(weighted_score, "Weighted sum")
 
 

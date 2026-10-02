@@ -57,8 +57,8 @@ from tqdm.auto import tqdm
 
 from modules.address_tagging import tag_address
 from modules.camp_search import DEFAULT_CAMPS_REFERENCE_PATH, CampReferenceMatcher
-from modules.geo_db_search import REGIONAL_TERM_MATCHING_METHOD, _STOP_WORDS, _compiled_stop_words, GeoDBSearch, TantivySearchIndex, ascii_normalize, german_normalize
-from modules.geo_disambiguation import DISAMBIGUATION_FACTOR_PRIORITY, Disambiguator
+from modules.geo_db_search import FUZZY_DISTANCE_1_SEARCH_PHASE, PHONETIC_SEARCH_PHASE, REGIONAL_TERM_MATCHING_METHOD, _STOP_WORDS, _compiled_stop_words, GeoDBSearch, TantivySearchIndex, ascii_normalize, german_normalize
+from modules.geo_disambiguation import MISSED_WORD_ENTITY_WEIGHT, Disambiguator, deciding_factor
 from modules.entity_linking_eval_metrics import normalize_iri
 from modules.pipeline.geographical_entity import GeographicalEntityType
 from modules.pipeline.linked_data import AddressProcessingData, AddressSpan, BZKFieldName, LinkedAddress, MatchedEntity, MatchedName, RawEntity
@@ -114,6 +114,9 @@ class SearchStatus:
     GEO_DB_EXACT_MATCH = "GEO_DB_EXACT_MATCH"
     GEO_DB_ABBREVIATION_MATCH = "GEO_DB_ABBREVIATION_MATCH"
     GEO_DB_PHONETIC_MATCH = "GEO_DB_PHONETIC_MATCH"
+    # retrieved with an edit distance of 1 (in the same phase as phonetic
+    # matches, see geo_db_search._match_search_phase), or of 2 and more
+    GEO_DB_FUZZY_DISTANCE_1_MATCH = "GEO_DB_FUZZY_DISTANCE_1_MATCH"
     GEO_DB_FUZZY_MATCH = "GEO_DB_FUZZY_MATCH"
     GEO_DB_PARTIAL_WORD_MATCH = "GEO_DB_PARTIAL_WORD_MATCH"
     # matched as a regional term (see geo_db_search.RegionalTerms), e.g. a
@@ -155,33 +158,87 @@ _CONTEXT_DISAMBIGUATION_FACTORS = {
 }
 
 
-def _resolved_disambiguation_status(address: AddressProcessingData) -> str:
+# LinkingOutcome.deciding_factor of an address linked without disambiguating
+# between candidates: the only candidate entity, or the common parent of tied ones
+UNAMBIGUOUS_DECIDING_FACTOR = "(single candidate)"
+COMMON_PARENT_DECIDING_FACTOR = "(common parent of tied candidates)"
+
+
+def _candidate_iri(candidate: LinkedAddress) -> str:
+    return candidate.finest_grain_entity.linked_to.geographical_name.entity.iri
+
+
+def _deciding_factor(address: AddressProcessingData, disambiguator: Disambiguator) -> str:
     """
-    Distinguish why disambiguation was able to settle on a single candidate:
-    see DisambiguationStatus.UNAMBIGUOUS/DISAMBIGUATED_BY_CONTEXT/DISAMBIGUATED_HEURISTICALLY.
-    Only meaningful when address.linked_to is not None.
+    The disambiguation factor the choice of address.linked_to hinged on, by
+    the same significance thresholds Disambiguator.disambiguate ranks
+    candidates with (see geo_disambiguation.deciding_factor). Candidates for
+    the same entity as the linked one do not compete with it (disambiguate
+    only treats distinct entities as ambiguous). Against each competitor, the
+    deciding factor is the first one whose difference is significant; the
+    address' is the lowest-priority of those, i.e. the one that separated the
+    linked candidate from its closest competitor. Only meaningful when
+    address.linked_to is not None.
     """
     if address.linked_to_common_parent:
+        return COMMON_PARENT_DECIDING_FACTOR
+    best = address.linked_to
+    best_iri = _candidate_iri(best)
+    priority = disambiguator.priority
+    closest = None
+    for competitor in address.possible_links or ():
+        if _candidate_iri(competitor) == best_iri:
+            continue
+        decided = deciding_factor(best.scores, competitor.scores, priority, disambiguator.significance_thresholds)
+        # a tie would have left the address ambiguous instead
+        if decided is not None and (closest is None or priority.index(decided[0]) > priority.index(closest[0][0])):
+            closest = (decided, competitor)
+    if closest is None:
+        return UNAMBIGUOUS_DECIDING_FACTOR
+    (factor, best_score, competitor_score), competitor = closest
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            "Address %s: best candidate beats its closest competitor %s on '%s' (%.3f vs %.3f)",
+            address.id, _describe_candidate(competitor), factor, best_score, competitor_score)
+    return factor
+
+
+def _resolved_disambiguation_status(factor: str) -> str:
+    """
+    Distinguish why disambiguation was able to settle on a single candidate
+    (see DisambiguationStatus.UNAMBIGUOUS/DISAMBIGUATED_BY_CONTEXT/
+    DISAMBIGUATED_HEURISTICALLY/DISAMBIGUATED_BY_COMMON_PARENT) from the
+    factor it hinged on (see _deciding_factor).
+    """
+    if factor == COMMON_PARENT_DECIDING_FACTOR:
         return DisambiguationStatus.DISAMBIGUATED_BY_COMMON_PARENT
-    possible_links = address.possible_links or ()
-    if len(possible_links) <= 1:
+    if factor == UNAMBIGUOUS_DECIDING_FACTOR:
         return DisambiguationStatus.UNAMBIGUOUS
-    # possible_links is sorted best-first; since address.linked_to is not
-    # None, the best candidate is not tied with the runner-up (see
-    # Disambiguator.disambiguate), so they differ on some factor. The first
-    # (highest-priority) factor where they differ is what the choice hinged on.
-    best, runner_up = possible_links[0].scores, possible_links[1].scores
-    for factor in DISAMBIGUATION_FACTOR_PRIORITY:
-        if best.get(factor, 0.0) != runner_up.get(factor, 0.0):
-            if logger.isEnabledFor(logging.DEBUG):
-                logger.debug(
-                    "Address %s: best candidate beats the runner-up %s on '%s' (%.3f vs %.3f)",
-                    address.id, _describe_candidate(possible_links[1]), factor,
-                    best.get(factor, 0.0), runner_up.get(factor, 0.0))
-            if factor in _CONTEXT_DISAMBIGUATION_FACTORS:
-                return DisambiguationStatus.DISAMBIGUATED_BY_CONTEXT
-            return DisambiguationStatus.DISAMBIGUATED_HEURISTICALLY
+    if factor in _CONTEXT_DISAMBIGUATION_FACTORS:
+        return DisambiguationStatus.DISAMBIGUATED_BY_CONTEXT
     return DisambiguationStatus.DISAMBIGUATED_HEURISTICALLY
+
+
+def _weighted_score_contributions(linked_address: LinkedAddress, disambiguator: Disambiguator) -> dict[str, float]:
+    """
+    The contribution of each weighted factor (see
+    Disambiguator.weighted_score_contributions) to the address-level
+    weighted score of a candidate, which is the sum of these contributions:
+    the per-entity contributions averaged the way the per-entity scores are
+    (see geo_disambiguation._average_scores, with missed words weighing
+    MISSED_WORD_ENTITY_WEIGHT). Entities left without a match only lower the
+    weighted score, so the contributions are scaled from their shares of it.
+    """
+    sums = defaultdict(float)
+    for entity in linked_address.entities:
+        weight = MISSED_WORD_ENTITY_WEIGHT if entity.is_missed_word else 1.0
+        for factor, contribution in disambiguator.weighted_score_contributions(entity.scores).items():
+            sums[factor] += weight * contribution
+    total = sum(sums.values())
+    if total == 0:
+        return {}
+    weighted_score = linked_address.scores.get("weighted_score", 0.0)
+    return {factor: weighted_score * contribution / total for factor, contribution in sums.items()}
 
 
 def _describe_raw_entity(entity: RawEntity) -> str:
@@ -215,8 +272,10 @@ def _geo_db_search_status(matched_name: MatchedName) -> str:
         return SearchStatus.GEO_DB_PHONETIC_MATCH
     if matched_name.is_partial_word_match:
         return SearchStatus.GEO_DB_PARTIAL_WORD_MATCH
-    if matched_name.cleaned_edit_distance == 0:
+    if matched_name.search_phase == "exact":
         return SearchStatus.GEO_DB_EXACT_MATCH
+    if matched_name.search_phase == FUZZY_DISTANCE_1_SEARCH_PHASE:
+        return SearchStatus.GEO_DB_FUZZY_DISTANCE_1_MATCH
     return SearchStatus.GEO_DB_FUZZY_MATCH
 
 
@@ -577,6 +636,17 @@ class LinkingOutcome:
     # Address-level (average of per-entity) disambiguation scores for the
     # winning candidate.
     disambiguation_scores: dict = field(default_factory=dict)
+    # The disambiguation factor the choice of the linked candidate hinged on
+    # (see _deciding_factor), when one was linked through GeoDBSearch.
+    deciding_factor: Optional[str] = None
+    # The phase of GeoDBSearch (see MatchedName.search_phase) that retrieved
+    # the match of the reference entity of the linked candidate, or of the
+    # first likely candidate when disambiguation could not settle on one.
+    reference_search_phase: Optional[str] = None
+    # The contribution of each weighted factor to the linked candidate's
+    # weighted score (see _weighted_score_contributions), when one was
+    # linked through GeoDBSearch.
+    weighted_score_contributions: dict = field(default_factory=dict)
     total_time : Optional[float] = None
     # The address as it was when linking stopped (after disambiguation, when
     # it got that far), with every scored candidate; only kept when
@@ -596,6 +666,7 @@ def _matching_metadata(matched_name: MatchedName) -> dict:
         "is_partial_word_match": matched_name.is_partial_word_match,
         "fuzzy_score": matched_name.fuzzy_score,
         "cleaned_similarity": matched_name.cleaned_similarity,
+        "search_phase": matched_name.search_phase,
     }
 
 
@@ -782,9 +853,11 @@ def _link_field(
             logger.debug(
                 "Address %s: linked to %s out of %d possible link(s)",
                 address.id, _describe_candidate(linked_address), possible_links_count)
-        disambiguation_status = _resolved_disambiguation_status(address)
+        decided_by = _deciding_factor(address, disambiguator)
+        disambiguation_status = _resolved_disambiguation_status(decided_by)
         ambiguous_iris = None
         search_status_match = linked_address.finest_grain_entity.linked_to
+        reference_match = linked_address.reference_entity.linked_to
         if address.linked_to_common_parent:
             # The linked entity was not itself found by search, but inferred
             # from the ambiguous candidates, which are kept for reference.
@@ -793,6 +866,7 @@ def _link_field(
                 for candidate in address.likely_links
             ]
             search_status_match = address.likely_links[0].finest_grain_entity.linked_to
+            reference_match = address.likely_links[0].reference_entity.linked_to
         return LinkingOutcome(
             iri=finest_iri,
             entity_type=finest_type,
@@ -804,6 +878,9 @@ def _link_field(
             possible_links_count=possible_links_count,
             likely_links_count=likely_links_count,
             disambiguation_scores=dict(linked_address.scores),
+            deciding_factor=decided_by,
+            reference_search_phase=reference_match.search_phase,
+            weighted_score_contributions=_weighted_score_contributions(linked_address, disambiguator),
             total_time=_elapsed()
         ), address
     if likely_links_count > 1:
@@ -829,6 +906,7 @@ def _link_field(
             possible_links_count=possible_links_count,
             likely_links_count=likely_links_count,
             disambiguation_scores=dict(first_candidate.scores),
+            reference_search_phase=first_candidate.reference_entity.linked_to.search_phase,
             total_time=_elapsed()
         ), address
     logger.debug(
@@ -866,6 +944,12 @@ def apply_outcome_to_row(row: dict, prefix: str, outcome: LinkingOutcome) -> dic
         updates[f"{prefix}.likely_links_count"] = outcome.likely_links_count
     for criterion, score in outcome.disambiguation_scores.items():
         updates[f"{prefix}.disambiguation_score.{criterion}"] = score
+    if outcome.deciding_factor is not None:
+        updates[f"{prefix}.deciding_factor"] = outcome.deciding_factor
+    if outcome.reference_search_phase is not None:
+        updates[f"{prefix}.reference_search_phase"] = outcome.reference_search_phase
+    for criterion, contribution in outcome.weighted_score_contributions.items():
+        updates[f"{prefix}.weighted_score_contribution.{criterion}"] = contribution
     for entity_metadata in outcome.linked_entities:
         entity_prefix = f"{prefix}.{entity_metadata.entity_type}"
         updates[f"{entity_prefix}_iri"] = entity_metadata.iri
@@ -933,7 +1017,7 @@ def build_geo_db_searcher(
 
 def build_disambiguator(geo_db_path: str = "geo.duckdb") -> Disambiguator:
     significance_theresholds = defaultdict(_default_significance_threshold)
-    for k, v in SIGNIFICANCE_THRESHOLDS:
+    for k, v in SIGNIFICANCE_THRESHOLDS.items():
         significance_theresholds[k] = v
     return Disambiguator(
         significance_thresholds=significance_theresholds,

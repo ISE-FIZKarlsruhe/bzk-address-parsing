@@ -997,11 +997,33 @@ class IndexSearchMatch(NamedTuple):
     geographical_name : Optional[GeographicalName] = None
 
 
+# Names of the phases of TantivySearchIndex.search (see MatchedName.search_phase)
+# which retrieve their matches in the same phase, told apart per match by
+# _match_search_phase
+PHONETIC_SEARCH_PHASE = "phonetic"
+FUZZY_DISTANCE_1_SEARCH_PHASE = "fuzzy(distance=1)"
+
+
+def _match_search_phase(phase : Optional[str], index_match : "IndexSearchMatch") -> Optional[str]:
+    """
+    The search phase of a single match of a phase of TantivySearchIndex.search:
+    the phonetic phase also runs the edit distance 1 fuzzy query, so its
+    matches are told apart by whether they came from the phonetic key (which
+    takes precedence for a name retrieved by both, consistently with
+    MatchedName.is_phonetic_match) or from the fuzzy query.
+    """
+    if phase is not None and phase.startswith(PHONETIC_SEARCH_PHASE):
+        return PHONETIC_SEARCH_PHASE if index_match.is_phonetic_match else FUZZY_DISTANCE_1_SEARCH_PHASE
+    return phase
+
+
 class IndexSearchResult(NamedTuple):
     nfc_query : str
     query_strings : list[str]
     abbreviation_pattern : Optional[str]
     matches : list[IndexSearchMatch]
+    # The phase of TantivySearchIndex.search that retrieved the matches
+    phase : Optional[str] = None
 
 
 def _describe_index_matches(matches : Iterable[IndexSearchMatch]) -> list[str]:
@@ -1635,7 +1657,7 @@ class TantivySearchIndex(GeoSearchIndex):
             # catches names that were misheard/misspelled in a way plain edit
             # distance on the raw string would not, and vice versa, so neither
             # should preempt the other
-            phonetic_phase_name = "phonetic"
+            phonetic_phase_name = PHONETIC_SEARCH_PHASE
             phonetic_phase_matches = []
             if phonetic_query_string.strip() != "":
                 self.logger.debug(
@@ -1646,7 +1668,7 @@ class TantivySearchIndex(GeoSearchIndex):
             else:
                 self.logger.debug("Phase 'phonetic' for %r skipped: empty phonetic key", expanded_query)
             if distance_threshold >= 1:
-                phonetic_phase_name = "phonetic+fuzzy(distance=1)"
+                phonetic_phase_name = f"{PHONETIC_SEARCH_PHASE}+{FUZZY_DISTANCE_1_SEARCH_PHASE}"
                 self.logger.debug(
                     "Phase 'phonetic' for %r: query strings %s, edit distance 1", expanded_query, query_strings)
                 phonetic_phase_matches.extend(self._search_inner(
@@ -1680,6 +1702,7 @@ class TantivySearchIndex(GeoSearchIndex):
                     query_strings=query_strings,
                     abbreviation_pattern=abbrev_pattern,
                     matches=matches,
+                    phase=phase,
                 )):
                     self.logger.debug("Phase '%s' for %r settled the search; stopping", phase, expanded_query)
                     break
@@ -1891,6 +1914,7 @@ class GeoDBSearch(LinkingStep):
                 cleaned_alt_name=term,
                 cleaned_edit_distance=None,
                 matching_method=REGIONAL_TERM_MATCHING_METHOD,
+                search_phase="regional_term",
                 matching_score=1.0,
                 fuzzy_score=fuzzy_score,
                 phonetic_score=phonetic_score,
@@ -2047,7 +2071,8 @@ class GeoDBSearch(LinkingStep):
                 matching_method=(
                     REGIONAL_TERM_MATCHING_METHOD if index_match.geographical_name is not None
                     else self.search_index.index_descriptor),
-                matching_score=index_match.score
+                matching_score=index_match.score,
+                search_phase=_match_search_phase(index_result.phase, index_match),
             )
 
             yield matched_name
@@ -2113,6 +2138,7 @@ class GeoDBSearch(LinkingStep):
             cleaned_alt_name=None,
             cleaned_edit_distance=None,
             matching_method="pre_linked",
+            search_phase="pre_linked",
             matching_score=1.0,
             fuzzy_score=1.0,
             phonetic_score=1.0,
