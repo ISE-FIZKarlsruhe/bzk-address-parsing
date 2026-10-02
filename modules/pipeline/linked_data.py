@@ -2,7 +2,6 @@ from dataclasses import dataclass, field
 from typing import Hashable, LiteralString, Optional, Callable, NamedTuple, Literal
 from enum import Enum
 from modules.pipeline.geographical_entity import (
-    Coordinates,
     GeographicalBranch,
     GeographicalEntityType,
     GeographicalName
@@ -148,22 +147,6 @@ class RawEntity:
 class MatchedEntity(RawEntity):
     matches : tuple[MatchedName, ...]
 
-@dataclass(frozen=True)
-class RegionHintEntity(RawEntity):
-    """
-    Not a real geographical entity (no iri, official name, etc.): a region
-    inferred by GeoDBSearch from an informative word left over from a partial
-    word match of another entity (e.g. "Saarpfalz" in "Homburg Saarpfalz"),
-    as the centroids of the clusters of the locations of the entities known
-    under indexed names containing that word (see
-    TantivySearchIndex._region_clusters_for_word). Only used by the
-    Disambiguator to score the regional_term_match of the matches of the
-    entity it was found for (source_entity_id), by their distance to the
-    closest centroid.
-    """
-    source_entity_id : str
-    centroids : tuple[Coordinates, ...]
-
 class AnnotatedScore(NamedTuple):
     score : int | float
     comment : Optional[str] = None
@@ -204,6 +187,4 @@ class AddressProcessingData:
     # entity at the branch of the geographical hierarchy they all share (e.g.
     # the state all of them lie in); see Disambiguator._link_to_common_parent.
     linked_to_common_parent : bool = False
-    # kept apart from entities, which are all expected to be real entities
-    region_hints : tuple[RegionHintEntity, ...] = ()
 

@@ -48,7 +48,7 @@ from tqdm.auto import tqdm
 
 from modules.address_tagging import tag_address
 from modules.camp_search import DEFAULT_CAMPS_REFERENCE_PATH, CampReferenceMatcher
-from modules.geo_db_search import _STOP_WORDS, _compiled_stop_words, GeoDBSearch, TantivySearchIndex, ascii_normalize, german_normalize
+from modules.geo_db_search import REGIONAL_TERM_MATCHING_METHOD, _STOP_WORDS, _compiled_stop_words, GeoDBSearch, TantivySearchIndex, ascii_normalize, german_normalize
 from modules.geo_disambiguation import DISAMBIGUATION_FACTOR_PRIORITY, Disambiguator
 from modules.entity_linking_eval_metrics import normalize_iri
 from modules.pipeline.geographical_entity import GeographicalEntityType
@@ -107,6 +107,9 @@ class SearchStatus:
     GEO_DB_PHONETIC_MATCH = "GEO_DB_PHONETIC_MATCH"
     GEO_DB_FUZZY_MATCH = "GEO_DB_FUZZY_MATCH"
     GEO_DB_PARTIAL_WORD_MATCH = "GEO_DB_PARTIAL_WORD_MATCH"
+    # matched as a regional term (see geo_db_search.RegionalTerms), e.g. a
+    # German state named as a whole
+    GEO_DB_REGIONAL_TERM_MATCH = "GEO_DB_REGIONAL_TERM_MATCH"
 
 
 class DisambiguationStatus:
@@ -195,6 +198,8 @@ def _describe_candidate(candidate: LinkedAddress) -> str:
 def _geo_db_search_status(matched_name: MatchedName) -> str:
     if matched_name.matching_method == "pre_linked":
         return SearchStatus.PRE_LINKED_DURING_PARSING
+    if matched_name.matching_method == REGIONAL_TERM_MATCHING_METHOD:
+        return SearchStatus.GEO_DB_REGIONAL_TERM_MATCH
     if matched_name.is_abbreviation_match:
         return SearchStatus.GEO_DB_ABBREVIATION_MATCH
     if matched_name.is_phonetic_match:

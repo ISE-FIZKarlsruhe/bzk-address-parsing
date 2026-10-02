@@ -750,9 +750,6 @@ class DisambiguationErrorExplainer:
         current_level = geo_db_search.ENTITY_LINKING_LOGGER.level
         if verbose:
             geo_db_search.ENTITY_LINKING_LOGGER.setLevel(logging.DEBUG)
-            region_branch_cache = self.geo_db_searcher.search_index._region_cluster_cache
-            logging.debug(f"Clearing cache geo_db_searcher.search_index._region_cluster_cache, contents {region_branch_cache}")
-            region_branch_cache.clear()
         try:
             self._explain(address_id)
         finally:

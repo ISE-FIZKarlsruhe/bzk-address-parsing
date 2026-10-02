@@ -16,9 +16,10 @@ import warnings
 import textwrap
 import itertools
 import time
-from collections import defaultdict
-from modules.pipeline.geographical_entity import Coordinates, CountryData, GeographicalBranch, GeographicalEntity, GeographicalEntityType, GeographicalName, GeonamesAdminCodes
-from modules.pipeline.linked_data import MatchedEntity, MatchedName, RawEntity, RegionHintEntity
+from collections import Counter, defaultdict
+from dataclasses import dataclass
+from modules.pipeline.geographical_entity import Coordinates, CountryData, RegionGeometry, GeographicalBranch, GeographicalEntity, GeographicalEntityType, GeographicalName, GeonamesAdminCodes
+from modules.pipeline.linked_data import MatchedEntity, MatchedName, RawEntity
 from modules.pipeline.linking_steps import LinkingStep
 import tantivy
 from tqdm.auto import tqdm
@@ -30,6 +31,7 @@ import editdistpy
 import sys
 import dataclasses
 import json
+import hashlib
 import logging
 import pyarrow
 import unidecode
@@ -136,11 +138,11 @@ _NAME_LANGUAGE_FILTER = f"""(
 )"""
 
 # Entities left out of the search index:
-# - rivers (geonames stream features, typed Region in the geo db), which
-#   addresses name as a qualifier of a place (e.g. "Ulm/Donau") rather than
-#   as the place itself, and are better used through the region hints of
-#   the names of the places along them (see
-#   TantivySearchIndex._region_clusters_for_word)
+# - rivers and lakes (geonames stream, lake and reservoir features, typed
+#   Region in the geo db), which addresses name as a qualifier of a place
+#   (e.g. "Ulm/Donau", "Tutzing am Starnberger See") rather than as the place
+#   itself, and are better located by the places named after them (see
+#   build_regional_terms)
 # - wikidata entities with a number in any of their names, which are
 #   monuments misclassified as settlements (e.g. "Bodendenkmal in Hausen bei
 #   Würzburg, #D-6-6026-0013", also named "Siedlung in ..."), cluttering the
@@ -149,6 +151,8 @@ _NAME_LANGUAGE_FILTER = f"""(
 #   among the names of actual places.
 _INDEX_EXCLUDED_ENTITIES_FILTER = """(
     coalesce(entity.classification, '') NOT LIKE 'H.STM%' AND
+    coalesce(entity.classification, '') NOT LIKE 'H.LK%' AND
+    coalesce(entity.classification, '') != 'H.RSV' AND
     NOT (
         entity.iri LIKE 'http://www.wikidata.org/entity/%' AND
         entity.iri IN (
@@ -348,6 +352,32 @@ def abbreviation_pattern_to_regexes(part : str) -> str:
     else:
         return f"({ascii_regex_pattern})|({german_regex_pattern})"
 
+# Min length of a word abbreviated in a query for it to pair, in a partial
+# word match, with the words it is a prefix of (see abbreviated_words): a
+# shorter one (e.g. "b." for "bei", "St." for "Sankt") is the prefix of too
+# many unrelated words
+MIN_ABBREVIATED_WORD_LENGTH = 3
+
+def abbreviated_words(part : str) -> frozenset[str]:
+    """
+    The words of `part` written abbreviated, i.e. directly followed by a
+    period (e.g. "bergstr" in "Weinheim/Bergstr."), normalized both ways as
+    in normalized_search_strings: the words abbreviation_pattern_to_regexes
+    lets any letters follow. Standard abbreviations made up only of initials
+    (e.g. "U.S.A.") and words shorter than MIN_ABBREVIATED_WORD_LENGTH are
+    left out.
+    """
+    prefixes = part.split(".")
+    if len(prefixes) == 1 or all(len(p.strip()) <= 1 for p in prefixes):
+        return frozenset()
+    words = set()
+    for prefix in prefixes[:-1]:
+        for normalize in (ascii_normalize, german_normalize):
+            normalized_words = normalize(prefix).split(" ")
+            if len(normalized_words[-1]) >= MIN_ABBREVIATED_WORD_LENGTH:
+                words.add(normalized_words[-1])
+    return frozenset(words)
+
 def is_entity_type_ruled_out(
         entity_type : GeographicalEntityType, match_entity_types : Collection[GeographicalEntityType]
     ) -> bool:
@@ -377,27 +407,41 @@ def geodesic_distance_km(a : Coordinates, b : Coordinates) -> float:
     h = math.sin((lat2 - lat1) / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2) ** 2
     return 2 * EARTH_RADIUS_KM * math.asin(math.sqrt(min(1.0, h)))
 
-def cluster_coordinates(points : Collection[Coordinates], max_distance_km : float) -> tuple[Coordinates, ...]:
+def cluster_coordinates(
+        points : Collection[Coordinates], max_distance_km : float
+    ) -> tuple[tuple[Coordinates, ...], ...]:
     """
     Clusters the points by merging any two within max_distance_km of each
     other (single linkage, so a chain of nearby points ends up in one
-    cluster), and returns the centroid of every cluster, largest cluster
-    first. Centroids are taken on the sphere (the mean of the points' unit
-    vectors), so that clusters across the antimeridian are averaged right.
+    cluster, e.g. the places along a river), and returns the points of every
+    cluster, largest cluster first.
     """
+    points = list(points)
     if len(points) == 0:
         return ()
     radians = np.radians([[p.latitude, p.longitude] for p in points])
     labels = DBSCAN(
         eps=max_distance_km / EARTH_RADIUS_KM, min_samples=1, metric="haversine", algorithm="ball_tree"
     ).fit_predict(radians)
-    centroids = []
-    for label in sorted(set(labels), key=lambda l: -np.count_nonzero(labels == l)):
-        lat, lon = radians[labels == label].T
-        x, y, z = (np.cos(lat) * np.cos(lon)).mean(), (np.cos(lat) * np.sin(lon)).mean(), np.sin(lat).mean()
-        centroids.append(Coordinates(
-            latitude=math.degrees(math.atan2(z, math.hypot(x, y))), longitude=math.degrees(math.atan2(y, x))))
-    return tuple(centroids)
+    clusters = defaultdict(list)
+    for point, label in zip(points, labels):
+        clusters[label].append(point)
+    return tuple(tuple(cluster) for cluster in sorted(clusters.values(), key=len, reverse=True))
+
+def distance_to_geometry_km(point : Coordinates, geometry : RegionGeometry) -> float:
+    """Great-circle distance in km from the point to the closest point of the geometry."""
+    lat, lon = geometry.points_radians.T
+    lat1, lon1 = math.radians(point.latitude), math.radians(point.longitude)
+    h = np.sin((lat - lat1) / 2) ** 2 + math.cos(lat1) * np.cos(lat) * np.sin((lon - lon1) / 2) ** 2
+    return float(2 * EARTH_RADIUS_KM * np.arcsin(np.sqrt(np.minimum(1.0, h))).min())
+
+def geometries_distance_km(a : RegionGeometry, b : RegionGeometry) -> float:
+    """Great-circle distance in km between the closest points of the two geometries."""
+    if len(a.points_radians) > len(b.points_radians):
+        a, b = b, a
+    return min(
+        distance_to_geometry_km(Coordinates(math.degrees(lat), math.degrees(lon)), b)
+        for lat, lon in a.points_radians)
 
 _NAME_SCORING_LOGGER = ENTITY_LINKING_LOGGER.getChild("NameScoring")
 
@@ -440,13 +484,17 @@ def score_name_similarity(
 PARTIAL_MATCH_WORD_DISTANCE = 1
 
 def pair_words(
-        query_words : list[str], candidate_words : list[str], max_distance : int = PARTIAL_MATCH_WORD_DISTANCE
+        query_words : list[str], candidate_words : list[str], max_distance : int = PARTIAL_MATCH_WORD_DISTANCE,
+        abbreviated_query_words : Collection[str] = frozenset()
     ) -> tuple[list[tuple[int, int]], list[int], list[int]]:
     """
     Greedily pairs up words between the two lists, closest edit distance
-    first (within max_distance), each word used in at most one pair. Returns
-    the (query word index, candidate word index) pairs and the indices of the
-    words on either side left unpaired.
+    first (within max_distance), each word used in at most one pair. A query
+    word among abbreviated_query_words (see abbreviated_words) also pairs
+    with the candidate words it is a prefix of (e.g. "bergstr" with
+    "bergstrasse"), ranked as if at max_distance. Returns the (query word
+    index, candidate word index) pairs and the indices of the words on either
+    side left unpaired.
     """
     candidate_pairs = []
     for qi, qword in enumerate(query_words):
@@ -454,6 +502,8 @@ def pair_words(
             distance = levenshtein(qword, cword, max_distance)
             if distance <= max_distance:
                 candidate_pairs.append((distance, qi, ci))
+            elif qword in abbreviated_query_words and cword.startswith(qword):
+                candidate_pairs.append((max_distance, qi, ci))
     candidate_pairs.sort(key=lambda p: p[0])
     used_query, used_candidate = set(), set()
     pairs = []
@@ -477,10 +527,12 @@ def partial_match_query_span(nfc_query : str, matched_key : str) -> Optional[tup
     string: from the first to the last query word paired with one of the
     name's words (stop words aside). The query words are paired under both
     the basic and the german ascii normalization, as when searching (see
-    normalized_search_strings), keeping whichever pairs more words. None if
-    no query word pairs with the name.
+    normalized_search_strings), keeping whichever pairs more words, and
+    abbreviated ones with the words they are a prefix of (see
+    abbreviated_words). None if no query word pairs with the name.
     """
     tokens = list(_WORD_REGEX.finditer(nfc_query))
+    abbreviated = abbreviated_words(nfc_query)
     candidate_words = [w for w in matched_key.split(" ") if w and w not in _STOP_WORDS]
     best_paired_tokens : list[int] = []
     for normalize in (ascii_normalize, german_normalize):
@@ -490,12 +542,340 @@ def partial_match_query_span(nfc_query : str, matched_key : str) -> Optional[tup
             if word and word not in _STOP_WORDS:
                 token_indices.append(i)
                 query_words.append(word)
-        pairs, _, _ = pair_words(query_words, candidate_words)
+        pairs, _, _ = pair_words(query_words, candidate_words, abbreviated_query_words=abbreviated)
         if len(pairs) > len(best_paired_tokens):
             best_paired_tokens = [token_indices[qi] for qi, _ in pairs]
     if len(best_paired_tokens) == 0:
         return None
     return tokens[min(best_paired_tokens)].start(), tokens[max(best_paired_tokens)].end()
+
+# Countries whose place names regional terms are collected from (see
+# build_regional_terms). The geometry of a term is estimated from the places
+# it qualifies in these and their neighboring countries, since regions named
+# in the addresses often extend across today's borders (e.g. "Ostpreussen",
+# now in Poland, Russia and Lithuania).
+REGIONAL_TERM_COUNTRIES = ("DE", "PL", "CZ", "IL")
+# Prepositions introducing the qualifier of a place name (German, then
+# Polish/Czech), e.g. "Neustadt an der Donau", "Kazimierz nad Wisłą",
+# "Rožnov pod Radhoštěm", "Hradec u Kadaně", "Nové Město na Moravě"
+_REGIONAL_TERM_PREPOSITIONS = (
+    r"am|an\s+der|an\s+dem|an|in\s+der|in\s+dem|im|in|bei|b\.|ob\s+der|auf\s+der|auf\s+dem|"
+    r"vor\s+der|vor\s+dem|unter\s+der|über|a\.\s*d\.|a\.|i\.\s*d\.|i\.|nad|pod|u|na"
+)
+# The qualifier of a place name: after a preposition, in parentheses or after
+# a slash. Dashes are left out, since what follows them is mostly a generic
+# suffix (e.g. "-Siedlung", "-Dorf") or a district's name.
+_REGIONAL_TERM_PATTERNS = (
+    re.compile(rf"^.+\s+(?:{_REGIONAL_TERM_PREPOSITIONS})\s+(?P<qualifier>[^()/]+)$"),
+    re.compile(rf"^[^()]+?\s*\(\s*(?:(?:{_REGIONAL_TERM_PREPOSITIONS})\s+)?(?P<qualifier>[^()]+?)\s*\)\s*$"),
+    re.compile(rf"^[^/()]+?\s*/\s*(?:(?:{_REGIONAL_TERM_PREPOSITIONS})\s+)?(?P<qualifier>[^/()]+?)\s*$"),
+)
+# Min number of distinct entities a term must qualify to be a regional term
+REGIONAL_TERM_MIN_ENTITIES = 2
+# Max distance between the places qualified by a term for them to be merged
+# into the same cluster of its geometry
+REGIONAL_TERM_CLUSTER_DISTANCE_KM = 50
+# Grid (in degrees, ~5 km) the points of a geometry are snapped to and
+# deduplicated on, to keep the geometry of widespread terms small
+REGIONAL_TERM_GRID_DEGREES = 0.05
+# Terms naming a populated place at least this large are left out: a city
+# qualifying its surroundings (e.g. "Garching bei München") is a place to look
+# up in its own right (e.g. "München-Pasing"), not only a region
+REGIONAL_TERM_MAX_PLACE_POPULATION = 50_000
+# Divisions whose center coordinates make up the geometry of a German state.
+# Geonames' ADM2 (Regierungsbezirk) only exists in 4 of the 16 states, so
+# ADM3 (Kreis) is used instead.
+GERMAN_STATE_GEOMETRY_DIVISION = "A.ADM3"
+# City states, which are cities first: their names are left out of the
+# regional terms
+_GERMAN_CITY_STATE_ADMIN1_CODES = ("03", "04", "16")  # Bremen, Hamburg, Berlin
+# Entity types whose whole text may be matched as a regional term (see
+# GeoDBSearch._regional_term_match)
+REGIONAL_TERM_ENTITY_TYPES = (
+    GeographicalEntityType.AboveCity, GeographicalEntityType.Region,
+    GeographicalEntityType.State, GeographicalEntityType.District,
+)
+# MatchedName.matching_method of a match on a regional term
+REGIONAL_TERM_MATCHING_METHOD = "regional_term"
+# IRI prefix of the synthetic entities standing for a regional term without
+# an entity of its own, which can thus never be linked
+REGIONAL_TERM_IRI_PREFIX = "regional-term:"
+# Bump to invalidate the cached regional terms after changing how they are built
+_REGIONAL_TERMS_VERSION = 2
+
+
+@dataclass(frozen=True)
+class RegionalTerm:
+    # The name matched on the term: a synthetic entity (see
+    # REGIONAL_TERM_IRI_PREFIX) or, for a German state, the state itself,
+    # either way carrying the term's geometry
+    geographical_name : GeographicalName
+    # Number of distinct entities the geometry was estimated from
+    entity_count : int
+
+
+class RegionalTerms:
+    """
+    Normalized regional terms (e.g. "donau", "bergstrasse", "hessen") mapped
+    to the regions they name, located by the places they qualify (see
+    build_regional_terms). Matched on instead of being looked up in the
+    index: see GeoDBSearch._regional_term_match and
+    TantivySearchIndex._partial_word_match.
+    """
+    def __init__(self, terms : dict[str, RegionalTerm]):
+        self.terms = terms
+        self._max_words = max((len(term.split(" ")) for term in terms), default=0)
+        self._single_word_terms = sorted(term for term in terms if " " not in term)
+
+    def __getitem__(self, term : str) -> RegionalTerm:
+        return self.terms[term]
+
+    def __contains__(self, term : str) -> bool:
+        return term in self.terms
+
+    def __len__(self) -> int:
+        return len(self.terms)
+
+    def _abbreviated_term(self, word : str) -> Optional[str]:
+        """The regional term the abbreviated word stands for (e.g. "bergstr" for "bergstrasse"), the one qualifying the most entities if several."""
+        candidates = [term for term in self._single_word_terms if term.startswith(word)]
+        return max(candidates, key=lambda term: self.terms[term].entity_count, default=None)
+
+    def find(self, query_string : str, abbreviated_query_words : Collection[str] = frozenset()) -> Optional[str]:
+        """The regional term the whole query string is, if any."""
+        if query_string in self.terms:
+            return query_string
+        if " " not in query_string and query_string in abbreviated_query_words:
+            return self._abbreviated_term(query_string)
+        return None
+
+    def find_in_words(
+            self, words : list[str], abbreviated_query_words : Collection[str] = frozenset()
+        ) -> tuple[list[str], list[str]]:
+        """
+        The regional terms found among the words (longest first, left to
+        right, each word in at most one term), and the words left over. Only
+        looked for after the first word, which names the place itself (e.g.
+        "steinbach" in "steinbach glan", though "steinbach" also qualifies
+        other places), as terms are collected from qualifiers.
+        """
+        terms, remaining = [], words[:1]
+        i = 1
+        while i < len(words):
+            for n in range(min(self._max_words, len(words) - i), 0, -1):
+                term = self.find(" ".join(words[i:i + n]), abbreviated_query_words if n == 1 else frozenset())
+                if term is not None:
+                    terms.append(term)
+                    i += n
+                    break
+            else:
+                remaining.append(words[i])
+                i += 1
+        return terms, remaining
+
+
+def _snap_to_grid(points : Iterable[Coordinates]) -> list[Coordinates]:
+    """The points snapped to REGIONAL_TERM_GRID_DEGREES and deduplicated."""
+    snapped = {
+        (round(p.latitude / REGIONAL_TERM_GRID_DEGREES) * REGIONAL_TERM_GRID_DEGREES,
+         round(p.longitude / REGIONAL_TERM_GRID_DEGREES) * REGIONAL_TERM_GRID_DEGREES): None
+        for p in points
+    }
+    return [Coordinates(round(lat, 4), round(lon, 4)) for lat, lon in snapped]
+
+
+def _regional_term_entry(
+        display_name : str, points_by_iri : dict[str, tuple[Coordinates, str]], state_iri : Optional[str] = None
+    ) -> dict:
+    """The cacheable description of a regional term (see _regional_terms_from_entries)."""
+    clusters = cluster_coordinates(_snap_to_grid(p for p, _ in points_by_iri.values()), REGIONAL_TERM_CLUSTER_DISTANCE_KM)
+    countries = Counter(country for _, country in points_by_iri.values())
+    return {
+        "name": display_name,
+        "clusters": [[[p.latitude, p.longitude] for p in cluster] for cluster in clusters],
+        "countries": [country for country, _ in countries.most_common()],
+        "entities": len(points_by_iri),
+        "state_iri": state_iri,
+    }
+
+
+def build_regional_terms(connection : duckdb.DuckDBPyConnection, search_index : "TantivySearchIndex") -> dict[str, dict]:
+    """
+    Collects the regional terms of the indexed place names in
+    REGIONAL_TERM_COUNTRIES: the informative words (see
+    TantivySearchIndex.partial_match_idf_threshold) qualifying a place's name
+    (see _REGIONAL_TERM_PATTERNS, e.g. "donau" in "Neustadt an der Donau",
+    "bergstrasse" in "Heppenheim (Bergstraße)"), or the whole qualifier if
+    made up of several words (e.g. "thuringer wald"), qualifying at least
+    REGIONAL_TERM_MIN_ENTITIES distinct entities there. Each is mapped to a
+    geometry estimated from the locations of the entities it qualifies, in
+    REGIONAL_TERM_COUNTRIES and their neighboring countries, clustered (see
+    cluster_coordinates). Also maps the names of every German
+    state but the city states to its geometry, estimated from the centers of
+    its divisions (see GERMAN_STATE_GEOMETRY_DIVISION), overriding a term of
+    the same name. Returns the cacheable entries of the terms, keyed by their
+    basic normalization (see normalized_search_strings), which every search
+    tries.
+    """
+    logger = ENTITY_LINKING_LOGGER.getChild("RegionalTerms")
+    countries_sql = ", ".join(f"'{country}'" for country in REGIONAL_TERM_COUNTRIES)
+    neighboring_countries = sorted({
+        neighbor
+        for (neighbors,) in connection.execute(f"""
+            SELECT DISTINCT entity.country.neighboring_countries_iso_codes FROM geo_db.geographical_names_with_entities
+            WHERE entity.country.iso_code IN ({countries_sql}) AND entity.classification = 'A.PCLI'
+        """).fetchall()
+        for neighbor in neighbors
+    } - set(REGIONAL_TERM_COUNTRIES))
+    point_countries_sql = ", ".join(f"'{country}'" for country in (*REGIONAL_TERM_COUNTRIES, *neighboring_countries))
+    rows = connection.execute(f"""
+        SELECT DISTINCT name, entity.iri, entity.coordinates.latitude, entity.coordinates.longitude,
+            entity.country.iso_code
+        FROM ({POP_LANGUAGE_FILTERED_NAMES_SELECT})
+        WHERE entity.country.iso_code IN ({point_countries_sql}) AND entity.coordinates.latitude IS NOT NULL
+            AND regexp_matches(name, '[(/]|\\s\\S+\\s')
+    """).fetchall()
+    logger.info(
+        "Collecting regional terms from names in %s, locating them in those and %s (%d names)",
+        REGIONAL_TERM_COUNTRIES, neighboring_countries, len(rows))
+    # term -> iri -> (coordinates, country), in every country; term -> iris
+    # in REGIONAL_TERM_COUNTRIES; term -> raw spellings
+    qualified : dict[str, dict[str, tuple[Coordinates, str]]] = defaultdict(dict)
+    qualified_in_countries : dict[str, set[str]] = defaultdict(set)
+    spellings : dict[str, Counter] = defaultdict(Counter)
+    for name, iri, latitude, longitude, country in rows:
+        name = unicodedata.normalize("NFC", name).strip()
+        for pattern in _REGIONAL_TERM_PATTERNS:
+            match = pattern.match(name)
+            if match is None:
+                continue
+            qualifier = match.group("qualifier").strip()
+            raw_words = [w for w in _WORD_REGEX.findall(qualifier) if not any(c.isdigit() for c in w)]
+            terms = []
+            for raw_word in raw_words:
+                word = ascii_normalize(raw_word)
+                if len(word) >= 3 and word not in _STOP_WORDS:
+                    terms.append((word, raw_word))
+            if len(terms) > 1:
+                terms.append((" ".join(word for word, _ in terms), " ".join(raw for _, raw in terms)))
+            for term, spelling in terms:
+                qualified[term][iri] = (Coordinates(latitude, longitude), country)
+                if country in REGIONAL_TERM_COUNTRIES:
+                    qualified_in_countries[term].add(iri)
+                    spellings[term][spelling] += 1
+            break
+    large_places = {
+        ascii_normalize(name) for (name,) in connection.execute(f"""
+            SELECT DISTINCT name FROM ({POP_LANGUAGE_FILTERED_NAMES_SELECT})
+            WHERE entity.country.iso_code IN ({countries_sql}) AND entity.classification LIKE 'P.%'
+                AND entity.population >= {REGIONAL_TERM_MAX_PLACE_POPULATION}
+        """).fetchall()
+    }
+    searcher = search_index.index.searcher()
+    threshold = search_index.partial_match_idf_threshold
+    entries : dict[str, dict] = {}
+    for term, points_by_iri in qualified.items():
+        if len(qualified_in_countries[term]) < REGIONAL_TERM_MIN_ENTITIES:
+            continue
+        if term in large_places:
+            logger.debug("Regional term %r left out: also the name of a large place", term)
+            continue
+        if not any(search_index._word_idf(searcher, word) > threshold for word in term.split(" ")):
+            logger.debug("Regional term %r left out: no informative word", term)
+            continue
+        entries[term] = _regional_term_entry(spellings[term].most_common(1)[0][0], points_by_iri)
+    logger.info("Collected %d regional terms qualifying place names", len(entries))
+    # German states, located by the centers of their divisions
+    division_points : dict[str, dict[str, tuple[Coordinates, str]]] = defaultdict(dict)
+    for iri, admin1_code, latitude, longitude in connection.execute(f"""
+            SELECT iri, admin_codes.admin1_code, coordinates.latitude, coordinates.longitude
+            FROM geo_db.geographical_entities
+            WHERE iso_country_code = 'DE' AND classification = '{GERMAN_STATE_GEOMETRY_DIVISION}'
+                AND coordinates.latitude IS NOT NULL
+        """).fetchall():
+        division_points[admin1_code][iri] = (Coordinates(latitude, longitude), "DE")
+    state_rows = connection.execute(f"""
+        SELECT DISTINCT name, entity.iri, entity.name, entity.admin_codes.admin1_code
+        FROM ({POP_LANGUAGE_FILTERED_NAMES_SELECT})
+        WHERE entity.country.iso_code = 'DE' AND entity.classification = 'A.ADM1'
+    """).fetchall()
+    states = 0
+    for name, iri, state_name, admin1_code in state_rows:
+        if admin1_code in _GERMAN_CITY_STATE_ADMIN1_CODES or admin1_code not in division_points:
+            continue
+        entry = _regional_term_entry(state_name, division_points[admin1_code], state_iri=iri)
+        for key in normalized_search_strings(_remove_stop_words(unicodedata.normalize("NFC", name))):
+            if len(key) >= 3:
+                entries[key] = entry
+                states += 1
+    logger.info("Added %d names of German states", states)
+    return entries
+
+
+def _regional_terms_from_entries(
+        connection : duckdb.DuckDBPyConnection, entries : dict[str, dict]
+    ) -> RegionalTerms:
+    """The regional terms described by entries (see build_regional_terms)."""
+    country_data = {}
+    countries_sql = ", ".join(
+        f"'{country}'" for country in sorted({c for entry in entries.values() for c in entry["countries"]}))
+    for (country,) in connection.execute(f"""
+            SELECT DISTINCT entity.country FROM geo_db.geographical_names_with_entities
+            WHERE entity.country.iso_code IN ({countries_sql}) AND entity.classification = 'A.PCLI'
+        """).fetchall():
+        country_data[country["iso_code"]] = CountryData(**country)
+    state_names : dict[str, GeographicalName] = {}
+    terms = {}
+    for term, entry in entries.items():
+        geometry = RegionGeometry(
+            clusters=tuple(tuple(Coordinates(lat, lon) for lat, lon in cluster) for cluster in entry["clusters"]),
+            country_iso_codes=tuple(entry["countries"]),
+        )
+        if entry["state_iri"] is not None:
+            state_iri = entry["state_iri"]
+            if state_iri not in state_names:
+                row = connection.execute(
+                    "SELECT * FROM geo_db.geographical_names_with_entities WHERE entity.iri = ? "
+                    "ORDER BY is_preferred_name DESC NULLS LAST, name_id LIMIT 1", [state_iri]).fetchone()
+                columns = [description[0] for description in connection.description]
+                state_names[state_iri] = decode_from_dict(dict(zip(columns, row)), GeographicalName)
+            state_name = state_names[state_iri]
+            geographical_name = dataclasses.replace(
+                state_name, entity=dataclasses.replace(state_name.entity, geometry=geometry))
+        else:
+            largest_cluster = geometry.clusters[0]
+            # the term was found in REGIONAL_TERM_COUNTRIES, which come first
+            countries = sorted(entry["countries"], key=lambda country: country not in REGIONAL_TERM_COUNTRIES)
+            entity = GeographicalEntity(
+                iri=f"{REGIONAL_TERM_IRI_PREFIX}{term}",
+                provider=None,
+                name=entry["name"],
+                asciiname=term,
+                classification="REGIONAL_TERM",
+                possible_entity_types=(GeographicalEntityType.Region,),
+                coordinates=Coordinates(
+                    sum(p.latitude for p in largest_cluster) / len(largest_cluster),
+                    sum(p.longitude for p in largest_cluster) / len(largest_cluster)),
+                population=None,
+                geonames_id=None,
+                closest_geonames_id=None,
+                country=country_data[countries[0]],
+                alternate_iso_country_codes=tuple(countries[1:]),
+                admin_codes=GeonamesAdminCodes(None, None, None, None, None),
+                other_parent_iris=(),
+                geometry=geometry,
+            )
+            geographical_name = GeographicalName(
+                name_id=-1, name=entry["name"], entity=entity, is_preferred_name=True,
+                is_short_name=None, is_colloquial=None, name_provider=None, isolanguage=None)
+        terms[term] = RegionalTerm(geographical_name=geographical_name, entity_count=entry["entities"])
+    return RegionalTerms(terms)
+
+
+def is_regional_term_entity(entity : GeographicalEntity) -> bool:
+    """Whether the entity is the synthetic one of a regional term (see RegionalTerm), which cannot be linked."""
+    return entity.iri.startswith(REGIONAL_TERM_IRI_PREFIX)
+
 
 class IndexSearchMatch(NamedTuple):
     score : float # score as returned by the the specific index search, meaning differs
@@ -509,6 +889,9 @@ class IndexSearchMatch(NamedTuple):
     # True if this match was found by allowing one word to be missing/added/
     # substituted (see TantivySearchIndex._partial_word_match)
     is_partial_word_match : bool = False
+    # The name matched, when not retrieved from the index (retrieved_data is
+    # then None), i.e. a regional term's (see RegionalTerms)
+    geographical_name : Optional[GeographicalName] = None
 
 
 class IndexSearchResult(NamedTuple):
@@ -516,11 +899,6 @@ class IndexSearchResult(NamedTuple):
     query_strings : list[str]
     abbreviation_pattern : Optional[str]
     matches : list[IndexSearchMatch]
-    # (word, cluster centroids) for each informative word that names retrieved
-    # by a partial word match only shared with the trailing part of the
-    # query, pointing at a region the queried place is in rather than at the
-    # place itself (see TantivySearchIndex._is_partial_word_match)
-    region_hints : tuple[tuple[str, tuple[Coordinates, ...]], ...] = ()
 
 
 def _describe_index_matches(matches : Iterable[IndexSearchMatch]) -> list[str]:
@@ -571,30 +949,14 @@ class TantivySearchIndex(GeoSearchIndex):
     # German place-name qualifiers, none of which should on their own be
     # treated as the "real" identifying word of a name, along with generic
     # words found trailing names that would otherwise make for region words
-    # (e.g. "garden" in "Clover Garden", see _is_partial_word_match). River
-    # names (e.g. "Main") are left out on purpose: they may well be region
-    # words.
+    # (e.g. "garden" in "Clover Garden"). River names (e.g. "Main") are left
+    # out on purpose: they are regional terms (see build_regional_terms).
     _PARTIAL_MATCH_IDF_REFERENCE_WORDS = ("Alt", "Neu", "Bad", "Garden", "See")
     # see PARTIAL_MATCH_WORD_DISTANCE
     _PARTIAL_MATCH_WORD_DISTANCE = PARTIAL_MATCH_WORD_DISTANCE
-    # Min number of indexed names containing a word for its region clusters
-    # to be persisted to disk (see _region_clusters_for_word): rare enough
-    # among region words to keep the file small, while being the ones
-    # costliest to cluster again
-    _REGION_HINT_PERSISTED_MIN_DOCS = 1000
-    # Min number of indexed names containing a word for it to make for a
-    # region hint (see _region_clusters_for_word): a word in fewer names is
-    # too rare to name a region (e.g. "lechfeld", in 6 names), rather than
-    # a place or a typo neighbour of the queried one. Low enough to keep
-    # e.g. "bergstrasse" (in 20 names).
-    _REGION_HINT_MIN_DOCS = 20
-    # Max distance between the entities named with a region word for them to
-    # be merged into the same cluster (see _region_clusters_for_word)
-    _REGION_HINT_CLUSTER_DISTANCE_KM = 50
 
     def __init__(
             self, index_path : str | Path, read_threads : int | Literal['auto'] = 'auto', write_threads : int = 8,
-            cache_dir : str | Path = "cache"
         ):
         if read_threads == 'auto':
             read_threads = (max(1, getattr(os, "process_cpu_count", lambda : None)() or os.cpu_count() or 8) * 3) // 2
@@ -610,9 +972,8 @@ class TantivySearchIndex(GeoSearchIndex):
             self.index_path, self.already_exists, self.read_threads, self.write_threads)
         self.index = tantivy.Index(self.schema, path=str(self.index_path))
         self.index.config_reader(num_warmers=self.read_threads)
-        self._region_cluster_cache : dict[str, tuple[Coordinates, ...]] = {}
-        self._persisted_region_clusters_path = Path(cache_dir) / "region_clusters.json"
-        self._persisted_region_clusters = self._load_persisted_region_clusters()
+        # set by GeoDBSearch.initialize (see build_regional_terms)
+        self.regional_terms : RegionalTerms = RegionalTerms({})
         self.index.register_tokenizer(
             "whitespace",
             tantivy.TextAnalyzerBuilder(
@@ -733,20 +1094,16 @@ class TantivySearchIndex(GeoSearchIndex):
         )
 
     def _is_partial_word_match(
-            self, searcher : tantivy.Searcher, query_words : list[str], candidate_words : list[str]
-        ) -> tuple[bool, list[str]]:
+            self, searcher : tantivy.Searcher, query_words : list[str], candidate_words : list[str],
+            abbreviated_query_words : Collection[str] = frozenset()
+        ) -> bool:
         """
-        Returns whether the candidate is a partial word match of the query
-        and, when it is not a match only because the words it shares with the
-        query are just the trailing part of either name (e.g. "Weilheim in
-        Oberbayern" vs "Tiefenbach Oberbayern"), those shared informative
-        words: region words, pointing at a region the queried place is in
-        (see _region_clusters_for_word) rather than at the place itself.
+        Whether the candidate is a partial word match of the query.
         """
         if len(query_words) == 0 or len(candidate_words) == 0:
             self.logger.debug(
                 "Partial word match %s vs %s rejected: empty word list", query_words, candidate_words)
-            return False, []
+            return False
         # a candidate whose words appear verbatim and in order in the query
         # is accepted regardless of how informative its words are (e.g.
         # "Neustadt" in "Neustadt Weinstrasse"), as long as it is not made
@@ -756,15 +1113,16 @@ class TantivySearchIndex(GeoSearchIndex):
             self.logger.debug(
                 "Partial word match %s vs %s accepted: candidate fully contained in query",
                 query_words, candidate_words)
-            return True, []
+            return True
         index_pairs, unmatched_query_idx, unmatched_candidate_idx = pair_words(
-            query_words, candidate_words, self._PARTIAL_MATCH_WORD_DISTANCE)
+            query_words, candidate_words, self._PARTIAL_MATCH_WORD_DISTANCE,
+            abbreviated_query_words=abbreviated_query_words)
         pairs = [(query_words[qi], candidate_words[ci]) for qi, ci in index_pairs]
         if len(pairs) == 0:
             # nothing matched at all: not even a partial match
             self.logger.debug(
                 "Partial word match %s vs %s rejected: no words paired", query_words, candidate_words)
-            return False, []
+            return False
         # unpaired stop words carry no meaning and are ignored altogether
         unmatched_query_idx = [i for i in unmatched_query_idx if query_words[i] not in _STOP_WORDS]
         unmatched_candidate_idx = [
@@ -784,7 +1142,7 @@ class TantivySearchIndex(GeoSearchIndex):
                     "Partial word match %s vs %s accepted: candidate of informative words fully "
                     "contained in query (unpaired query words: %s)",
                     query_words, candidate_words, unmatched_query)
-                return True, []
+                return True
         # IDF is taken on the candidate side, since the candidate word is
         # known to be in the index while the query word may be a typo.
         paired_idfs = [(cword, self._word_idf(searcher, cword)) for _, cword in pairs]
@@ -803,13 +1161,13 @@ class TantivySearchIndex(GeoSearchIndex):
                     "than the paired informative words (min idf %.4f)",
                     query_words, candidate_words,
                     ", ".join(f"{w!r} idf {idf:.4f}" for w, idf in unmatched_idfs), min_paired_idf)
-                return True, []
+                return True
         # at most one word may be missing/added/substituted on either side
         if len(unmatched_query) > 1 or len(unmatched_candidate) > 1:
             self.logger.debug(
                 "Partial word match %s vs %s rejected: too many unpaired words (query: %s, candidate: %s)",
                 query_words, candidate_words, unmatched_query, unmatched_candidate)
-            return False, []
+            return False
         # the shared words must include at least one informative word: names
         # sharing only a common qualifier (e.g. "Bad Homburg" vs "Bad Tölz")
         # are unrelated places.
@@ -820,18 +1178,13 @@ class TantivySearchIndex(GeoSearchIndex):
                 query_words, candidate_words,
                 ", ".join(f"{w!r} idf {idf:.4f}" for w, idf in paired_idfs),
                 self.partial_match_idf_threshold)
-            return False, []
+            return False
         # an informative word may only be dropped if it is the last word of
         # its name (e.g. "Frankfurt" vs "Frankfurt Oder"), not counting
-        # trailing stop words. When a leading or middle query word is
-        # dropped, the candidate only shares the trailing part of the query,
-        # which is then no match for the place itself, but its shared
-        # informative words are kept as region words (e.g. "oberbayern" from
-        # "Weilheim in Oberbayern" vs "Tiefenbach Oberbayern"). Not so for a
-        # dropped candidate word, where the shared words may well be the
-        # place's own name (e.g. "Tiefenbach" in "Kleinwalsertal Tiefenbach")
-        for words, unmatched_idx, keeps_region_words in (
-                (query_words, unmatched_query_idx, True), (candidate_words, unmatched_candidate_idx, True)):
+        # trailing stop words. When a leading or middle word is dropped, the
+        # names only share their trailing part (e.g. "Weilheim in Oberbayern"
+        # vs "Tiefenbach Oberbayern"), which is no match for the place itself.
+        for words, unmatched_idx in ((query_words, unmatched_query_idx), (candidate_words, unmatched_candidate_idx)):
             last_content_idx = max(
                 (i for i, w in enumerate(words) if w not in _STOP_WORDS), default=len(words) - 1)
             for i in unmatched_idx:
@@ -839,135 +1192,57 @@ class TantivySearchIndex(GeoSearchIndex):
                     continue
                 idf = self._word_idf(searcher, words[i])
                 if idf > self.partial_match_idf_threshold:
-                    region_words = [
-                        w for w, word_idf in paired_idfs if (
-                            word_idf > self.partial_match_idf_threshold and 
-                            len(w) > 3
-                        )
-                    ] if keeps_region_words else []
                     self.logger.debug(
                         "Partial word match %s vs %s rejected: unpaired non-final word %r is too "
-                        "informative (idf %.4f > threshold %.4f); keeping region words %s",
-                        query_words, candidate_words, words[i], idf, self.partial_match_idf_threshold,
-                        region_words)
-                    return False, region_words
+                        "informative (idf %.4f > threshold %.4f)",
+                        query_words, candidate_words, words[i], idf, self.partial_match_idf_threshold)
+                    return False
         self.logger.debug(
             "Partial word match %s vs %s accepted (unpaired query words: %s, unpaired candidate words: %s)",
             query_words, candidate_words, unmatched_query, unmatched_candidate)
-        return True, []
-
-    def _load_persisted_region_clusters(self) -> dict[str, tuple[Coordinates, ...]]:
-        """
-        The region clusters persisted by _region_clusters_for_word, unless
-        they were clustered with another _REGION_HINT_CLUSTER_DISTANCE_KM.
-        """
-        path = self._persisted_region_clusters_path
-        if not path.exists():
-            self.logger.info("No persisted region clusters found at %s", path)
-            return {}
-        with path.open("r", encoding="utf-8") as f:
-            data = json.load(f)
-        if data.get("cluster_distance_km") != self._REGION_HINT_CLUSTER_DISTANCE_KM:
-            self.logger.info(
-                "Ignoring persisted region clusters at %s: clustered within %s km instead of %s km",
-                path, data.get("cluster_distance_km"), self._REGION_HINT_CLUSTER_DISTANCE_KM)
-            return {}
-        clusters = {
-            word: tuple(Coordinates(latitude, longitude) for latitude, longitude in centroids)
-            for word, centroids in data["words"].items()
-        }
-        self.logger.info("Loaded region clusters of %d words from %s", len(clusters), path)
-        return clusters
-
-    def _persist_region_clusters(self):
-        path = self._persisted_region_clusters_path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        data = {
-            "cluster_distance_km": self._REGION_HINT_CLUSTER_DISTANCE_KM,
-            "words": {
-                word: [[c.latitude, c.longitude] for c in centroids]
-                for word, centroids in sorted(self._persisted_region_clusters.items())
-            },
-        }
-        # written to a temporary file first, so that an interrupted write
-        # does not leave a truncated cache behind
-        temporary_path = path.with_suffix(".json.tmp")
-        with temporary_path.open("w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False)
-        temporary_path.replace(path)
-
-    def _region_clusters_for_word(self, searcher : tantivy.Searcher, word : str) -> tuple[Coordinates, ...]:
-        """
-        Aggregates the locations of every entity known under an indexed name
-        containing `word`, clusters them (see cluster_coordinates, within
-        _REGION_HINT_CLUSTER_DISTANCE_KM) and returns the centroids of the
-        clusters, largest first. Returns no centroids if the word is in
-        fewer than _REGION_HINT_MIN_DOCS names. Results are cached per word,
-        and persisted to disk for the words in more than
-        _REGION_HINT_PERSISTED_MIN_DOCS names.
-        """
-        self.logger.debug("Looking up region clusters for word %r", word)
-        if word in self._region_cluster_cache:
-            self.logger.debug("Cache hit: region clusters for word %r", word)
-            return self._region_cluster_cache[word]
-        if word in self._persisted_region_clusters:
-            self.logger.debug("Persisted cache hit: region clusters for word %r", word)
-            centroids = self._persisted_region_clusters[word]
-            self._region_cluster_cache[word] = centroids
-            return centroids
-        self.logger.debug("Cache miss: fetching all matches containing word %r", word)
-        query = tantivy.Query.term_query(self.schema, "search_words", word, index_option='basic')
-        search_results = searcher.search(query, limit=self._REGION_HINT_PERSISTED_MIN_DOCS, count=True)
-        is_persisted = search_results.count > self._REGION_HINT_PERSISTED_MIN_DOCS
-        if is_persisted:
-            # the first search only told how many names there are to fetch
-            search_results = searcher.search(query, limit=search_results.count, count=True)
-        centroids : tuple[Coordinates, ...] = ()
-        if search_results.count < self._REGION_HINT_MIN_DOCS:
-            self.logger.debug(
-                "Region word %r: found in only %d indexed names (< %d); too rare for a region hint",
-                word, search_results.count, self._REGION_HINT_MIN_DOCS)
-        else:
-            # an entity known under several names containing the word only
-            # counts once, so as not to weigh its cluster's centroid
-            points_by_iri : dict[str, Coordinates] = {}
-            for _, doc_address in search_results.hits:
-                doc = searcher.doc(doc_address)
-                for row in json.loads(doc.get_first("name_data").decode("utf-8")):
-                    entity = row["entity"]
-                    coordinates = entity.get("coordinates")
-                    if coordinates is None or coordinates.get("latitude") is None or coordinates.get("longitude") is None:
-                        self.logger.debug("Skipping entity %r without coordinates", entity.get("iri"))
-                        continue
-                    points_by_iri[entity.get("iri")] = Coordinates(coordinates["latitude"], coordinates["longitude"])
-            centroids = cluster_coordinates(list(points_by_iri.values()), self._REGION_HINT_CLUSTER_DISTANCE_KM)
-            self.logger.debug(
-                "Region word %r: %d entities in %d indexed names cluster around centroids %s",
-                word, len(points_by_iri), search_results.count, centroids)
-        self._region_cluster_cache[word] = centroids
-        if is_persisted:
-            self.logger.debug(
-                "Persisting region clusters for word %r (in %d indexed names > %d) to %s",
-                word, search_results.count, self._REGION_HINT_PERSISTED_MIN_DOCS,
-                self._persisted_region_clusters_path)
-            self._persisted_region_clusters[word] = centroids
-            self._persist_region_clusters()
-        return centroids
+        return True
 
     def _partial_word_match(
             self,
             query_strings : list[str],
             hints : list[tuple[tantivy.Occur, tantivy.Query]],
             limit : int,
-        ) -> tuple[list[IndexSearchMatch], tuple[tuple[str, tuple[Coordinates, ...]], ...]]:
+            abbreviated_query_words : Collection[str] = frozenset(),
+        ) -> list[IndexSearchMatch]:
         """
         Lowest-priority fallback: matches names that share most, but not
         necessarily all, of their words with the query (see _is_partial_word_match).
-        Also returns the region hints (region word, cluster centroids) gathered
-        from the retrieved names rejected for sharing only a trailing part of
-        the query.
+        The query words written abbreviated (abbreviated_query_words, see
+        abbreviated_words) also match the words they are a prefix of (e.g.
+        "bergstr" the word "bergstrasse").
+        The query words making up a regional term (see RegionalTerms, e.g.
+        "donau" in "Ulm/Donau") are not looked up: the regional term itself is
+        matched on them instead, and the other words are matched without them.
         """
         searcher = self.index.searcher()
+        matches = []
+        remaining_query_strings = []
+        matched_terms = {}
+        for query_string in query_strings:
+            query_words = [w for w in query_string.split(" ") if w]
+            terms, remaining_words = self.regional_terms.find_in_words(query_words, abbreviated_query_words)
+            for term in terms:
+                matched_terms.setdefault(term, None)
+            if len(remaining_words) > 0:
+                remaining_query_strings.append(" ".join(remaining_words))
+        for term in matched_terms:
+            regional_term = self.regional_terms[term]
+            self.logger.debug(
+                "Partial word match on regional term %r (%s, %d entities); not looking it up",
+                term, regional_term.geographical_name.entity.iri, regional_term.entity_count)
+            matches.append(IndexSearchMatch(
+                score=0.0,
+                matched_key=term,
+                nfc_name=regional_term.geographical_name.name,
+                is_partial_word_match=True,
+                geographical_name=regional_term.geographical_name
+            ))
+        query_strings = remaining_query_strings
         words = [
             word
             for query_string in query_strings
@@ -989,9 +1264,12 @@ class TantivySearchIndex(GeoSearchIndex):
             ]))
             word_queries.append(tantivy.Query.fuzzy_term_query(
                 self.schema, "search_words", word, distance=self._PARTIAL_MATCH_WORD_DISTANCE))
+            if word in abbreviated_query_words:
+                word_queries.append(tantivy.Query.regex_query(
+                    self.schema, "search_words", f"{re.escape(word)}[a-z0-9]*"))
         if len(word_queries) == 0:
-            self.logger.debug("Partial word match skipped: no words in query strings %s", query_strings)
-            return [], ()
+            self.logger.debug("Partial word match lookup skipped: no words in query strings %s", query_strings)
+            return matches
         final_name_query = tantivy.Query.disjunction_max_query(word_queries)
         if len(hints) > 0:
             final_query = tantivy.Query.boolean_query(
@@ -999,8 +1277,6 @@ class TantivySearchIndex(GeoSearchIndex):
         else:
             final_query = final_name_query
         search_results = searcher.search(final_query, limit=limit)
-        matches = []
-        region_words = []
         for score, doc_address in search_results.hits:
             doc = searcher.doc(doc_address)
             nfc_name = doc.get_first("nfc_name")
@@ -1009,10 +1285,7 @@ class TantivySearchIndex(GeoSearchIndex):
                 query_words = [w for w in query_string.split(" ") if w]
                 for candidate_string in normalized_search_strings(nfc_name):
                     candidate_words = [w for w in candidate_string.split(" ") if w]
-                    is_match, candidate_region_words = self._is_partial_word_match(
-                        searcher, query_words, candidate_words)
-                    region_words.extend(w for w in candidate_region_words if w not in region_words)
-                    if is_match:
+                    if self._is_partial_word_match(searcher, query_words, candidate_words, abbreviated_query_words):
                         matched_key = candidate_string
                         break
                 if matched_key is not None:
@@ -1029,12 +1302,7 @@ class TantivySearchIndex(GeoSearchIndex):
                     retrieved_data=entity_data,
                     is_partial_word_match=True
                 ))
-        region_hints = []
-        for word in region_words:
-            centroids = self._region_clusters_for_word(searcher, word)
-            if len(centroids) > 0:
-                region_hints.append((word, centroids))
-        return matches, tuple(region_hints)
+        return matches
 
     def _build_entity_type_restriction(
             self, entity_types : Collection[GeographicalEntityType]) -> tantivy.Query:
@@ -1173,7 +1441,10 @@ class TantivySearchIndex(GeoSearchIndex):
         phonetic_query_string = cologne_phonetic_normalize(normalize_for_phonetics(expanded_query))
         if expand_abbreviations:
             abbrev_pattern = abbreviation_pattern_to_regexes(expanded_query)
-        else: abbrev_pattern = None
+            abbreviated_query_words = abbreviated_words(expanded_query)
+        else:
+            abbrev_pattern = None
+            abbreviated_query_words = frozenset()
         self.logger.debug(
             "Searching %r: query strings %s, phonetic key %r, abbreviation pattern %r, "
             "distance threshold %d, limit %d, entity types %s (strict: %s), "
@@ -1203,14 +1474,14 @@ class TantivySearchIndex(GeoSearchIndex):
             self.logger.debug(
                 "Phase 'exact' for %r: query strings %s, abbreviation pattern %r",
                 expanded_query, query_strings, abbrev_pattern)
-            yield "exact", self._search_inner(query_strings=query_strings, distance_threshold=0, **other_params), ()
+            yield "exact", self._search_inner(query_strings=query_strings, distance_threshold=0, **other_params)
 
             #abbreviation matches next: catches names that are abbreviated in the query but not in the index, e.g. "Rum." vs "Rumanien"
             if abbrev_pattern is not None:
                 self.logger.debug(
                     "Phase 'abbreviation' for %r: abbreviation pattern %r", expanded_query, abbrev_pattern)
                 yield "abbreviation", self._search_inner(
-                    abbrev_pattern=abbrev_pattern, query_strings=[], distance_threshold=0, **other_params), ()
+                    abbrev_pattern=abbrev_pattern, query_strings=[], distance_threshold=0, **other_params)
             
             # phonetic and edit distance 1 fuzzy matches next, together in the
             # same phase with their results concatenated: phonetic matching
@@ -1233,7 +1504,7 @@ class TantivySearchIndex(GeoSearchIndex):
                     "Phase 'phonetic' for %r: query strings %s, edit distance 1", expanded_query, query_strings)
                 phonetic_phase_matches.extend(self._search_inner(
                     query_strings=query_strings, distance_threshold=1, **other_params))
-            yield phonetic_phase_name, phonetic_phase_matches, ()
+            yield phonetic_phase_name, phonetic_phase_matches
             # larger edit distance fuzzy matches next, only tried once exact,
             # abbreviation, phonetic and distance 1 fuzzy matching have failed
             # to find anything
@@ -1242,26 +1513,26 @@ class TantivySearchIndex(GeoSearchIndex):
                     "Phase 'fuzzy' for %r: query strings %s, edit distance %d",
                     expanded_query, query_strings, i)
                 yield f"fuzzy(distance={i})", self._search_inner(
-                    query_strings=query_strings, distance_threshold=i, **other_params), ()
+                    query_strings=query_strings, distance_threshold=i, **other_params)
             # partial word match last: lowest priority and riskiest for false
             # positives, only tried once nothing else has found anything
             self.logger.debug(
-                "Phase 'partial_word' for %r: query strings %s, max word distance %d",
-                expanded_query, query_strings, self._PARTIAL_MATCH_WORD_DISTANCE)
-            yield ("partial_word", *self._partial_word_match(query_strings, hints=hints, limit=limit))
+                "Phase 'partial_word' for %r: query strings %s, max word distance %d, abbreviated words %s",
+                expanded_query, query_strings, self._PARTIAL_MATCH_WORD_DISTANCE, abbreviated_query_words)
+            yield "partial_word", self._partial_word_match(
+                query_strings, hints=hints, limit=limit, abbreviated_query_words=abbreviated_query_words)
 
-        for phase, matches, region_hints in _falling_queries():
+        for phase, matches in _falling_queries():
             if self.logger.isEnabledFor(logging.DEBUG):
                 self.logger.debug(
-                    "Phase '%s' for %r retrieved %d matches: %s (region hints: %s)",
-                    phase, expanded_query, len(matches), _describe_index_matches(matches), region_hints)
-            if len(matches) > 0 or len(region_hints) > 0:
+                    "Phase '%s' for %r retrieved %d matches: %s",
+                    phase, expanded_query, len(matches), _describe_index_matches(matches))
+            if len(matches) > 0:
                 if callback(IndexSearchResult(
                     nfc_query=expanded_query,
                     query_strings=query_strings,
                     abbreviation_pattern=abbrev_pattern,
                     matches=matches,
-                    region_hints=region_hints
                 )):
                     self.logger.debug("Phase '%s' for %r settled the search; stopping", phase, expanded_query)
                     break
@@ -1359,6 +1630,8 @@ class GeoDBSearch(LinkingStep):
         self.cache_dir = Path(cache_dir)
         self._pre_linked_cache_path = self.cache_dir / "pre_linked_entities.json"
         self._pre_linked_cache : dict[str, Optional[GeographicalName]] = {}
+        # set by initialize (see build_regional_terms)
+        self.regional_terms = RegionalTerms({})
 
     def initialize(self):
         self.logger.info(
@@ -1386,7 +1659,96 @@ class GeoDBSearch(LinkingStep):
             pbar.close()
         self.search_index.populate_index(row_retriever(POP_LANGUAGE_FILTERED_NAMES_SELECT), skip_if_exists=True)
         self._load_pre_linked_cache()
+        self.regional_terms = self._load_or_build_regional_terms()
+        if isinstance(self.search_index, TantivySearchIndex):
+            self.search_index.regional_terms = self.regional_terms
         return super().initialize()
+
+    def _regional_terms_cache_parameters(self) -> dict:
+        """Everything the regional terms depend on, invalidating their cache when changed."""
+        index_filters = POP_LANGUAGE_FILTERED_NAMES_SELECT.encode("utf-8")
+        return {
+            "version": _REGIONAL_TERMS_VERSION,
+            "countries": list(REGIONAL_TERM_COUNTRIES),
+            "patterns": [pattern.pattern for pattern in _REGIONAL_TERM_PATTERNS],
+            "min_entities": REGIONAL_TERM_MIN_ENTITIES,
+            "cluster_distance_km": REGIONAL_TERM_CLUSTER_DISTANCE_KM,
+            "grid_degrees": REGIONAL_TERM_GRID_DEGREES,
+            "max_place_population": REGIONAL_TERM_MAX_PLACE_POPULATION,
+            "state_division": GERMAN_STATE_GEOMETRY_DIVISION,
+            "idf_threshold": round(self.search_index.partial_match_idf_threshold, 4),
+            "index_filters_sha1": hashlib.sha1(index_filters).hexdigest(),
+        }
+
+    def _load_or_build_regional_terms(self) -> RegionalTerms:
+        """
+        The regional terms (see build_regional_terms), cached to disk since
+        collecting them from the geo database takes a while.
+        """
+        if not isinstance(self.search_index, TantivySearchIndex):
+            return RegionalTerms({})
+        path = self.cache_dir / "regional_terms.json"
+        parameters = self._regional_terms_cache_parameters()
+        entries = None
+        if path.exists():
+            with path.open("r", encoding="utf-8") as f:
+                cached = json.load(f)
+            if cached.get("parameters") == parameters:
+                entries = cached["terms"]
+                self.logger.info("Loaded %d regional terms from %s", len(entries), path)
+            else:
+                self.logger.info("Ignoring cached regional terms at %s: built with other parameters", path)
+        if entries is None:
+            entries = build_regional_terms(self.connection, self.search_index)
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+            # written to a temporary file first, so that an interrupted write
+            # does not leave a truncated cache behind
+            temporary_path = path.with_suffix(".json.tmp")
+            with temporary_path.open("w", encoding="utf-8") as f:
+                json.dump({"parameters": parameters, "terms": entries}, f, ensure_ascii=False)
+            temporary_path.replace(path)
+            self.logger.info("Cached %d regional terms to %s", len(entries), path)
+        return _regional_terms_from_entries(self.connection, entries)
+
+    def _regional_term_match(self, entity : RawEntity) -> Optional[MatchedName]:
+        """
+        A match on the regional term the whole entity is (see RegionalTerms),
+        if it is one and coarser than a city (e.g. AboveCity "Pfalz" or
+        "Bergstr."). A City or Neighborhood is left to the search, its name
+        being a place in its own right.
+        """
+        if entity.entity_type not in REGIONAL_TERM_ENTITY_TYPES or len(self.regional_terms) == 0:
+            return None
+        expanded_query, _ = abbrev_list_expander.expand_abbreviations(unicodedata.normalize("NFC", entity.raw_text))
+        abbreviated = abbreviated_words(expanded_query)
+        for query_string in normalized_search_strings(_remove_stop_words(expanded_query)):
+            term = self.regional_terms.find(query_string, abbreviated)
+            if term is None:
+                continue
+            geographical_name = self.regional_terms[term].geographical_name
+            edit_distance, fuzzy_score, phonetic_score = score_name_similarity(
+                expanded_query, geographical_name.name, self.logger)
+            self.logger.debug(
+                "Entity %r (%s) is the regional term %r (%s); matching it instead of searching",
+                entity.raw_text, entity.entity_type, term, geographical_name.entity.iri)
+            return MatchedName(
+                geographical_name=geographical_name,
+                nfc_query=expanded_query,
+                nfc_alt_name=geographical_name.name,
+                cleaned_query=None,
+                cleaned_alt_name=term,
+                cleaned_edit_distance=None,
+                matching_method=REGIONAL_TERM_MATCHING_METHOD,
+                matching_score=1.0,
+                fuzzy_score=fuzzy_score,
+                phonetic_score=phonetic_score,
+                abbreviation_pattern=None,
+                edit_distance=edit_distance,
+                is_abbreviation_match=term != query_string,
+                is_phonetic_match=False,
+                is_partial_word_match=False,
+            )
+        return None
 
     def finalize(self):
         self.connection.close()
@@ -1468,12 +1830,17 @@ class GeoDBSearch(LinkingStep):
             if self.logger.isEnabledFor(logging.DEBUG):
                 self.logger.debug(
                     "Parsing index match with IRI %r for query %r (abbreviation pattern %r)",
-                    index_match.retrieved_data.get("entity", {}).get("iri", None), index_result.nfc_query, index_result.abbreviation_pattern)
+                    (index_match.retrieved_data or {}).get("entity", {}).get("iri", None)
+                    if index_match.geographical_name is None else index_match.geographical_name.entity.iri,
+                    index_result.nfc_query, index_result.abbreviation_pattern)
             is_abreviation_match = False
             if index_result.abbreviation_pattern is not None:
                is_abreviation_match = re.fullmatch(index_result.abbreviation_pattern, index_match.matched_key) is not None
 
-            geographical_name=decode_from_dict(index_match.retrieved_data, GeographicalName)
+            if index_match.geographical_name is not None:
+                geographical_name = index_match.geographical_name
+            else:
+                geographical_name = decode_from_dict(index_match.retrieved_data, GeographicalName)
             nfc_alt_name = unicodedata.normalize("NFC", geographical_name.name)
             edit_distance, fuzzy_score, phonetic_score = score_name_similarity(
                 index_result.nfc_query, nfc_alt_name, self.logger)
@@ -1491,7 +1858,9 @@ class GeoDBSearch(LinkingStep):
                 is_abbreviation_match=is_abreviation_match,
                 is_phonetic_match=index_match.is_phonetic_match,
                 is_partial_word_match=index_match.is_partial_word_match,
-                matching_method=self.search_index.index_descriptor,
+                matching_method=(
+                    REGIONAL_TERM_MATCHING_METHOD if index_match.geographical_name is not None
+                    else self.search_index.index_descriptor),
                 matching_score=index_match.score
             )
 
@@ -1640,7 +2009,6 @@ class GeoDBSearch(LinkingStep):
 
     def apply(self, address):
         new_entities = []
-        region_hint_entities = []
         country_codes = set()
         admin_codes = set()
         self.logger.debug("Searching entities of address %s (%r)", address.id, address.full_address)
@@ -1660,13 +2028,14 @@ class GeoDBSearch(LinkingStep):
                 # A pre-linked entity is as authoritative as a resolved
                 # Country search match, regardless of its own entity type.
                 is_authoritative = pre_linked_match is not None
+            elif (regional_term_match := self._regional_term_match(entity)) is not None:
+                matched_names = [regional_term_match]
+                is_authoritative = False
             else:
                 matched_names : list[MatchedName] = []
-                region_hints : dict[str, tuple[Coordinates, ...]] = {}
                 def callback(index_result : IndexSearchResult) -> bool:
                     nonlocal matched_names
                     settle_here = False
-                    region_hints.update(index_result.region_hints)
                     for matched_name in self._parse_data(index_result):
                         if entity.is_missed_word and not self._is_trusted_missed_word_match(index_result, matched_name):
                             self.logger.debug(
@@ -1697,18 +2066,6 @@ class GeoDBSearch(LinkingStep):
                     search_callback=callback
                 )
                 is_authoritative = entity.entity_type == GeographicalEntityType.Country
-                for word, centroids in region_hints.items():
-                    self.logger.debug(
-                        "Attaching region hint %r (cluster centroids %s) to entity %r", word, centroids, entity.raw_text)
-                    region_hint_entities.append(RegionHintEntity(
-                        address_entity_id=str(uuid.uuid4()),
-                        raw_text=word,
-                        entity_type=GeographicalEntityType.Region,
-                        span=None,
-                        nearby=None,
-                        source_entity_id=entity.address_entity_id,
-                        centroids=centroids
-                    ))
             self.logger.debug(
                 "Entity %r (%s) ended with %d matches", entity.raw_text, entity.entity_type, len(matched_names))
             if is_authoritative and len(matched_names) > 0:
@@ -1729,5 +2086,4 @@ class GeoDBSearch(LinkingStep):
                                           entity.raw_text, matched_name.geographical_name.entity.admin_codes)
                         admin_codes.add(matched_name.geographical_name.entity.admin_codes)
             new_entities.append(entity.with_matches(tuple(matched_names)))
-        return dataclasses.replace(
-            address, entities=tuple(new_entities), region_hints=tuple(address.region_hints) + tuple(region_hint_entities))
+        return dataclasses.replace(address, entities=tuple(new_entities))

@@ -1,6 +1,8 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
+from functools import cached_property
 from typing import Optional, TYPE_CHECKING, NamedTuple
+import numpy as np
 import pandas as pd
 from urllib.parse import urlparse
 
@@ -115,6 +117,23 @@ class Coordinates(NamedTuple):
     latitude : float
     longitude : float
 
+@dataclass(frozen=True, eq=False)
+class RegionGeometry:
+    """
+    Estimated extent of a region with no usable boundary (e.g. "Bergstraße",
+    or the Donau as named by "Neustadt an der Donau"): the locations of the
+    places known to lie within it, as clusters of nearby points (see
+    geo_db_search.build_regional_terms). Compared by identity, being large.
+    """
+    clusters : tuple[tuple[Coordinates, ...], ...]
+    # iso codes of the countries the points lie in
+    country_iso_codes : tuple[str, ...]
+
+    @cached_property
+    def points_radians(self) -> np.ndarray:
+        """Every point, as an (n, 2) array of (latitude, longitude) in radians."""
+        return np.radians([point for cluster in self.clusters for point in cluster])
+
 class GeonamesClassification(NamedTuple):
     feature_class : Optional[str]
     feature_code : Optional[str]
@@ -154,6 +173,9 @@ class GeographicalEntity:
     alternate_iso_country_codes : tuple[str, ...]
     admin_codes : GeonamesAdminCodes
     other_parent_iris : tuple[str, ...]
+    # Estimated extent, for an entity whose admin codes do not describe it
+    # (see geo_db_search.build_regional_terms)
+    geometry : Optional[RegionGeometry] = field(default=None, compare=False, repr=False)
 
     @property
     def all_country_iso_codes(self) -> list[str]:

@@ -1,5 +1,5 @@
 from json import JSONEncoder, JSONDecoder
-from dataclasses import dataclass, fields, is_dataclass
+from dataclasses import MISSING, dataclass, fields, is_dataclass
 from enum import Enum
 from typing import NamedTuple
 import types
@@ -157,11 +157,14 @@ def decode_from_dict(data, expected_type : type, options: Optional[DecodingOptio
 
         # dataclasses
         elif is_dataclass(expected_type):
-            field_types = {f.name: f.type for f in fields(expected_type)}
             init_values = {}
-            for key, field_type in field_types.items():
-                with _push_to_stack(f".{key}", object_stack_trace):
-                    init_values[key] = _decode(data[key], field_type, object_stack_trace)
+            for f in fields(expected_type):
+                # a field missing from the data (e.g. added since it was
+                # encoded) is left to its default, if it has one
+                if f.name not in data and (f.default is not MISSING or f.default_factory is not MISSING):
+                    continue
+                with _push_to_stack(f".{f.name}", object_stack_trace):
+                    init_values[f.name] = _decode(data[f.name], f.type, object_stack_trace)
             return expected_type(**init_values)
         
         

@@ -5,8 +5,10 @@ import pprint
 from typing import Literal, Optional, NamedTuple
 
 from modules.pipeline.geographical_entity import GeographicalBranch, GeographicalEntityType, GeographicalName
-from modules.geo_db_search import ABOVE_CITY_ENTITY_TYPES, ENTITY_LINKING_LOGGER, geodesic_distance_km, is_entity_type_ruled_out, partial_match_query_span, score_name_similarity
-from modules.pipeline.linked_data import AddressSpan, BZKFieldName, AddressProcessingData, LinkedEntity, MatchedEntity, MatchedName, LinkedAddress, RawEntity, RegionHintEntity
+from modules.geo_db_search import (
+    ABOVE_CITY_ENTITY_TYPES, ENTITY_LINKING_LOGGER, distance_to_geometry_km, geometries_distance_km,
+    is_entity_type_ruled_out, is_regional_term_entity, partial_match_query_span, score_name_similarity)
+from modules.pipeline.linked_data import AddressSpan, BZKFieldName, AddressProcessingData, LinkedEntity, MatchedEntity, MatchedName, LinkedAddress, RawEntity
 import uuid
 from modules.pipeline.storage.encoding_util import decode_from_dict
 import dataclasses
@@ -30,7 +32,6 @@ DISAMBIGUATION_FACTOR_PRIORITY = [
     "entity_types_matching_preferred",
     "population_order_of_magnitude",
     "country_likelihood_rank", # general rank of country likelihood based on observation
-    "regional_term_match",
     "phonetic_score",
     "entity_types_matching",
     "is_preferred_name",
@@ -47,10 +48,11 @@ WEIGHTED_DISAMBIGUATION_FACTORS = {
 
 NA_SCORE = AnnotatedScore(0.0, "Not applicable")
 
-# Distance from a match to the closest cluster of a region hint (see
-# _score_regional_term_match) at and beyond which the match is considered
-# entirely outside the hinted region
-REGIONAL_TERM_MAX_DISTANCE_KM = 1000
+# Distance from a child to the closest point of a parent's estimated geometry
+# (see RegionGeometry) at and beyond which the child is considered entirely
+# outside the parent, for the parents whose admin codes do not describe them
+# (see _score_parent_child_by_geometry)
+GEOMETRY_PARENT_CHILD_MAX_DISTANCE_KM = 50
 
 # Weight, relative to the other entities (weighing 1), of a missed word entity
 # (see RawEntity.is_missed_word) in the average of a candidate address' scores.
@@ -138,6 +140,16 @@ def _describe_linked_address(linked_address : LinkedAddress) -> str:
         f"scores {dict(linked_address.scores)}"
     )
 
+def _country_iso_codes(match : MatchedName) -> tuple[str, ...]:
+    """
+    The countries a match lies in: its country, or every country of the
+    geometry of a regional term spanning several (see RegionGeometry).
+    """
+    entity = match.geographical_name.entity
+    if is_regional_term_entity(entity) and entity.geometry is not None:
+        return entity.geometry.country_iso_codes
+    return (entity.country.iso_code if entity.country is not None else None,)
+
 class Disambiguator:
     logger = ENTITY_LINKING_LOGGER.getChild("Disambiguator")
 
@@ -150,7 +162,7 @@ class Disambiguator:
             min_population_order_of_magnitude: int = 500_000,
             score_prune_thresholds : dict[str, float] = defaultdict(float),
             geo_db_path : str = "geo.duckdb",
-            regional_term_max_distance_km : float = REGIONAL_TERM_MAX_DISTANCE_KM
+            geometry_parent_child_max_distance_km : float = GEOMETRY_PARENT_CHILD_MAX_DISTANCE_KM
         ):
         self.significance_thresholds = significance_thresholds
         self.priority = priority
@@ -159,7 +171,7 @@ class Disambiguator:
         self.min_population_order_of_magnitude = min_population_order_of_magnitude
         self.score_prune_thresholds = score_prune_thresholds
         self.geo_db_path = geo_db_path
-        self.regional_term_max_distance_km = regional_term_max_distance_km
+        self.geometry_parent_child_max_distance_km = geometry_parent_child_max_distance_km
         # Read only connection to the geo duckdb, only needed to look up the
         # entity of a common parent branch (see _link_to_common_parent). Opened
         # lazily, and every use (and cache miss) goes through _geo_db_lock since
@@ -173,10 +185,10 @@ class Disambiguator:
         self.logger.info(
             "Initialized with significance thresholds %s, priority %s, population rounding factor %d, "
             "min population order of magnitude %d, score prune thresholds %s, geo db %s, "
-            "regional term max distance %.0f km",
+            "geometry parent/child max distance %.0f km",
             self.significance_thresholds, self.priority, self.population_rounding_factor,
             self.min_population_order_of_magnitude, dict(self.score_prune_thresholds), self.geo_db_path,
-            self.regional_term_max_distance_km)
+            self.geometry_parent_child_max_distance_km)
 
     def __getstate__(self):
         # Neither the connection nor the lock can be pickled (e.g. when sent to
@@ -468,6 +480,45 @@ class Disambiguator:
                 child.cleaned_alt_name, child.geographical_name.entity.iri
             )
             return AnnotatedScore(1, "Informal relationship")
+        geometry_score = self._score_parent_child_by_geometry(parent, child)
+        if geometry_score is not None and is_regional_term_entity(parent_entity):
+            return geometry_score
+        admin_codes_score = self._score_parent_child_by_admin_codes(parent, child)
+        if geometry_score is not None and geometry_score.score > admin_codes_score.score:
+            return geometry_score
+        return admin_codes_score
+
+    def _score_parent_child_by_geometry(self, parent: MatchedName, child: MatchedName) -> Optional[AnnotatedScore]:
+        """
+        For a parent with an estimated geometry (see RegionGeometry), how
+        close the child lies to it: 1 within it, decreasing linearly to 0 at
+        geometry_parent_child_max_distance_km from its closest point. None if
+        the parent has no geometry or the child no location.
+        """
+        parent_entity = parent.geographical_name.entity
+        child_entity = child.geographical_name.entity
+        if parent_entity.geometry is None:
+            return None
+        if child_entity.geometry is not None:
+            distance = geometries_distance_km(parent_entity.geometry, child_entity.geometry)
+        elif child_entity.coordinates is not None and child_entity.coordinates.latitude is not None:
+            distance = distance_to_geometry_km(child_entity.coordinates, parent_entity.geometry)
+        else:
+            return None
+        score = max(0.0, 1.0 - distance / self.geometry_parent_child_max_distance_km)
+        self.logger.getChild("parent_child_scoring").debug(
+            "Child %r (%r) lies %.1f km from the geometry of parent %r (%r), setting score to %.2f",
+            child.cleaned_alt_name, child_entity.iri, distance, parent.cleaned_alt_name, parent_entity.iri, score)
+        return AnnotatedScore(score, f"{distance:.0f} km from the estimated geometry")
+
+    def _score_parent_child_by_admin_codes(self, parent: MatchedName, child: MatchedName) -> AnnotatedScore:
+        """
+        How far down the administrative hierarchy (country, then admin codes
+        in order) the child agrees with the parent.
+        """
+        parent_entity = parent.geographical_name.entity
+        child_entity = child.geographical_name.entity
+        logger = self.logger.getChild("parent_child_scoring")
         if min(parent_entity.possible_entity_types) <= max(child_entity.possible_entity_types):
             not_null_codes = 1
             if parent_entity.country.iso_code == child_entity.country.iso_code:
@@ -517,7 +568,6 @@ class Disambiguator:
                 "Full admin code match between parent %r (%r) and child %r (%r), setting score to 1",
                 parent.cleaned_alt_name, parent.geographical_name.entity.iri,
                 child.cleaned_alt_name, child.geographical_name.entity.iri,
-                score
             )
             return AnnotatedScore(1, "Administrative Code full match")
         else:
@@ -529,32 +579,6 @@ class Disambiguator:
             )
             return AnnotatedScore(0, "Entity type mismatch")
         
-    def _score_regional_term_match(
-            self, match : MatchedName, region_hints : list[RegionHintEntity]
-        ) -> Optional[AnnotatedScore]:
-        """
-        Score how well a match agrees with the region hints found for its
-        entity, as the average over the hints of how close the match lies to
-        the closest of the hint's cluster centroids: the geodesic distance to
-        it, inverted against regional_term_max_distance_km (1 on a centroid,
-        0 at that distance or beyond). 0 for a match without coordinates, and
-        None if the entity has no region hints.
-        """
-        if len(region_hints) == 0:
-            return None
-        coordinates = match.geographical_name.entity.coordinates
-        if coordinates is None:
-            return AnnotatedScore(0.0, f"Region hints {[region.raw_text for region in region_hints]}: no coordinates")
-        hint_scores = []
-        distances = []
-        for region in region_hints:
-            distance = min(geodesic_distance_km(coordinates, centroid) for centroid in region.centroids)
-            distances.append(f"{region.raw_text!r} {distance:.0f} km")
-            hint_scores.append(max(0.0, 1.0 - distance / self.regional_term_max_distance_km))
-        return AnnotatedScore(
-            sum(hint_scores) / len(hint_scores),
-            f"Region hints, distance to closest cluster: {', '.join(distances)}")
-
     def _is_entity_type_ruled_out(self, entity : MatchedEntity, match : MatchedName) -> bool:
         """
         Whether the match is of an entity type ruled out for the entity (see
@@ -583,9 +607,7 @@ class Disambiguator:
         """
         if self._is_entity_type_ruled_out(other_entity, other_match.match):
             return True
-        if (
-            reference_match.geographical_name.entity.country.iso_code != other_match.match.geographical_name.entity.country.iso_code
-        ):
+        if not (set(_country_iso_codes(reference_match)) & set(_country_iso_codes(other_match.match))):
             self.logger.debug(
                 "Pruned %r (%s) for %r: country %s differs from reference %r country %s",
                 other_match.match.nfc_alt_name, other_match.match.geographical_name.entity.iri, other_entity.raw_text,
@@ -629,9 +651,6 @@ class Disambiguator:
         possible_addresses = []
         if len(address.entities) == 0:
             return possible_addresses
-        region_hints = defaultdict(list)
-        for region_hint in address.region_hints:
-            region_hints[region_hint.source_entity_id].append(region_hint)
         for match in entity.matches:
             if self._is_entity_type_ruled_out(entity, match):
                 continue
@@ -643,9 +662,6 @@ class Disambiguator:
             matched = {id(e): ScoredMatch(None, {}) for e in address.entities if e.entity_type in [GeographicalEntityType.Neighborhood, GeographicalEntityType.City, GeographicalEntityType.Region, GeographicalEntityType.State, GeographicalEntityType.Country, GeographicalEntityType.AboveCity, GeographicalEntityType.Unknown]}
             matched[id(entity)] = self._score_individual_match(entity, match, bzk_field)
             matched[id(entity)].scores["child_parent_likelihood"] = AnnotatedScore(1.0, "Reference match")
-            regional_term_match = self._score_regional_term_match(match, region_hints[entity.address_entity_id])
-            if regional_term_match is not None:
-                matched[id(entity)].scores["regional_term_match"] = regional_term_match
             matched[id(entity)].scores["weighted_score"] = self._calculate_weighted_score(matched[id(entity)].scores)
             finest_entity = entity
             for other_entity in address.entities:
@@ -669,10 +685,6 @@ class Disambiguator:
                         scored_match.scores["child_parent_likelihood"] = self._score_parent_child(match, other_match)
                     else:
                         scored_match.scores["child_parent_likelihood"] = self._score_parent_child(other_match, match)
-                    regional_term_match = self._score_regional_term_match(
-                        other_match, region_hints[other_entity.address_entity_id])
-                    if regional_term_match is not None:
-                        scored_match.scores["regional_term_match"] = regional_term_match
                     scored_match.scores["weighted_score"] = self._calculate_weighted_score(scored_match.scores)
                     self.logger.debug(
                         "Scores for other entity %r (%r) set: %r",
@@ -826,6 +838,8 @@ class Disambiguator:
         Why the candidate address is pruned based on score thresholds, or None
         if it is not.
         """
+        if is_regional_term_entity(candidate.finest_grain_entity.linked_to.geographical_name.entity):
+            return "finest entity is a regional term, which cannot be linked"
         score_dict = candidate.scores
         for factor, threshold in self.score_prune_thresholds.items():
             if score_dict.get(factor, 0.0) < threshold:
