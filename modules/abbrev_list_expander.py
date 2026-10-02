@@ -46,7 +46,7 @@ ABBREV_EXPANSIONS = [
         Expansion("unterfranken")
         ),
     (
-        re.compile(r"\b[JYI]ugs?l?\.?", re.IGNORECASE),
+        re.compile(r"\b[JYI]ugs?l?" + _ABBREV_END, re.IGNORECASE),
         Expansion("yugoslavia")
         ),
     (

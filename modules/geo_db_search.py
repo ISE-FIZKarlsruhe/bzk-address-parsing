@@ -211,7 +211,7 @@ _PHONETIC_PUNCTUATION_REMOVAL_TABLE = _PhoneticPunctuationRemovalTable()
 # those languages instead.
 _STOP_WORDS = frozenset((
     "der", "die", "das", "des", "dem", "den",
-    "und", "oder", "in", "im", "am", "an", "auf", r"[ia]\.", "bei",
+    "und", "in", "im", "am", "an", "auf", r"[ia]\.", "bei",
     "zu", "zum", "zur", "von", "vom", "nach", "fuer", "fur",
     "the", "and", "of", "at",
     "el", "la", "los", "las", "de", "del", "y", "en",
@@ -450,23 +450,109 @@ class NameSimilarity(NamedTuple):
     fuzzy_score : float
     phonetic_score : float
 
+# Letters an abbreviated word must share with the start of a word for an
+# abbreviation match to get a full fuzzy score (see abbreviation_similarity)
+ABBREVIATION_FULL_SCORE_LETTERS = 5
+
+# Queries with fewer letters than this are scored with the strict edit
+# distance of normalize_for_scoring, which keeps punctuation and casing (see
+# score_name_similarity): for them, a single character carries a lot of the
+# name's identity
+STRICT_SCORING_MAX_QUERY_LETTERS = 5
+
+# A period directly followed by a word character (e.g. in "a.Lech")
+_ABBREVIATION_PERIOD_REGEX = re.compile(r"\.(?=\w)")
+
+def _common_prefix_length(a : str, b : str) -> int:
+    length = 0
+    for char_a, char_b in zip(a, b):
+        if char_a != char_b:
+            break
+        length += 1
+    return length
+
+def _abbreviated_word_similarity(query_word : str, alt_name_word : str) -> float:
+    if query_word == alt_name_word:
+        return 1.0
+    shared_letters = _common_prefix_length(query_word, alt_name_word)
+    return min(shared_letters, ABBREVIATION_FULL_SCORE_LETTERS) / ABBREVIATION_FULL_SCORE_LETTERS
+
+def abbreviation_similarity(nfc_query : str, nfc_alt_name : str) -> float:
+    """
+    Fuzzy score of an abbreviation match (e.g. "Rum." for "Rumänien"): the
+    number of letters each query word shares with the start of the name's
+    word at the same position, out of ABBREVIATION_FULL_SCORE_LETTERS (more
+    count as all of them), and 1 for a word written in full. Averaged over
+    the words, or taken over the whole names when they differ in word count.
+    The names are normalized as for search (see normalized_search_strings),
+    keeping the best of the basic and german ascii normalizations, after
+    separating the words joined by a period (e.g. "a.Lech"), which the
+    abbreviation pattern splits too (see abbreviation_pattern_to_regexes).
+    """
+    nfc_query = _ABBREVIATION_PERIOD_REGEX.sub(". ", nfc_query)
+    nfc_alt_name = _ABBREVIATION_PERIOD_REGEX.sub(". ", nfc_alt_name)
+    best_similarity = 0.0
+    for normalize in (ascii_normalize, german_normalize):
+        query_words = normalize(_remove_stop_words(nfc_query)).split(" ")
+        alt_name_words = normalize(_remove_stop_words(nfc_alt_name)).split(" ")
+        if len(query_words) != len(alt_name_words):
+            query_words, alt_name_words = [" ".join(query_words)], [" ".join(alt_name_words)]
+        similarity = sum(
+            _abbreviated_word_similarity(query_word, alt_name_word)
+            for query_word, alt_name_word in zip(query_words, alt_name_words)
+        ) / len(query_words)
+        best_similarity = max(best_similarity, similarity)
+    return best_similarity
+
+def search_normalized_similarity_and_distance(nfc_query : str, nfc_alt_name : str) -> tuple[int, float]:
+    """
+    Edit distance and similarity between the names normalized as for search
+    (see normalized_search_strings), keeping whichever of the basic and
+    german ascii normalizations yields the higher similarity.
+    """
+    best = None
+    for normalize in (ascii_normalize, german_normalize):
+        edit_distance, similarity = similarity_and_distance(
+            normalize(_remove_stop_words(nfc_query)), normalize(_remove_stop_words(nfc_alt_name)), 10)
+        if best is None or similarity > best[1]:
+            best = (edit_distance, similarity)
+    return best
+
 def score_name_similarity(
-        nfc_query : str, nfc_alt_name : str, logger : logging.Logger = _NAME_SCORING_LOGGER
+        nfc_query : str, nfc_alt_name : str, logger : logging.Logger = _NAME_SCORING_LOGGER,
+        is_abbreviation_match : bool = False
     ) -> NameSimilarity:
     """
     Similarity between a query and a retrieved name, as used to score search
     matches (see GeoDBSearch._parse_data) and to rescore them against part of
     the query (see Disambiguator._split_entity): the edit distance and fuzzy
-    score between the names normalized for scoring, and the phonetic score
-    between their phonetic keys.
+    score between the names, and the phonetic score between their phonetic
+    keys. Both names have the abbreviations of the expansion list expanded
+    first (see abbrev_list_expander). The fuzzy score is that of
+    abbreviation_similarity for an abbreviation match, and otherwise the
+    similarity by edit distance: between the names normalized for scoring
+    (see normalize_for_scoring) for a query of fewer than
+    STRICT_SCORING_MAX_QUERY_LETTERS letters, or else between the names
+    normalized as for search (see search_normalized_similarity_and_distance).
     """
-    query_for_scoring = normalize_for_scoring(nfc_query)
-    alt_name_for_scoring = normalize_for_scoring(nfc_alt_name)
-    edit_distance, fuzzy_score = similarity_and_distance(
-        query_for_scoring, alt_name_for_scoring, 10, distance_function=levenshtein_for_scoring)
+    nfc_query, _ = abbrev_list_expander.expand_abbreviations(nfc_query)
+    nfc_alt_name, _ = abbrev_list_expander.expand_abbreviations(nfc_alt_name)
+    query_letters = sum(c.isalpha() for c in nfc_query)
+    if is_abbreviation_match:
+        edit_distance, _ = search_normalized_similarity_and_distance(nfc_query, nfc_alt_name)
+        fuzzy_score = abbreviation_similarity(nfc_query, nfc_alt_name)
+        method = "abbreviation prefix"
+    elif query_letters < STRICT_SCORING_MAX_QUERY_LETTERS:
+        edit_distance, fuzzy_score = similarity_and_distance(
+            normalize_for_scoring(nfc_query), normalize_for_scoring(nfc_alt_name), 10,
+            distance_function=levenshtein_for_scoring)
+        method = "strict edit distance"
+    else:
+        edit_distance, fuzzy_score = search_normalized_similarity_and_distance(nfc_query, nfc_alt_name)
+        method = "search normalized edit distance"
     logger.debug(
-        "Computed edit distance %d and fuzzy score %.3f for query %r vs alt name %r",
-        edit_distance, fuzzy_score, query_for_scoring, alt_name_for_scoring
+        "Computed edit distance %d and fuzzy score %.3f (%s) for query %r vs alt name %r",
+        edit_distance, fuzzy_score, method, nfc_query, nfc_alt_name
     )
     query_phonetic_key = phonetics_for_scoring(normalize_for_phonetics(nfc_query))
     alt_name_phonetic_key = phonetics_for_scoring(normalize_for_phonetics(nfc_alt_name))
@@ -1727,7 +1813,8 @@ class GeoDBSearch(LinkingStep):
                 continue
             geographical_name = self.regional_terms[term].geographical_name
             edit_distance, fuzzy_score, phonetic_score = score_name_similarity(
-                expanded_query, geographical_name.name, self.logger)
+                expanded_query, geographical_name.name, self.logger,
+                is_abbreviation_match=term != query_string)
             self.logger.debug(
                 "Entity %r (%s) is the regional term %r (%s); matching it instead of searching",
                 entity.raw_text, entity.entity_type, term, geographical_name.entity.iri)
@@ -1843,7 +1930,8 @@ class GeoDBSearch(LinkingStep):
                 geographical_name = decode_from_dict(index_match.retrieved_data, GeographicalName)
             nfc_alt_name = unicodedata.normalize("NFC", geographical_name.name)
             edit_distance, fuzzy_score, phonetic_score = score_name_similarity(
-                index_result.nfc_query, nfc_alt_name, self.logger)
+                index_result.nfc_query, nfc_alt_name, self.logger,
+                is_abbreviation_match=is_abreviation_match)
             matched_name = MatchedName(
                 geographical_name=geographical_name,
                 nfc_query=index_result.nfc_query,

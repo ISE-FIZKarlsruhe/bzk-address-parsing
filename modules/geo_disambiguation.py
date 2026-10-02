@@ -61,7 +61,7 @@ GEOMETRY_PARENT_CHILD_MAX_DISTANCE_KM = 50
 # the entities identified by parsing.
 MISSED_WORD_ENTITY_WEIGHT = 0.5
 
-# Fuzzy similarity score above which a country match of an AboveCity entity is
+# Fuzzy similarity score from which a country match of an AboveCity entity is
 # forced, i.e. the entity's other matches are dropped (see
 # _force_country_matches)
 FORCED_COUNTRY_MATCH_MIN_FUZZY_SCORE = 0.8
@@ -381,8 +381,7 @@ class Disambiguator:
     def _force_country_matches(self, entity : MatchedEntity, matches : tuple[MatchedName, ...]) -> tuple[MatchedName, ...]:
         """
         For an AboveCity entity, if any of its matches is a country with a
-        fuzzy similarity score (1 for an abbreviation match, as in
-        _score_individual_match) above FORCED_COUNTRY_MATCH_MIN_FUZZY_SCORE,
+        fuzzy similarity score of at least FORCED_COUNTRY_MATCH_MIN_FUZZY_SCORE,
         keep only those country matches. The matches are left as they are
         otherwise.
         """
@@ -391,7 +390,7 @@ class Disambiguator:
         country_matches = tuple(
             match for match in matches
             if GeographicalEntityType.Country in match.geographical_name.entity.possible_entity_types
-            and (match.is_abbreviation_match or match.fuzzy_score > FORCED_COUNTRY_MATCH_MIN_FUZZY_SCORE)
+            and match.fuzzy_score >= FORCED_COUNTRY_MATCH_MIN_FUZZY_SCORE
         )
         if len(country_matches) == 0:
             return matches
@@ -456,10 +455,7 @@ class Disambiguator:
                 scores["entity_types_matching_preferred"] = AnnotatedScore(0.0, "Entity type does not match")
         scores["phonetic_score"] = AnnotatedScore(name.phonetic_score, "Phonetic similarity score")
         scores["is_preferred_name"] = AnnotatedScore.from_bool(name.geographical_name.is_preferred_name)
-        if name.is_abbreviation_match:
-            scores["fuzzy_similarity_score"] = AnnotatedScore(1.0, "Abbreviation match")
-        else:
-            scores["fuzzy_similarity_score"] = AnnotatedScore(name.fuzzy_score, "Fuzzy similarity score")
+        scores["fuzzy_similarity_score"] = AnnotatedScore(name.fuzzy_score, "Fuzzy similarity score")
 
         if name.geographical_name.entity.country.iso_code == "DE":
             scores["country_likelihood_rank"] = AnnotatedScore(3, "Germany")
@@ -826,7 +822,8 @@ class Disambiguator:
                         continue
                     match = entity.matches[i]
                     edit_distance, fuzzy_score, phonetic_score = score_name_similarity(
-                        part_text, match.nfc_alt_name, self.logger)
+                        part_text, match.nfc_alt_name, self.logger,
+                        is_abbreviation_match=match.is_abbreviation_match)
                     part_matches.append(dataclasses.replace(
                         match, nfc_query=part_text, edit_distance=edit_distance,
                         fuzzy_score=fuzzy_score, phonetic_score=phonetic_score))
