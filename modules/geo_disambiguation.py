@@ -61,6 +61,11 @@ GEOMETRY_PARENT_CHILD_MAX_DISTANCE_KM = 50
 # the entities identified by parsing.
 MISSED_WORD_ENTITY_WEIGHT = 0.5
 
+# Fuzzy similarity score above which a country match of an AboveCity entity is
+# forced, i.e. the entity's other matches are dropped (see
+# _force_country_matches)
+FORCED_COUNTRY_MATCH_MIN_FUZZY_SCORE = 0.8
+
 # "entity_types_matching_preferred" for Unknown entities (see
 # _score_individual_match), which match any entity type but, coming from
 # single-word addresses (e.g. "Polen"), are most likely a Country, then a
@@ -372,6 +377,30 @@ class Disambiguator:
             already_seen.add(iri)
             unique_matches.append(match)
         return unique_matches
+
+    def _force_country_matches(self, entity : MatchedEntity, matches : tuple[MatchedName, ...]) -> tuple[MatchedName, ...]:
+        """
+        For an AboveCity entity, if any of its matches is a country with a
+        fuzzy similarity score (1 for an abbreviation match, as in
+        _score_individual_match) above FORCED_COUNTRY_MATCH_MIN_FUZZY_SCORE,
+        keep only those country matches. The matches are left as they are
+        otherwise.
+        """
+        if entity.entity_type != GeographicalEntityType.AboveCity or matches is None:
+            return matches
+        country_matches = tuple(
+            match for match in matches
+            if GeographicalEntityType.Country in match.geographical_name.entity.possible_entity_types
+            and (match.is_abbreviation_match or match.fuzzy_score > FORCED_COUNTRY_MATCH_MIN_FUZZY_SCORE)
+        )
+        if len(country_matches) == 0:
+            return matches
+        if self.logger.isEnabledFor(logging.DEBUG):
+            self.logger.debug(
+                "Forcing country matches %s for AboveCity %r, dropping %d other matches",
+                [(m.nfc_alt_name, m.geographical_name.entity.iri) for m in country_matches],
+                entity.raw_text, len(matches) - len(country_matches))
+        return country_matches
 
     def _calculate_weighted_score(self, scores : dict[str, float]) -> AnnotatedScore:
         weight_sum = 0
@@ -809,12 +838,13 @@ class Disambiguator:
                 span = None
                 if entity.span is not None and entity.raw_text == nfc_query:
                     span = AddressSpan(entity.span.start + start, entity.span.start + end)
-                parts.append(dataclasses.replace(
+                part = dataclasses.replace(
                     entity, address_entity_id=str(uuid.uuid4()), raw_text=part_text,
-                    entity_type=entity_type, span=span, matches=tuple(part_matches)))
+                    entity_type=entity_type, span=span, matches=tuple(part_matches))
+                parts.append(dataclasses.replace(part, matches=self._force_country_matches(part, part.matches)))
                 self.logger.debug(
                     "Phase 'split entity' for %r: part %r (%s) with %d matches",
-                    entity.raw_text, part_text, entity_type.name, len(part_matches))
+                    entity.raw_text, part_text, entity_type.name, len(parts[-1].matches))
             split_address = dataclasses.replace(address, entities=[
                 part for e in address.entities for part in (parts if e is entity else [e])
             ])
@@ -879,7 +909,8 @@ class Disambiguator:
         unduped_entities = []
         for entity in address.entities:
             if isinstance(entity, MatchedEntity) and entity.matches is not None and len(entity.matches) > 0:
-                unduped_entities.append(dataclasses.replace(entity, matches=self._drop_duplicates(entity, entity.matches, bzk_field=address.bzk_field_name)))
+                matches = self._drop_duplicates(entity, entity.matches, bzk_field=address.bzk_field_name)
+                unduped_entities.append(dataclasses.replace(entity, matches=self._force_country_matches(entity, matches)))
             else:
                 unduped_entities.append(entity)
         address = dataclasses.replace(address, entities=unduped_entities)
