@@ -1475,6 +1475,12 @@ class TantivySearchIndex(GeoSearchIndex):
         for score, doc_address in search_results.hits:
             doc = searcher.doc(doc_address)
             matched_key = doc.get_first(field)
+            if abbrev_pattern:
+                # a name has several search keys (e.g. with and without stop
+                # words); keep the one the abbreviation pattern matched, which
+                # GeoDBSearch._parse_data checks to flag abbreviation matches
+                matched_key = next(
+                    (key for key in doc.get_all(field) if re.fullmatch(abbrev_pattern, key)), matched_key)
             nfc_name = doc.get_first("nfc_name")
             entities_data = json.loads(doc.get_first("name_data").decode("utf-8"))
             for entity_data in entities_data:
@@ -1871,9 +1877,8 @@ class GeoDBSearch(LinkingStep):
         search_callback : Callable[[IndexSearchResult], bool]
     ) -> IndexSearchResult:
         entity_type = entity.entity_type
-        # country_codes as passed in is what _prune_search_match should judge
-        # plausibility against; it is only widened to the priority countries
-        # below for restricting the search itself.
+        # with no already resolved countries, the search is only hinted
+        # towards the priority countries, not restricted to them
         country_strict = False
         if entity_type != GeographicalEntityType.Country and country_codes is None:
             self.logger.debug(
@@ -2057,14 +2062,10 @@ class GeoDBSearch(LinkingStep):
             return True
         return False
 
-    def _prune_search_match(self, entity : RawEntity, match : MatchedName, country_codes : set) -> bool:
+    def _prune_search_match(self, entity : RawEntity, match : MatchedName) -> bool:
         """
         Prune a match if it is unlikely to be the correct match for the given address and entity.
         """
-        country_is_unlikely = (
-            match.geographical_name.entity.country.iso_code not in ("IL", "US") and 
-            match.geographical_name.entity.country.continent != "EU"
-        )
         # if match.fuzzy_score < self.prune_score_threshold:
         #     return True
         if entity.entity_type == GeographicalEntityType.Country and GeographicalEntityType.Country not in match.geographical_name.entity.possible_entity_types:
@@ -2073,26 +2074,11 @@ class GeoDBSearch(LinkingStep):
                 match.nfc_alt_name, match.geographical_name.entity.iri, entity.raw_text,
                 match.geographical_name.entity.possible_entity_types)
             return True
-        elif (
-            entity.entity_type != GeographicalEntityType.Country and
-            match.geographical_name.entity.country.iso_code not in country_codes and
-            country_is_unlikely and
-            (
-                ((match.geographical_name.entity.population or 1) < 100_000 and match.fuzzy_score < 0.95)
-                or
-                match.fuzzy_score < 0.9
-            )
-            
-        ):
-            self.logger.debug(
-                "Pruned %r (%s) for %r: unlikely country %s (continent %s) outside known countries %s "
-                "with population %s and fuzzy score %.3f",
-                match.nfc_alt_name, match.geographical_name.entity.iri, entity.raw_text,
-                match.geographical_name.entity.country.iso_code, match.geographical_name.entity.country.continent,
-                country_codes, match.geographical_name.entity.population, match.fuzzy_score)
-            return True
         # matches of an entity type ruled out for the entity are not pruned
-        # here but by the Disambiguator (see is_entity_type_ruled_out)
+        # here but by the Disambiguator (see is_entity_type_ruled_out), and
+        # neither are weak matches in an unlikely country, which other
+        # entities of the address may corroborate (see
+        # Disambiguator._uncorroborated_unlikely_country_reason)
         return False
 
     def apply(self, address):
@@ -2132,7 +2118,7 @@ class GeoDBSearch(LinkingStep):
                                 matched_name.nfc_alt_name, matched_name.geographical_name.entity.iri,
                                 entity.raw_text, matched_name.cleaned_alt_name)
                             continue
-                        if not self._prune_search_match(entity, matched_name, country_codes):
+                        if not self._prune_search_match(entity, matched_name):
                             self.logger.debug(
                                 "Kept %r (%s, country %s) for %r: fuzzy %.3f, phonetic %.3f, "
                                 "abbreviation %s, phonetic match %s, partial word match %s",

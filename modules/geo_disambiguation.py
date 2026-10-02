@@ -6,8 +6,8 @@ from typing import Literal, Optional, NamedTuple
 
 from modules.pipeline.geographical_entity import GeographicalBranch, GeographicalEntityType, GeographicalName
 from modules.geo_db_search import (
-    ABOVE_CITY_ENTITY_TYPES, ENTITY_LINKING_LOGGER, distance_to_geometry_km, geometries_distance_km,
-    is_entity_type_ruled_out, is_regional_term_entity, partial_match_query_span, score_name_similarity)
+    ABOVE_CITY_ENTITY_TYPES, ENTITY_LINKING_LOGGER, REGIONAL_TERM_MATCHING_METHOD, distance_to_geometry_km,
+    geometries_distance_km, is_entity_type_ruled_out, is_regional_term_entity, partial_match_query_span, score_name_similarity)
 from modules.pipeline.linked_data import AddressSpan, BZKFieldName, AddressProcessingData, LinkedEntity, MatchedEntity, MatchedName, LinkedAddress, RawEntity
 import uuid
 from modules.pipeline.storage.encoding_util import decode_from_dict
@@ -65,6 +65,21 @@ MISSED_WORD_ENTITY_WEIGHT = 0.5
 # forced, i.e. the entity's other matches are dropped (see
 # _force_country_matches)
 FORCED_COUNTRY_MATCH_MIN_FUZZY_SCORE = 0.8
+
+# Countries outside of Europe that are still likely for an address (see
+# _is_weak_unlikely_country_match)
+LIKELY_NON_EUROPEAN_COUNTRIES = ("IL", "US")
+
+# A match in an unlikely country (outside Europe and
+# LIKELY_NON_EUROPEAN_COUNTRIES) is weak when its fuzzy similarity score is
+# below UNLIKELY_COUNTRY_MIN_FUZZY_SCORE, or below
+# UNLIKELY_COUNTRY_SMALL_PLACE_MIN_FUZZY_SCORE for a place with a population
+# under UNLIKELY_COUNTRY_SMALL_PLACE_MAX_POPULATION; such a match is only kept
+# when corroborated by another entity of the address (see
+# _uncorroborated_unlikely_country_reason)
+UNLIKELY_COUNTRY_MIN_FUZZY_SCORE = 0.9
+UNLIKELY_COUNTRY_SMALL_PLACE_MIN_FUZZY_SCORE = 0.95
+UNLIKELY_COUNTRY_SMALL_PLACE_MAX_POPULATION = 100_000
 
 # "entity_types_matching_preferred" for Unknown entities (see
 # _score_individual_match), which match any entity type but, coming from
@@ -860,13 +875,82 @@ class Disambiguator:
                 candidates.extend(self._score_ambiguous_matches(split_address, part, address.bzk_field_name))
         return sorted(candidates, key=lambda a: _score_dict_to_tuple(a.scores, self.priority), reverse=True)
 
+    def _is_weak_unlikely_country_match(self, linked_entity : LinkedEntity) -> bool:
+        """
+        Whether an entity is linked to a search match in an unlikely country
+        with a weak fuzzy similarity score (see UNLIKELY_COUNTRY_MIN_FUZZY_SCORE).
+        Country entities, and entities pre-linked or matched to a regional
+        term, are never weak.
+        """
+        match = linked_entity.linked_to
+        if linked_entity.entity_type == GeographicalEntityType.Country or match.matching_method in (
+            "pre_linked", REGIONAL_TERM_MATCHING_METHOD
+        ):
+            return False
+        entity = match.geographical_name.entity
+        if entity.country.iso_code in LIKELY_NON_EUROPEAN_COUNTRIES or entity.country.continent == "EU":
+            return False
+        fuzzy_score = linked_entity.scores.get(
+            "fuzzy_similarity_score", AnnotatedScore(match.fuzzy_score)).score
+        if (entity.population or 1) < UNLIKELY_COUNTRY_SMALL_PLACE_MAX_POPULATION:
+            return fuzzy_score < UNLIKELY_COUNTRY_SMALL_PLACE_MIN_FUZZY_SCORE
+        return fuzzy_score < UNLIKELY_COUNTRY_MIN_FUZZY_SCORE
+
+    def _is_corroborated(self, candidate : LinkedAddress, linked_entity : LinkedEntity) -> bool:
+        """
+        Whether another entity of the candidate address, other than a missed
+        word, is linked within the same country as the entity, i.e. with a
+        positive child/parent likelihood (e.g. the city "Caracas" for the
+        neighborhood "Urb. Los Caobos"). The child/parent likelihood of each
+        entity is scored against the reference entity's match (see
+        _score_ambiguous_matches), so a pair of entities other than the
+        reference is taken to be as related as the least related of the two.
+        """
+        reference_id = candidate.reference_entity.address_entity_id
+        for other in candidate.entities:
+            if other.address_entity_id == linked_entity.address_entity_id or other.is_missed_word:
+                continue
+            likelihoods = [
+                e.scores.get("child_parent_likelihood", NA_SCORE).score
+                for e in (linked_entity, other) if e.address_entity_id != reference_id
+            ]
+            if min(likelihoods) > 0:
+                return True
+        return False
+
+    def _uncorroborated_unlikely_country_reason(self, candidate : LinkedAddress) -> Optional[str]:
+        """
+        Why the candidate address is pruned for linking an entity to a weak
+        match in an unlikely country (see _is_weak_unlikely_country_match)
+        that no other entity corroborates (see _is_corroborated), or None if
+        it does not. Such matches are rarely right on their own, but left
+        unpruned by GeoDBSearch since the other entities of the address may
+        well place it in that country.
+        """
+        for linked_entity in candidate.entities:
+            if not self._is_weak_unlikely_country_match(linked_entity) or self._is_corroborated(candidate, linked_entity):
+                continue
+            match = linked_entity.linked_to
+            return (
+                f"{match.nfc_alt_name!r} ({match.geographical_name.entity.iri}) for {linked_entity.raw_text!r} "
+                f"is in unlikely country {match.geographical_name.entity.country.iso_code} with population "
+                f"{match.geographical_name.entity.population} and fuzzy score "
+                f"{linked_entity.scores.get('fuzzy_similarity_score', AnnotatedScore(match.fuzzy_score)).score:.3f}, "
+                f"uncorroborated by other entities"
+            )
+        return None
+
     def _prune_reason(self, candidate: LinkedAddress) -> Optional[str]:
         """
-        Why the candidate address is pruned based on score thresholds, or None
-        if it is not.
+        Why the candidate address is pruned based on score thresholds, or for
+        an uncorroborated weak match in an unlikely country (see
+        _uncorroborated_unlikely_country_reason), or None if it is not.
         """
         if is_regional_term_entity(candidate.finest_grain_entity.linked_to.geographical_name.entity):
             return "finest entity is a regional term, which cannot be linked"
+        unlikely_country_reason = self._uncorroborated_unlikely_country_reason(candidate)
+        if unlikely_country_reason is not None:
+            return unlikely_country_reason
         score_dict = candidate.scores
         for factor, threshold in self.score_prune_thresholds.items():
             if score_dict.get(factor, 0.0) < threshold:
