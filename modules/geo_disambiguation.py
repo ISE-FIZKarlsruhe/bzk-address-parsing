@@ -2,12 +2,13 @@
 
 from os import name
 import pprint
+import re
 from typing import Iterable, Literal, Optional, NamedTuple
 
-from modules.pipeline.geographical_entity import GeographicalBranch, GeographicalEntityType, GeographicalName
+from modules.pipeline.geographical_entity import GeographicalBranch, GeographicalEntity, GeographicalEntityType, GeographicalName
 from modules.geo_db_search import (
     ABOVE_CITY_ENTITY_TYPES, ENTITY_LINKING_LOGGER, REGIONAL_TERM_MATCHING_METHOD, distance_to_geometry_km,
-    geometries_distance_km, is_entity_type_ruled_out, is_regional_term_entity, partial_match_query_span,
+    geodesic_distance_km, geometries_distance_km, is_entity_type_ruled_out, is_regional_term_entity, partial_match_query_span,
     preferred_name_by_entity_iri_select, score_name_similarity)
 from modules.pipeline.linked_data import AddressSpan, BZKFieldName, AddressProcessingData, LinkedEntity, MatchedEntity, MatchedName, LinkedAddress, RawEntity
 import uuid
@@ -98,6 +99,43 @@ NA_SCORE = AnnotatedScore(0.0, "Not applicable")
 # (see _score_parent_child_by_geometry)
 GEOMETRY_PARENT_CHILD_MAX_DISTANCE_KM = 50
 
+# Number of admin code levels a parent's codes must reach for a child whose
+# codes match all of them to be certainly within it (see _score_parent_child):
+# codes reaching only admin1 (as for most places in Israel or Russia)
+# describe the parent's whole district rather than the parent itself
+EXACT_ADMIN_MATCH_MIN_LEVEL = 2
+
+# Distance between the coordinates of a parent and a child at and beyond which
+# the child is considered entirely outside the parent, for the parents neither
+# their admin codes nor an estimated geometry describe (see
+# _score_parent_child_by_distance), by the admin level of the parent (see
+# _parent_admin_level): 0 for a parent with no admin codes at all (e.g. a
+# region), 1 to 5 for admin1 to admin5. Only used when the admin codes of the
+# child do not contradict the parent's.
+PARENT_CHILD_MAX_DISTANCE_KM_BY_ADMIN_LEVEL = {
+    0: 300,  # a region of unknown extent
+    1: 300,  # a state (Land, voivodeship, oblast, ...)
+    2: 100,  # a Regierungsbezirk, a county, a powiat
+    3: 40,   # a Kreis, a gmina
+    4: 20,   # a Gemeinde, a commune
+    5: 15,   # a city, or any populated place
+}
+
+# Share of the distance of PARENT_CHILD_MAX_DISTANCE_KM_BY_ADMIN_LEVEL within
+# which a child scores 1 (see _score_parent_child_by_distance): the location
+# of a parent being only a point, how close to it a child lies says little
+# while within its likely extent
+PARENT_CHILD_FULL_SCORE_DISTANCE_RATIO = 0.5
+
+# For a populated place with a known population, the distance at which a
+# child is considered outside it grows with its size: at least this factor
+# times the square root of its population (e.g. 113 km for New York, 19 km
+# for Netanya at 0.04), since the radius of a city grows with the square root
+# of its area. None to use PARENT_CHILD_MAX_DISTANCE_KM_BY_ADMIN_LEVEL alone.
+CITY_MAX_DISTANCE_KM_PER_SQRT_POPULATION : Optional[float] = 0.04
+
+_ADMIN_DIVISION_CLASSIFICATION = re.compile(r"A\.(ADM([1-5D])|PCL[A-Z]*)H?")
+
 # Weight, relative to the other entities (weighing 1), of a missed word entity
 # (see RawEntity.is_missed_word) in the average of a candidate address' scores.
 # Being only a guess, it should establish a preference between candidates that
@@ -152,6 +190,45 @@ UNKNOWN_ENTITY_TYPE_PREFERENCE = {
     GeographicalEntityType.Region: AnnotatedScore(0.25, "Unknown entity type matches region"),
     GeographicalEntityType.District: AnnotatedScore(0.25, "Unknown entity type matches district"),
 }
+
+def _admin_code_level(entity : GeographicalEntity) -> int:
+    """The finest admin code level (1 to 5) an entity has a code for, 0 if none."""
+    return max((i + 1 for i, code in enumerate(entity.admin_codes or ()) if not _is_admin_code_null(code)), default=0)
+
+def _admin_codes_match_up_to_parent(parent_entity : GeographicalEntity, child_entity : GeographicalEntity) -> bool:
+    """
+    Whether the child has the same code as the parent at every admin level
+    the parent has a code for (a null intermediate code of the parent, e.g.
+    admin2 "00" of a German town, being a level it skips).
+    """
+    return all(
+        _is_admin_code_null(parent_code) or parent_code == child_code
+        for parent_code, child_code in zip(parent_entity.admin_codes or (), child_entity.admin_codes or ())
+    )
+
+def _is_admin_division(entity : GeographicalEntity) -> bool:
+    """Whether an entity is an administrative division (or a country) by its classification."""
+    return entity.classification is not None and _ADMIN_DIVISION_CLASSIFICATION.fullmatch(entity.classification) is not None
+
+def _is_populated_place(entity : GeographicalEntity) -> bool:
+    return (entity.classification or "").startswith("P.") or any(
+        t in entity.possible_entity_types for t in (GeographicalEntityType.City, GeographicalEntityType.Neighborhood))
+
+def _parent_admin_level(entity : GeographicalEntity) -> int:
+    """
+    The admin level of a parent, for PARENT_CHILD_MAX_DISTANCE_KM_BY_ADMIN_LEVEL:
+    that of its classification for an admin division (0 for a country), 5
+    for a populated place, and the finest level it has a code for otherwise.
+    """
+    classification_match = _ADMIN_DIVISION_CLASSIFICATION.fullmatch(entity.classification or "")
+    if classification_match is not None:
+        level = classification_match.group(2)
+        if level is None:
+            return 0
+        return int(level) if level != "D" else _admin_code_level(entity)
+    if _is_populated_place(entity):
+        return 5
+    return _admin_code_level(entity)
 
 class ScoredMatch(NamedTuple):
     match: MatchedName
@@ -612,10 +689,71 @@ class Disambiguator:
         geometry_score = self._score_parent_child_by_geometry(parent, child)
         if geometry_score is not None and is_regional_term_entity(parent_entity):
             return geometry_score
-        admin_codes_score = self._score_parent_child_by_admin_codes(parent, child)
-        if geometry_score is not None and geometry_score.score > admin_codes_score.score:
+        if min(parent_entity.possible_entity_types) > max(child_entity.possible_entity_types):
+            # the parent cannot possibly outrank the child (see _score_parent_child_by_admin_codes)
+            return self._score_parent_child_by_admin_codes(parent, child)
+        if parent_entity.country.iso_code != child_entity.country.iso_code:
+            return AnnotatedScore(0, "Different countries")
+        if not _admin_codes_match_up_to_parent(parent_entity, child_entity):
+            # the codes contradict the child lying within the parent, however
+            # close they are; a far away child is even less likely within it
+            admin_codes_score = self._score_parent_child_by_admin_codes(parent, child)
+            distance_score = self._score_parent_child_by_distance(parent, child)
+            if distance_score is not None and distance_score.score < admin_codes_score.score:
+                return distance_score
+            return admin_codes_score
+        parent_level = _admin_code_level(parent_entity)
+        if parent_level >= EXACT_ADMIN_MATCH_MIN_LEVEL:
+            logger.debug(
+                "Admin codes of child %r (%r) match all %d of parent %r (%r), setting score to 1",
+                child.cleaned_alt_name, child_entity.iri, parent_level, parent.cleaned_alt_name, parent_entity.iri)
+            return AnnotatedScore(1, "Administrative Code exact match")
+        if _is_admin_division(parent_entity) and parent_level >= _parent_admin_level(parent_entity):
+            # only a division with a code at its own level (unlike e.g. the
+            # historical Banat, A.ADM1H with no admin1 code) is described by
+            # its codes
+            logger.debug(
+                "Child %r (%r) lies within the administrative division %r (%r), setting score to 1",
+                child.cleaned_alt_name, child_entity.iri, parent.cleaned_alt_name, parent_entity.iri)
+            return AnnotatedScore(1, "Within the administrative division")
+        if geometry_score is not None:
             return geometry_score
-        return admin_codes_score
+        distance_score = self._score_parent_child_by_distance(parent, child)
+        if distance_score is not None:
+            return distance_score
+        return self._score_parent_child_by_admin_codes(parent, child)
+
+    def _score_parent_child_by_distance(self, parent: MatchedName, child: MatchedName) -> Optional[AnnotatedScore]:
+        """
+        How close the child lies to the parent: 1 up to
+        PARENT_CHILD_FULL_SCORE_DISTANCE_RATIO of the distance of the parent's
+        admin level, decreasing linearly to 0 at that distance
+        (see PARENT_CHILD_MAX_DISTANCE_KM_BY_ADMIN_LEVEL and
+        CITY_MAX_DISTANCE_KM_PER_SQRT_POPULATION). None if either has no
+        location.
+        """
+        parent_entity = parent.geographical_name.entity
+        child_entity = child.geographical_name.entity
+        if (
+            parent_entity.coordinates is None or parent_entity.coordinates.latitude is None
+            or child_entity.coordinates is None or child_entity.coordinates.latitude is None
+        ):
+            return None
+        level = _parent_admin_level(parent_entity)
+        max_distance = PARENT_CHILD_MAX_DISTANCE_KM_BY_ADMIN_LEVEL[level]
+        if (
+            CITY_MAX_DISTANCE_KM_PER_SQRT_POPULATION is not None and _is_populated_place(parent_entity)
+            and parent_entity.population
+        ):
+            max_distance = max(max_distance, CITY_MAX_DISTANCE_KM_PER_SQRT_POPULATION * math.sqrt(parent_entity.population))
+        distance = geodesic_distance_km(parent_entity.coordinates, child_entity.coordinates)
+        full_score_distance = PARENT_CHILD_FULL_SCORE_DISTANCE_RATIO * max_distance
+        score = min(1.0, max(0.0, (max_distance - distance) / (max_distance - full_score_distance)))
+        self.logger.getChild("parent_child_scoring").debug(
+            "Child %r (%r) lies %.1f km from parent %r (%r) (admin level %d, max %.0f km), setting score to %.2f",
+            child.cleaned_alt_name, child_entity.iri, distance, parent.cleaned_alt_name, parent_entity.iri,
+            level, max_distance, score)
+        return AnnotatedScore(score, f"{distance:.0f} km from the parent (max {max_distance:.0f} km)")
 
     def _score_parent_child_by_geometry(self, parent: MatchedName, child: MatchedName) -> Optional[AnnotatedScore]:
         """
