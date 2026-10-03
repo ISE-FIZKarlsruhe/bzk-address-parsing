@@ -58,7 +58,7 @@ from tqdm.auto import tqdm
 from modules.address_tagging import tag_address
 from modules.camp_search import DEFAULT_CAMPS_REFERENCE_PATH, CampReferenceMatcher
 from modules.geo_db_search import FUZZY_DISTANCE_1_SEARCH_PHASE, PHONETIC_SEARCH_PHASE, REGIONAL_TERM_MATCHING_METHOD, _STOP_WORDS, _compiled_stop_words, GeoDBSearch, TantivySearchIndex, ascii_normalize, german_normalize
-from modules.geo_disambiguation import MISSED_WORD_ENTITY_WEIGHT, Disambiguator, deciding_factor
+from modules.geo_disambiguation import MISSED_WORD_ENTITY_WEIGHT, Disambiguator, deciding_factor, factor_of_label
 from modules.entity_linking_eval_metrics import normalize_iri
 from modules.pipeline.geographical_entity import GeographicalEntityType
 from modules.pipeline.linked_data import AddressProcessingData, AddressSpan, BZKFieldName, LinkedAddress, MatchedEntity, MatchedName, RawEntity
@@ -148,7 +148,7 @@ class DisambiguationStatus:
     NO_CANDIDATES = "NO_CANDIDATES"
 
 
-# DISAMBIGUATION_FACTOR_PRIORITY factors that reflect the entity's own type
+# Disambiguation factors (see geo_disambiguation.DISAMBIGUATION_FACTOR_PRIORITY) that reflect the entity's own type
 # match or agreement with sibling entities in the same address, as opposed to
 # generic ranking criteria (population, country, preferred name, ...).
 _CONTEXT_DISAMBIGUATION_FACTORS = {
@@ -171,12 +171,14 @@ def _candidate_iri(candidate: LinkedAddress) -> str:
 def _deciding_factor(address: AddressProcessingData, disambiguator: Disambiguator) -> str:
     """
     The disambiguation factor the choice of address.linked_to hinged on, by
-    the same significance thresholds Disambiguator.disambiguate ranks
-    candidates with (see geo_disambiguation.deciding_factor). Candidates for
+    the same comparison steps Disambiguator.disambiguate ranks candidates
+    with (see geo_disambiguation.deciding_factor), labelled as the step that
+    decided (e.g. "fuzzy_similarity_score (no threshold)" when decided only
+    once the primary factors are compared with no threshold). Candidates for
     the same entity as the linked one do not compete with it (disambiguate
     only treats distinct entities as ambiguous). Against each competitor, the
-    deciding factor is the first one whose difference is significant; the
-    address' is the lowest-priority of those, i.e. the one that separated the
+    deciding factor is that of the first step whose difference is
+    significant; the address' is the latest step of those, i.e. the one that separated the
     linked candidate from its closest competitor. Only meaningful when
     address.linked_to is not None.
     """
@@ -184,14 +186,14 @@ def _deciding_factor(address: AddressProcessingData, disambiguator: Disambiguato
         return COMMON_PARENT_DECIDING_FACTOR
     best = address.linked_to
     best_iri = _candidate_iri(best)
-    priority = disambiguator.priority
+    step_order = {step.label: i for i, step in enumerate(disambiguator.comparison_steps)}
     closest = None
     for competitor in address.possible_links or ():
         if _candidate_iri(competitor) == best_iri:
             continue
-        decided = deciding_factor(best.scores, competitor.scores, priority, disambiguator.significance_thresholds)
+        decided = deciding_factor(best.scores, competitor.scores, disambiguator.comparison_steps)
         # a tie would have left the address ambiguous instead
-        if decided is not None and (closest is None or priority.index(decided[0]) > priority.index(closest[0][0])):
+        if decided is not None and (closest is None or step_order[decided[0]] > step_order[closest[0][0]]):
             closest = (decided, competitor)
     if closest is None:
         return UNAMBIGUOUS_DECIDING_FACTOR
@@ -214,7 +216,7 @@ def _resolved_disambiguation_status(factor: str) -> str:
         return DisambiguationStatus.DISAMBIGUATED_BY_COMMON_PARENT
     if factor == UNAMBIGUOUS_DECIDING_FACTOR:
         return DisambiguationStatus.UNAMBIGUOUS
-    if factor in _CONTEXT_DISAMBIGUATION_FACTORS:
+    if factor_of_label(factor) in _CONTEXT_DISAMBIGUATION_FACTORS:
         return DisambiguationStatus.DISAMBIGUATED_BY_CONTEXT
     return DisambiguationStatus.DISAMBIGUATED_HEURISTICALLY
 

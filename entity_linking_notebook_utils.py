@@ -704,7 +704,9 @@ _PIE_LINK_STATUSES = [LinkStatus.CORRECTLY_LINKED, LinkStatus.INCORRECTLY_LINKED
 # factor and the weighted score contribution pies.
 _DISAMBIGUATION_FACTOR_ORDER = [
     entity_linking.UNAMBIGUOUS_DECIDING_FACTOR,
-    *geo_disambiguation.DISAMBIGUATION_FACTOR_PRIORITY,
+    *geo_disambiguation.comparison_step_labels(
+        geo_disambiguation.DISAMBIGUATION_FACTOR_PRIMARY_PRIORITY,
+        geo_disambiguation.DISAMBIGUATION_FACTOR_SECONDARY_PRIORITY),
     entity_linking.COMMON_PARENT_DECIDING_FACTOR,
 ]
 # Phases of TantivySearchIndex.search in the order they are tried (with the
@@ -712,7 +714,7 @@ _DISAMBIGUATION_FACTOR_ORDER = [
 # matches obtained without a text search (see MatchedName.search_phase)
 _SEARCH_PHASE_ORDER = [
     "exact", "abbreviation", geo_db_search.PHONETIC_SEARCH_PHASE, geo_db_search.FUZZY_DISTANCE_1_SEARCH_PHASE,
-    "fuzzy(distance=2)", "partial_word", "regional_term", "pre_linked",
+    "fuzzy(distance=2)", "partial_word", "regional_term", "pre_linked", "common_parent",
 ]
 # Human readable names of the "{prefix}.status" of a parsed address
 _PARSING_METHOD_NAMES = {"fully_parsed": "Regex", "llm_parsed": "LLM", "llm_error": "LLM (failed)"}
@@ -756,6 +758,50 @@ def _counts_by_link_status(values: list[Optional[str]], statuses: list[str], ord
     return counts
 
 
+def _incorrectly_linked_by_category(
+    addresses: pd.DataFrame,
+    outcomes: list[entity_linking.LinkingOutcome],
+    ground_truth: pd.DataFrame,
+    values: list[Optional[str]],
+    category_name: str,
+    order: list[str],
+) -> pd.DataFrame:
+    """
+    Every incorrectly linked address with its value (in a `category_name`
+    column) of `values`, the category it falls in in the incorrectly linked pie
+    of plot_pies_by_link_status (see _counts_by_link_status), sorted by
+    category in `order`, skipping None values like the pie does.
+    """
+    records = []
+    for row, outcome, value, status in zip(
+        addresses.itertuples(), outcomes, values, link_statuses(outcomes, ground_truth)
+    ):
+        if status != LinkStatus.INCORRECTLY_LINKED or value is None:
+            continue
+        finest = finest_entity(outcome)
+        records.append({
+            category_name: value,
+            "address_id": row.address_id,
+            "card_id": row.card_id,
+            "bzk_field_name": row.field,
+            "full_address": row.FullAddress,
+            "true_iri": None if pd.isna(row.iri) else normalize_iri(row.iri),
+            "pred_iri": normalize_iri(outcome.iri),
+            "pred_entity_type": outcome.entity_type,
+            "pred_raw_text": finest.raw_text if finest else None,
+            "pred_matched_name": finest.matching.get("matched_name") if finest else None,
+            "pred_country": finest.country if finest else None,
+        })
+    samples = pd.DataFrame(records, columns=[
+        category_name, "address_id", "card_id", "bzk_field_name", "full_address", "true_iri", "pred_iri",
+        "pred_entity_type", "pred_raw_text", "pred_matched_name", "pred_country",
+    ])
+    rank = {v: i for i, v in enumerate(order)}
+    return samples.sort_values(
+        category_name, key=lambda column: column.map(lambda v: rank.get(v, len(order))), kind="stable"
+    ).reset_index(drop=True)
+
+
 def deciding_factor_counts(outcomes: list[entity_linking.LinkingOutcome], ground_truth: pd.DataFrame) -> pd.DataFrame:
     """
     Number of correctly and incorrectly linked addresses per factor the
@@ -765,6 +811,15 @@ def deciding_factor_counts(outcomes: list[entity_linking.LinkingOutcome], ground
     return _counts_by_link_status(
         [outcome.deciding_factor for outcome in outcomes], link_statuses(outcomes, ground_truth),
         _DISAMBIGUATION_FACTOR_ORDER)
+
+
+def incorrectly_linked_by_deciding_factor(
+    addresses: pd.DataFrame, outcomes: list[entity_linking.LinkingOutcome], ground_truth: pd.DataFrame
+) -> pd.DataFrame:
+    """The incorrectly linked addresses counted by deciding_factor_counts, with their deciding factor."""
+    return _incorrectly_linked_by_category(
+        addresses, outcomes, ground_truth, [outcome.deciding_factor for outcome in outcomes],
+        "deciding_factor", _DISAMBIGUATION_FACTOR_ORDER)
 
 
 def weighted_score_contributions(outcomes: list[entity_linking.LinkingOutcome], ground_truth: pd.DataFrame) -> pd.DataFrame:
@@ -789,15 +844,44 @@ def weighted_score_contributions(outcomes: list[entity_linking.LinkingOutcome], 
     return means
 
 
-def reference_search_phase_counts(outcomes: list[entity_linking.LinkingOutcome], ground_truth: pd.DataFrame) -> pd.DataFrame:
+def _finest_search_phase(outcome: entity_linking.LinkingOutcome) -> Optional[str]:
+    """
+    The phase of GeoDBSearch (see MatchedName.search_phase) that retrieved the
+    match of the finest entity of the linked candidate, the one its IRI is
+    that of ("common_parent" for one linked to the common parent of tied
+    candidates), or None when it was not linked through GeoDBSearch.
+    """
+    finest = finest_entity(outcome)
+    return finest.matching.get("search_phase") if finest is not None else None
+
+
+def finest_search_phase_counts(outcomes: list[entity_linking.LinkingOutcome], ground_truth: pd.DataFrame) -> pd.DataFrame:
     """
     Number of correctly and incorrectly linked addresses per phase of
-    GeoDBSearch that retrieved the match of the linked candidate's reference
-    entity (see LinkingOutcome.reference_search_phase).
+    GeoDBSearch that retrieved the match of the linked candidate's finest
+    entity (see _finest_search_phase).
     """
     return _counts_by_link_status(
-        [outcome.reference_search_phase for outcome in outcomes], link_statuses(outcomes, ground_truth),
+        [_finest_search_phase(outcome) for outcome in outcomes], link_statuses(outcomes, ground_truth),
         _SEARCH_PHASE_ORDER)
+
+
+def incorrectly_linked_by_finest_search_phase(
+    addresses: pd.DataFrame, outcomes: list[entity_linking.LinkingOutcome], ground_truth: pd.DataFrame
+) -> pd.DataFrame:
+    """The incorrectly linked addresses counted by finest_search_phase_counts, with their search phase."""
+    return _incorrectly_linked_by_category(
+        addresses, outcomes, ground_truth, [_finest_search_phase(outcome) for outcome in outcomes],
+        "finest_search_phase", _SEARCH_PHASE_ORDER)
+
+
+def _parsing_methods(parsed_rows: list[dict]) -> list[Optional[str]]:
+    """Human readable name of the method that parsed each of `parsed_rows` (see _PARSING_METHOD_NAMES)."""
+    methods = []
+    for parsed_row in parsed_rows:
+        status = entity_linking._clean_optional_str(parsed_row.get(f"{parsed_row['prefix']}.status"))
+        methods.append(_PARSING_METHOD_NAMES.get(status, status))
+    return methods
 
 
 def parsing_method_counts(
@@ -808,11 +892,19 @@ def parsing_method_counts(
     parsed them (regex, or the LLM fallback), from the parsed rows the
     outcomes were linked from (see run_pipeline).
     """
-    methods = []
-    for parsed_row in parsed_rows:
-        status = entity_linking._clean_optional_str(parsed_row.get(f"{parsed_row['prefix']}.status"))
-        methods.append(_PARSING_METHOD_NAMES.get(status, status))
-    return _counts_by_link_status(methods, link_statuses(outcomes, ground_truth), _PARSING_METHOD_ORDER)
+    return _counts_by_link_status(
+        _parsing_methods(parsed_rows), link_statuses(outcomes, ground_truth), _PARSING_METHOD_ORDER)
+
+
+def incorrectly_linked_by_parsing_method(
+    addresses: pd.DataFrame,
+    outcomes: list[entity_linking.LinkingOutcome],
+    ground_truth: pd.DataFrame,
+    parsed_rows: list[dict],
+) -> pd.DataFrame:
+    """The incorrectly linked addresses counted by parsing_method_counts, with their parsing method."""
+    return _incorrectly_linked_by_category(
+        addresses, outcomes, ground_truth, _parsing_methods(parsed_rows), "parsing_method", _PARSING_METHOD_ORDER)
 
 
 def _plot_pie_row(axes, values: pd.DataFrame, styles: dict[str, tuple[str, str]], min_labeled_pct: float) -> None:
@@ -849,7 +941,7 @@ def plot_pies_by_link_status(
     """
     Side by side pies of the rows of `values`, one per link status column:
     address counts (as built by deciding_factor_counts,
-    reference_search_phase_counts and parsing_method_counts) or average
+    finest_search_phase_counts and parsing_method_counts) or average
     contributions (as built by weighted_score_contributions). Several of these
     tables, keyed by a title for each, are stacked in rows of the same figure
     sharing one legend. Each category keeps the same color in every pie (see
@@ -957,7 +1049,8 @@ class DisambiguationErrorExplainer:
         3. After linking: the outcome compared against the ground truth, at the
            step where linking stopped; for GeoDBSearch + disambiguation, the
            winning candidate's per-factor scores against the true candidate's,
-           in DISAMBIGUATION_FACTOR_PRIORITY order, to surface the deciding factor.
+           in DISAMBIGUATION_FACTOR_PRIORITY order, to surface the deciding factor
+           (see geo_disambiguation.comparison_steps).
         """
         current_level = geo_db_search.ENTITY_LINKING_LOGGER.level
         if verbose:
@@ -1223,15 +1316,18 @@ class DisambiguationErrorExplainer:
         sb.clear()
 
         table = ["| factor | predicted | true | |", "|---|--:|--:|---|"]
-        deciding_factor = None
+        decided = geo_disambiguation.deciding_factor(
+            predicted.scores, true_candidate.scores, self.disambiguator.comparison_steps)
+        deciding_factor = decided[0] if decided is not None else None
         for factor in self.disambiguator.priority:
             pred_score = predicted.scores.get(factor, 0.0)
             true_score = true_candidate.scores.get(factor, 0.0)
 
             marker = ""
-            if deciding_factor is None and abs(pred_score - true_score) > self.disambiguator.significance_thresholds[factor]:
-                deciding_factor = factor
+            if deciding_factor is not None and geo_disambiguation.factor_of_label(deciding_factor) == factor:
                 marker = "**← decides the ranking**"
+                if deciding_factor != factor:
+                    marker += " (once no primary factor differs significantly)"
             table.append(f"| `{factor}` | {pred_score:.3f} | {true_score:.3f} | {marker} |")
         display(Markdown("\n".join(table)))
         if deciding_factor is not None:

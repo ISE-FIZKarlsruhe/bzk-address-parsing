@@ -2,7 +2,7 @@
 
 from os import name
 import pprint
-from typing import Literal, Optional, NamedTuple
+from typing import Iterable, Literal, Optional, NamedTuple
 
 from modules.pipeline.geographical_entity import GeographicalBranch, GeographicalEntityType, GeographicalName
 from modules.geo_db_search import (
@@ -26,18 +26,61 @@ def _is_admin_code_null(code : Optional[str]) -> bool:
     return code is None or code == "" or all(c == "0" for c in code)
 
 
-DISAMBIGUATION_FACTOR_PRIORITY = [
+# Factors candidates are compared on, in priority order (see
+# comparison_steps): first the primary factors, each deciding only when the
+# difference exceeds its significance threshold; then, when none does, the
+# primary factors again with no threshold at all; and only then the secondary
+# factors, with their significance thresholds, to break the remaining ties.
+DISAMBIGUATION_FACTOR_PRIMARY_PRIORITY = [
     "weighted_score",
     "child_parent_likelihood",
     "fuzzy_similarity_score",
     "entity_types_matching_preferred",
     "population_order_of_magnitude",
     "country_likelihood_rank", # general rank of country likelihood based on observation
+]
+DISAMBIGUATION_FACTOR_SECONDARY_PRIORITY = [
     "phonetic_score",
     "entity_types_matching",
     "is_preferred_name",
     "population_count"
 ]
+# Every factor in priority order, as a strict (threshold-free) ranking
+# compares them
+DISAMBIGUATION_FACTOR_PRIORITY = [*DISAMBIGUATION_FACTOR_PRIMARY_PRIORITY, *DISAMBIGUATION_FACTOR_SECONDARY_PRIORITY]
+
+# Suffix of the label of a primary factor compared with no threshold (see
+# comparison_steps), e.g. "fuzzy_similarity_score (no threshold)"
+NO_THRESHOLD_SUFFIX = " (no threshold)"
+
+class ComparisonStep(NamedTuple):
+    # what deciding_factor reports the step as
+    label : str
+    factor : str
+    threshold : float
+
+def comparison_steps(
+        primary_priority : list[str], secondary_priority : list[str], significance_thresholds : dict[str, float]
+    ) -> tuple[ComparisonStep, ...]:
+    """
+    The steps two score dictionaries are compared in (see deciding_factor):
+    the primary factors with their significance thresholds, then the primary
+    factors with no threshold, then the secondary factors with their
+    significance thresholds.
+    """
+    return (
+        *(ComparisonStep(factor, factor, significance_thresholds[factor]) for factor in primary_priority),
+        *(ComparisonStep(factor + NO_THRESHOLD_SUFFIX, factor, 0.0) for factor in primary_priority),
+        *(ComparisonStep(factor, factor, significance_thresholds[factor]) for factor in secondary_priority),
+    )
+
+def comparison_step_labels(primary_priority : list[str], secondary_priority : list[str]) -> list[str]:
+    """The labels of comparison_steps, in order."""
+    return [step.label for step in comparison_steps(primary_priority, secondary_priority, defaultdict(float))]
+
+def factor_of_label(label : str) -> str:
+    """The factor a label of comparison_steps compares on."""
+    return label.removesuffix(NO_THRESHOLD_SUFFIX)
 
 # Higher value means more impact in the decision
 WEIGHTED_DISAMBIGUATION_FACTORS = {
@@ -66,6 +109,16 @@ MISSED_WORD_ENTITY_WEIGHT = 0.5
 # forced, i.e. the entity's other matches are dropped (see
 # _force_country_matches)
 FORCED_COUNTRY_MATCH_MIN_FUZZY_SCORE = 0.8
+
+# Fuzzy similarity score below which a match of an entity other than the
+# reference one is pruned (see _prune_match), except pre-linked and regional
+# term matches
+MIN_OTHER_MATCH_FUZZY_SCORE = 0.5
+
+# Child/parent likelihood below which a Neighborhood match is pruned (see
+# _prune_match): sharing only the first admin code of a city with an admin2
+# code (2/3) is not enough
+MIN_NEIGHBORHOOD_CHILD_PARENT_LIKELIHOOD = 0.74
 
 # Countries outside of Europe that are still likely for an address (see
 # _is_weak_unlikely_country_match)
@@ -117,33 +170,32 @@ def _score_dict_to_tuple(scores : dict[str, AnnotatedScore | float], priority : 
 def deciding_factor(
         s1 : dict[str, AnnotatedScore | float],
         s2 : dict[str, AnnotatedScore | float],
-        priority : list[str],
-        significance_thresholds : dict[str, float]
+        steps : Iterable[ComparisonStep],
     ) -> Optional[tuple[str, float, float]]:
     """
-    The first factor, in priority order, whose difference between two score
-    dictionaries exceeds its significance threshold, with both scores on it;
-    None if no factor does (the two are tied).
+    The label of the first of the comparison steps (see comparison_steps)
+    whose factor's difference between two score dictionaries exceeds the
+    step's threshold, with both scores on it; None if no step does (the two
+    are tied).
     """
-    t1 = _score_dict_to_tuple(s1, priority)
-    t2 = _score_dict_to_tuple(s2, priority)
-    for factor, a, b in zip(priority, t1, t2):
-        if abs(a - b) > significance_thresholds[factor]:
-            return factor, a, b
+    for step in steps:
+        a = _score_dict_to_tuple(s1, [step.factor])[0]
+        b = _score_dict_to_tuple(s2, [step.factor])[0]
+        if abs(a - b) > step.threshold:
+            return step.label, a, b
     return None
 
 def _compare_scores(
         s1 : dict[str, AnnotatedScore | float],
         s2 : dict[str, AnnotatedScore | float],
-        priority : list[str],
-        significance_thresholds : dict[str, float]
+        steps : Iterable[ComparisonStep],
     ) -> Literal["gt", "lt", "eq"]:
     """
-    Compares two score dictionaries factor by factor in priority order: the
-    first factor whose difference exceeds its significance threshold decides
-    ("gt" or "lt"); "eq" if no factor does.
+    Compares two score dictionaries step by step (see comparison_steps): the
+    first step whose factor's difference exceeds its threshold decides ("gt"
+    or "lt"); "eq" if no step does.
     """
-    decided = deciding_factor(s1, s2, priority, significance_thresholds)
+    decided = deciding_factor(s1, s2, steps)
     if decided is None:
         return "eq"
     _, a, b = decided
@@ -191,7 +243,8 @@ class Disambiguator:
     def __init__(
             self, 
             significance_thresholds: dict[str, float] = defaultdict(float),
-            priority: list[str] = DISAMBIGUATION_FACTOR_PRIORITY,
+            primary_priority: list[str] = DISAMBIGUATION_FACTOR_PRIMARY_PRIORITY,
+            secondary_priority: list[str] = DISAMBIGUATION_FACTOR_SECONDARY_PRIORITY,
             score_weights: list[str] = WEIGHTED_DISAMBIGUATION_FACTORS,
             population_rounding_factor: int = 10_000,
             min_population_order_of_magnitude: int = 500_000,
@@ -200,7 +253,12 @@ class Disambiguator:
             geometry_parent_child_max_distance_km : float = GEOMETRY_PARENT_CHILD_MAX_DISTANCE_KM
         ):
         self.significance_thresholds = significance_thresholds
-        self.priority = priority
+        self.primary_priority = primary_priority
+        self.secondary_priority = secondary_priority
+        # every factor in priority order, for strict rankings (e.g. sorting)
+        self.priority = [*primary_priority, *secondary_priority]
+        # how candidates are compared when telling them apart (see comparison_steps)
+        self.comparison_steps = comparison_steps(primary_priority, secondary_priority, significance_thresholds)
         self.score_weights = score_weights
         self.population_rounding_factor = population_rounding_factor
         self.min_population_order_of_magnitude = min_population_order_of_magnitude
@@ -220,10 +278,12 @@ class Disambiguator:
         self._geo_db_lock = threading.Lock()
         self._common_parent_cache : dict[GeographicalBranch, Optional[GeographicalName]] = {}
         self.logger.info(
-            "Initialized with significance thresholds %s, priority %s, population rounding factor %d, "
+            "Initialized with significance thresholds %s, primary priority %s, secondary priority %s, "
+            "population rounding factor %d, "
             "min population order of magnitude %d, score prune thresholds %s, geo db %s, "
             "geometry parent/child max distance %.0f km",
-            self.significance_thresholds, self.priority, self.population_rounding_factor,
+            self.significance_thresholds, self.primary_priority, self.secondary_priority,
+            self.population_rounding_factor,
             self.min_population_order_of_magnitude, dict(self.score_prune_thresholds), self.geo_db_path,
             self.geometry_parent_child_max_distance_km)
 
@@ -414,16 +474,17 @@ class Disambiguator:
 
     def _force_country_matches(self, entity : MatchedEntity, matches : tuple[MatchedName, ...]) -> tuple[MatchedName, ...]:
         """
-        For an AboveCity entity, if any of its matches is a country with a
-        fuzzy similarity score of at least FORCED_COUNTRY_MATCH_MIN_FUZZY_SCORE,
-        keep only those country matches. The matches are left as they are
-        otherwise.
+        For an AboveCity entity, if any of its matches is an independent
+        country (A.PCLI, unlike e.g. the parish "Califat" typed as a country)
+        with a fuzzy similarity score of at least
+        FORCED_COUNTRY_MATCH_MIN_FUZZY_SCORE, keep only those country matches.
+        The matches are left as they are otherwise.
         """
         if entity.entity_type != GeographicalEntityType.AboveCity or matches is None:
             return matches
         country_matches = tuple(
             match for match in matches
-            if GeographicalEntityType.Country in match.geographical_name.entity.possible_entity_types
+            if match.geographical_name.entity.classification == "A.PCLI"
             and match.fuzzy_score >= FORCED_COUNTRY_MATCH_MIN_FUZZY_SCORE
         )
         if len(country_matches) == 0:
@@ -606,6 +667,18 @@ class Disambiguator:
                 )
                 return AnnotatedScore(0, "Different countries")
             for i, (parent_code, child_code) in enumerate(zip(parent_entity.admin_codes, child_entity.admin_codes)):
+                if _is_admin_code_null(parent_code) and any(
+                    not _is_admin_code_null(code) for code in parent_entity.admin_codes[i + 1:]
+                ):
+                    # an intermediate null code (e.g. admin2 "00" of a German
+                    # town with an admin3 code) is a level the parent skips,
+                    # not the end of its hierarchy
+                    logger.debug(
+                        "Admin %d code %r is null on the parent %r (%r) but a finer code is not; skipping it",
+                        i, parent_code,
+                        parent.cleaned_alt_name, parent.geographical_name.entity.iri
+                    )
+                    continue
                 if _is_admin_code_null(parent_code):
                     logger.debug(
                         "Admin %d code %r is considered null on the parent %r (%r); all codes match up to the parent's level, setting score to 1",
@@ -692,11 +765,21 @@ class Disambiguator:
                 other_match.match.geographical_name.entity.possible_entity_types)
             return True
         
-        if other_entity.entity_type == GeographicalEntityType.Neighborhood and other_match.scores.get("child_parent_likelihood", AnnotatedScore(0, "Not applicable")).score < 0.6:
+        if (
+            other_match.match.matching_method not in ("pre_linked", REGIONAL_TERM_MATCHING_METHOD)
+            and other_match.match.fuzzy_score < MIN_OTHER_MATCH_FUZZY_SCORE
+        ):
             self.logger.debug(
-                "Pruned %r (%s) for neighborhood %r: child/parent likelihood %s below 0.6",
+                "Pruned %r (%s) for %r: fuzzy score %.3f below %.2f",
                 other_match.match.nfc_alt_name, other_match.match.geographical_name.entity.iri, other_entity.raw_text,
-                other_match.scores.get("child_parent_likelihood"))
+                other_match.match.fuzzy_score, MIN_OTHER_MATCH_FUZZY_SCORE)
+            return True
+
+        if other_entity.entity_type == GeographicalEntityType.Neighborhood and other_match.scores.get("child_parent_likelihood", AnnotatedScore(0, "Not applicable")).score < MIN_NEIGHBORHOOD_CHILD_PARENT_LIKELIHOOD:
+            self.logger.debug(
+                "Pruned %r (%s) for neighborhood %r: child/parent likelihood %s below %.2f",
+                other_match.match.nfc_alt_name, other_match.match.geographical_name.entity.iri, other_entity.raw_text,
+                other_match.scores.get("child_parent_likelihood"), MIN_NEIGHBORHOOD_CHILD_PARENT_LIKELIHOOD)
             return True
         return False
 
@@ -1045,13 +1128,13 @@ class Disambiguator:
             if len(possible_addresses) > 0:
                 best_address = possible_addresses[0]
                 for other_address in possible_addresses[1:]:
-                    if _compare_scores(best_address.scores, other_address.scores, self.priority, self.significance_thresholds) == "lt":
+                    if _compare_scores(best_address.scores, other_address.scores, self.comparison_steps) == "lt":
                         best_address = other_address
                 reference_iris = set()
                 reference_iris.add(best_address.finest_grain_entity.linked_to.geographical_name.entity.iri)
                 likely_addresses = [best_address]
                 for other_address in possible_addresses:
-                    if _compare_scores(best_address.scores, other_address.scores, self.priority, self.significance_thresholds) == "eq":
+                    if _compare_scores(best_address.scores, other_address.scores, self.comparison_steps) == "eq":
                         if not other_address.finest_grain_entity.linked_to.geographical_name.entity.iri in reference_iris:
                             reference_iris.add(other_address.finest_grain_entity.linked_to.geographical_name.entity.iri)
                             likely_addresses.append(other_address)

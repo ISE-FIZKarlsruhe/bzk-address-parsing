@@ -1991,13 +1991,20 @@ class GeoDBSearch(LinkingStep):
         entity : MatchedEntity, 
         country_codes : Optional[Collection[str]], 
         admin_codes : Optional[Collection[GeonamesAdminCodes]],
-        search_callback : Callable[[IndexSearchResult], bool]
+        search_callback : Callable[[IndexSearchResult], bool],
+        hint_country_codes : Optional[Collection[str]] = None,
     ) -> IndexSearchResult:
         entity_type = entity.entity_type
         # with no already resolved countries, the search is only hinted
+        # towards the countries hinted by the address (see apply), or else
         # towards the priority countries, not restricted to them
         country_strict = False
-        if entity_type != GeographicalEntityType.Country and country_codes is None:
+        if entity_type != GeographicalEntityType.Country and country_codes is None and hint_country_codes:
+            self.logger.debug(
+                "No resolved country for %r (%s); hinting search towards countries %s named in the address",
+                entity.raw_text, entity_type, sorted(hint_country_codes))
+            country_codes = hint_country_codes
+        elif entity_type != GeographicalEntityType.Country and country_codes is None:
             self.logger.debug(
                 "No known country for %r (%s); hinting search towards priority countries %s",
                 entity.raw_text, entity_type, self.priority_countries)
@@ -2165,13 +2172,24 @@ class GeoDBSearch(LinkingStep):
         return any(
             f" {query_string} " in f" {match.cleaned_alt_name} " for query_string in index_result.query_strings)
 
-    def _settle_for_search_match(self, entity : RawEntity, match : MatchedName) -> bool:
+    def _settle_for_search_match(
+            self, entity : RawEntity, match : MatchedName, country_codes : Collection[str]
+        ) -> bool:
         if is_entity_type_ruled_out(entity.entity_type, match.geographical_name.entity.possible_entity_types):
             self.logger.debug(
                 "Not settling search for %r on %r (%s): expected entity type %r but the possible entity types %r "
                 "do not include City or Neighborhood",
                 entity.raw_text, match.nfc_alt_name, match.geographical_name.entity.iri,
                 entity.entity_type, match.geographical_name.entity.possible_entity_types)
+            return False
+        # only a match in a country established by an authoritative entity of
+        # the address (see apply) may settle the search, so that the matches
+        # of later phases remain available to the Disambiguator otherwise
+        if match.geographical_name.entity.country.iso_code not in country_codes:
+            self.logger.debug(
+                "Not settling search for %r on %r (%s): country %s is not among the authoritative country codes %s",
+                entity.raw_text, match.nfc_alt_name, match.geographical_name.entity.iri,
+                match.geographical_name.entity.country.iso_code, sorted(country_codes))
             return False
         if match.fuzzy_score >= self.settle_score_threshold:
             self.logger.debug(
@@ -2210,9 +2228,50 @@ class GeoDBSearch(LinkingStep):
         # Disambiguator._uncorroborated_unlikely_country_reason)
         return False
 
+    @staticmethod
+    def _is_verbatim_match(entity : RawEntity, match : MatchedName) -> bool:
+        """
+        Whether a match's name is the entity's text as is, punctuation
+        included (e.g. "Polen" for "Polen", but not "Calif" for "Calif."),
+        ignoring only case and surrounding/repeated whitespace.
+        """
+        def _key(text : str) -> str:
+            return " ".join(unicodedata.normalize("NFC", text).split()).casefold()
+        return _key(entity.raw_text) == _key(match.nfc_alt_name)
+
+    def _country_restriction_and_hints(
+            self, entity : RawEntity, matched_names : Iterable[MatchedName]
+        ) -> tuple[list[MatchedName], set[str]]:
+        """
+        (matches restricting later searches to their country, countries later
+        searches are only hinted towards) for the matches of a Country or
+        AboveCity entity. Only independent countries (A.PCLI) count. A
+        verbatim match (see _is_verbatim_match) restricts later searches when
+        every verbatim match is in the same country; otherwise every country
+        matched (verbatim or not) is only hinted at, along with its
+        neighboring countries.
+        """
+        country_matches = [
+            matched_name for matched_name in matched_names
+            if matched_name.geographical_name.entity.classification == "A.PCLI"
+            and matched_name.geographical_name.entity.country is not None
+        ]
+        verbatim_matches = [m for m in country_matches if self._is_verbatim_match(entity, m)]
+        if len({m.geographical_name.entity.country.iso_code for m in verbatim_matches}) == 1:
+            return verbatim_matches, set()
+        hint_country_codes = set()
+        for matched_name in country_matches:
+            country = matched_name.geographical_name.entity.country
+            hint_country_codes.add(country.iso_code)
+            hint_country_codes.update(country.neighboring_countries_iso_codes or ())
+        return [], hint_country_codes
+
     def apply(self, address):
         new_entities = []
+        # countries later searches are restricted to (see _search_entity),
+        # and countries they are only hinted towards
         country_codes = set()
+        hint_country_codes = set()
         admin_codes = set()
         self.logger.debug("Searching entities of address %s (%r)", address.id, address.full_address)
         for entity in sorted(address.entities, key=lambda e: e.entity_type):
@@ -2230,10 +2289,10 @@ class GeoDBSearch(LinkingStep):
                 matched_names = [pre_linked_match] if pre_linked_match is not None else []
                 # A pre-linked entity is as authoritative as a resolved
                 # Country search match, regardless of its own entity type.
-                is_authoritative = pre_linked_match is not None
+                authoritative_matches = matched_names
             elif (regional_term_match := self._regional_term_match(entity)) is not None:
                 matched_names = [regional_term_match]
-                is_authoritative = False
+                authoritative_matches = []
             else:
                 matched_names : list[MatchedName] = []
                 def callback(index_result : IndexSearchResult) -> bool:
@@ -2257,7 +2316,7 @@ class GeoDBSearch(LinkingStep):
                                 matched_name.is_abbreviation_match, matched_name.is_phonetic_match,
                                 matched_name.is_partial_word_match)
                             matched_names.append(matched_name)
-                            if self._settle_for_search_match(entity, matched_name):
+                            if self._settle_for_search_match(entity, matched_name, country_codes):
                                 settle_here = True
                     return settle_here
 
@@ -2266,16 +2325,29 @@ class GeoDBSearch(LinkingStep):
                     entity,
                     country_codes=country_codes if len(country_codes) > 0 else None,
                     admin_codes=admin_codes if len(admin_codes) > 0 else None,
-                    search_callback=callback
+                    search_callback=callback,
+                    hint_country_codes=hint_country_codes,
                 )
-                is_authoritative = entity.entity_type == GeographicalEntityType.Country
+                if entity.entity_type in (GeographicalEntityType.Country, GeographicalEntityType.AboveCity):
+                    # a Country or AboveCity entity naming a country (e.g.
+                    # "Polen" in "Stol/Polen") restricts later searches to it
+                    # or hints them towards it (see _country_restriction_and_hints)
+                    authoritative_matches, entity_hint_country_codes = self._country_restriction_and_hints(
+                        entity, matched_names)
+                    if entity_hint_country_codes:
+                        self.logger.debug(
+                            "Entity %r hints later searches towards countries %s",
+                            entity.raw_text, sorted(entity_hint_country_codes))
+                        hint_country_codes.update(entity_hint_country_codes)
+                else:
+                    authoritative_matches = []
             self.logger.debug(
                 "Entity %r (%s) ended with %d matches", entity.raw_text, entity.entity_type, len(matched_names))
-            if is_authoritative and len(matched_names) > 0:
+            if len(authoritative_matches) > 0:
                 self.logger.debug(
-                    "Entity %r is authoritative; its matches restrict countries/admin codes of later searches",
-                    entity.raw_text)
-                for matched_name in matched_names:
+                    "Entity %r is authoritative; %d of its matches restrict countries/admin codes of later searches",
+                    entity.raw_text, len(authoritative_matches))
+                for matched_name in authoritative_matches:
                     if matched_name.geographical_name.entity.classification == "A.PCLH":
                         self.logger.debug(
                             "Entity %r is an historical country; its country code %s will not be used to restrict later searches",
