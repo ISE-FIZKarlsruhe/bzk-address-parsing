@@ -1090,10 +1090,7 @@ class DisambiguationErrorExplainer:
         _display_block(sb)
         sb.clear()
 
-        row = {**parsed_row.to_dict(), "address_id": str(address_id)}
-        outcome = entity_linking.link_field(
-            row, prefix, self.camp_matcher, self.geo_db_searcher, self.disambiguator, keep_address=True
-        )
+        outcome = self._link(address_id)
 
         pred_iri = normalize_iri(outcome.iri)
         sb.append(f"  predicted:    {outcome.entity_type} -> {pred_iri}")
@@ -1106,6 +1103,360 @@ class DisambiguationErrorExplainer:
         else:
             self._explain_outcome(sb, outcome, true_iri, true_entity_type, true_raw_text)
         _display_block(sb)
+
+    def _link(self, address_id) -> entity_linking.LinkingOutcome:
+        """Runs link_field on the cached parsed row of the address exactly as in the pipeline, keeping the address."""
+        parsed_row = self.indexed_parsed.loc[str(address_id)]
+        row = {**parsed_row.to_dict(), "address_id": str(address_id)}
+        return entity_linking.link_field(
+            row, parsed_row["prefix"], self.camp_matcher, self.geo_db_searcher, self.disambiguator, keep_address=True
+        )
+
+    def disambiguation_diagram(
+            self,
+            address_id,
+            iris: Optional[list[str]] = None,
+            entities: Optional[tuple[str, str]] = None,
+            top: Optional[int] = None,
+            show: bool = True,
+        ) -> Optional[str]:
+        """
+        A mermaid (block-beta) diagram of the disambiguation of an address:
+        the steps of Disambiguator.disambiguate it went through, then the
+        cross matching (see Disambiguator._score_ambiguous_matches) of two of
+        its linkable entities as a table, with a card for the search match of
+        each row and column:
+
+        - rows: the matches of the reference entity, each the reference match
+          of a candidate address (the last column: its best candidate left
+          after pruning, if any);
+        - columns: the matches of another entity, each cell holding the
+          scores of the column match cross matched against the row match;
+          grey when pruned (see Disambiguator._prune_match), outlined blue
+          when the best unpruned one of its row (the one the candidate takes);
+        - green: the chosen combination (the linked address); orange: the
+          deciding factor, against the best candidate of another IRI (the
+          runner-up), whose row it also outlines.
+
+        iris restricts the rows and columns to the matches of these IRIs (the
+        cross matching still runs over all of them), as the table of an
+        address with many matches is otherwise unreadable. entities is the
+        raw text of the (row, column) entities; by default, the reference
+        entity of the most likely candidate and its companion closest to it
+        in the order disambiguate goes through the entities in.
+
+        top, applied after iris, keeps only that many rows, those of the best
+        ranked candidates (rows left without one last), and that many columns,
+        those of the best cross match against any row kept (unpruned first),
+        each in that order.
+
+        Displays the diagram if show, and returns its source; None if the
+        address has fewer than two entities with search matches.
+        """
+        outcome = self._link(address_id)
+        address = outcome.address
+        linkable = [
+            e for e in (address.entities if address is not None else [])
+            if isinstance(e, MatchedEntity) and e.matches
+        ]
+        if len(linkable) < 2:
+            display(Markdown(
+                f"Address {address_id!r} has {len(linkable)} entity with search matches: nothing to cross match "
+                f"(search status {outcome.search_status})."))
+            return None
+        # the order disambiguate takes the entities as reference entity in
+        linkable.sort(
+            key=lambda e: (1 if e.entity_type == geo_disambiguation.GeographicalEntityType.City else 0, e.entity_type),
+            reverse=True)
+        _, likely = self._most_likely_candidate(address)
+        if entities is not None:
+            by_text = {e.raw_text: e for e in linkable}
+            missing = [text for text in entities if text not in by_text]
+            if missing:
+                raise ValueError(f"No entity with search matches has the raw text {missing}; "
+                                 f"those of the address are {list(by_text)}")
+            row_entity, column_entity = by_text[entities[0]], by_text[entities[1]]
+        else:
+            reference_id = likely.reference_entity.address_entity_id if likely is not None else None
+            # a split part (see Disambiguator._split_entity) is no entity of the address
+            row_entity = next((e for e in linkable if e.address_entity_id == reference_id), linkable[0])
+            linked_ids = {e.address_entity_id for e in likely.entities} if likely is not None else set()
+            others = [e for e in linkable if e is not row_entity]
+            column_entity = next((e for e in others if e.address_entity_id in linked_ids), others[0])
+
+        wanted = None if iris is None else {normalize_iri(iri) for iri in iris}
+
+        def shown(match) -> bool:
+            return wanted is None or normalize_iri(match.geographical_name.entity.iri) in wanted
+
+        def match_key(match) -> tuple[str, str]:
+            return match.geographical_name.entity.iri, match.nfc_alt_name
+
+        disambiguator = self.disambiguator
+
+        def rank(candidate) -> tuple:
+            return geo_disambiguation._score_dict_to_tuple(candidate.scores, disambiguator.priority)
+
+        def best_candidate_of(row_match):
+            """The best candidate address left after pruning with row_match as the reference match, if any."""
+            return max((
+                c for c in candidates
+                if c.reference_entity.address_entity_id == row_entity.address_entity_id
+                and match_key(c.reference_entity.linked_to) == match_key(row_match)
+            ), key=rank, default=None)
+
+        candidates = address.possible_links or ()
+        rows = [m for m in row_entity.matches if shown(m)]
+        if top is not None:
+            # sorted is stable: rows without a candidate stay in search order
+            rows = sorted(rows, key=lambda m: (
+                (1, rank(c)) if (c := best_candidate_of(m)) is not None else (0, ())), reverse=True)[:top]
+        row_candidates = {
+            i: c for i, row_match in enumerate(rows) if (c := best_candidate_of(row_match)) is not None}
+        # index among all the column entity's matches of each shown column
+        column_indices = [j for j, m in enumerate(column_entity.matches) if shown(m)]
+
+        # cross matching, as in Disambiguator._score_ambiguous_matches (over
+        # every column match, so that the best of a row is the actual one)
+        bzk_field = address.bzk_field_name
+        cells: dict[tuple[int, int], tuple[dict, bool]] = {}
+        best_column: dict[int, Optional[int]] = {}
+        ruled_out: set[int] = set()
+        current_level = geo_db_search.ENTITY_LINKING_LOGGER.level
+        geo_db_search.ENTITY_LINKING_LOGGER.setLevel(logging.WARNING)
+        try:
+            for i, row_match in enumerate(rows):
+                if disambiguator._is_entity_type_ruled_out(row_entity, row_match):
+                    ruled_out.add(i)
+                    continue
+                best, best_scores = None, None
+                for j, column_match in enumerate(column_entity.matches):
+                    scored = disambiguator._score_individual_match(column_entity, column_match, bzk_field)
+                    if row_entity.entity_type < column_entity.entity_type:
+                        likelihood = disambiguator._score_parent_child(row_match, column_match)
+                    else:
+                        likelihood = disambiguator._score_parent_child(column_match, row_match)
+                    scored.scores["child_parent_likelihood"] = likelihood
+                    scored.scores["weighted_score"] = disambiguator._calculate_weighted_score(scored.scores)
+                    pruned = disambiguator._prune_match(row_match, column_entity, scored)
+                    cells[i, j] = (scored.scores, pruned)
+                    if not pruned and (best is None or geo_disambiguation._score_dict_to_tuple(
+                            scored.scores, disambiguator.priority) > best_scores):
+                        best, best_scores = j, geo_disambiguation._score_dict_to_tuple(
+                            scored.scores, disambiguator.priority)
+                best_column[i] = best
+        finally:
+            geo_db_search.ENTITY_LINKING_LOGGER.setLevel(current_level)
+        if top is not None:
+            def column_rank(j: int) -> tuple:
+                return max((
+                    (not pruned, geo_disambiguation._score_dict_to_tuple(scores, disambiguator.priority))
+                    for (_, cell_j), (scores, pruned) in cells.items() if cell_j == j
+                ), default=(False, ()))
+            column_indices = sorted(column_indices, key=column_rank, reverse=True)[:top]
+        columns = [column_entity.matches[j] for j in column_indices]
+
+
+        def finest_iri(candidate) -> str:
+            return candidate.finest_grain_entity.linked_to.geographical_name.entity.iri
+
+        linked = address.linked_to if not address.linked_to_common_parent else None
+        runner_up, decided = None, None
+        if linked is not None:
+            runner_up = max(
+                (c for c in candidates if finest_iri(c) != finest_iri(linked)), key=rank, default=None)
+            if runner_up is not None:
+                decided = geo_disambiguation.deciding_factor(
+                    linked.scores, runner_up.scores, disambiguator.comparison_steps)
+        deciding = geo_disambiguation.factor_of_label(decided[0]) if decided is not None else None
+
+        def is_row_of(candidate, i) -> bool:
+            return candidate is not None and row_candidates.get(i) is candidate
+
+        def column_of(candidate) -> Optional[int]:
+            """The column of the match the candidate links the column entity to."""
+            linked_column = next(
+                (e.linked_to for e in candidate.entities if e.address_entity_id == column_entity.address_entity_id),
+                None)
+            if linked_column is None:
+                return None
+            return next((j for j, m in enumerate(columns) if match_key(m) == match_key(linked_column)), None)
+
+        def text(value) -> str:
+            # mermaid entity codes, so that labels may hold any text
+            return (str(value).replace("#", "#35;").replace('"', "#quot;")
+                    .replace("<", "#lt;").replace(">", "#gt;"))
+
+        def score(scores, factor) -> str:
+            value = scores.get(factor)
+            if value is None:
+                return "—"
+            value = value.score if isinstance(value, geo_disambiguation.AnnotatedScore) else value
+            return f"{value:.3g}"
+
+        def card(match) -> str:
+            entity = match.geographical_name.entity
+            population = f"{entity.population:,}" if entity.population is not None else "unknown"
+            country = entity.country.iso_code if entity.country is not None else "—"
+            return "<br/>".join([
+                f"<b>{text(match.nfc_alt_name)}</b>",
+                text(f"{entity.name} · {country}"),
+                text(classification_name(entity.classification)),
+                text(f"pop. {population}"),
+                text(f"fuzzy {match.fuzzy_score:.2f} · phon. {match.phonetic_score:.2f}"),
+                f"<i>{text(normalize_iri(entity.iri))}</i>",
+            ])
+
+        def factor_line(scores) -> str:
+            if deciding is None or deciding in ("weighted_score", "child_parent_likelihood") or deciding not in scores:
+                return ""
+            return f"<br/><b>{text(deciding)} {score(scores, deciding)}</b>"
+
+        width = len(columns) + 2
+        lines = ["block-beta", f"  columns {width}"]
+        # class of each styled block; the most telling of those it qualifies for
+        class_precedence = ["header", "pruned", "best", "tied", "decision", "runnerup", "chosen"]
+        block_classes: dict[str, str] = {}
+
+        def style(block_id: str, name: str) -> None:
+            current = block_classes.get(block_id)
+            if current is None or class_precedence.index(name) > class_precedence.index(current):
+                block_classes[block_id] = name
+
+        raw_address = address.full_address
+        lines.append(f'  heading["<b>Address {text(address_id)}</b>: {text(repr(raw_address))} '
+                     f'({text(bzk_field.name)})"]:{width}')
+
+        # the procedure
+        entity_list = "<br/>".join(
+            text(f"{e.entity_type.name} {e.raw_text!r}: {len(e.matches)} match{'es' if len(e.matches) != 1 else ''}")
+            for e in linkable)
+        candidate_count = len(candidates)
+        if linked is not None:
+            decision = text(f"linked to {linked.finest_grain_entity.linked_to.nfc_alt_name!r} "
+                            f"({normalize_iri(finest_iri(linked))})")
+            if decided is not None:
+                label, a, b = decided
+                decision += (f"<br/>over {text(repr(runner_up.finest_grain_entity.linked_to.nfc_alt_name))} "
+                             f"({text(normalize_iri(finest_iri(runner_up)))})<br/>deciding factor: "
+                             f"<b>{text(label)}</b> {a:.3g} vs {b:.3g}")
+            elif runner_up is None:
+                decision += "<br/>the only candidate IRI"
+        elif address.linked_to_common_parent:
+            decision = text(f"{len(address.likely_links)} candidates tie: linked to their common parent "
+                            f"{address.linked_to.finest_grain_entity.linked_to.nfc_alt_name!r}")
+        else:
+            decision = text(f"left unlinked ({len(address.likely_links or ())} tied candidates)"
+                            if candidate_count else "no candidate survives pruning: left unlinked")
+        lines += [
+            f"  block:steps:{width}",
+            "    columns 4",
+            f'    step1["<b>1. Searched entities</b><br/>{entity_list}"]',
+            f'    step2["<b>2. Cross matching</b><br/>each match of the reference entity '
+            f'{text(row_entity.entity_type.name)} {text(repr(row_entity.raw_text))} '
+            f'against the matches of the other entities,<br/>keeping per entity the best unpruned one"]',
+            f'    step3["<b>3. Candidate addresses</b><br/>{candidate_count} left after pruning"]',
+            f'    step4["<b>4. Decision</b><br/>{decision}"]',
+            "  end",
+            "  step1 --> step2",
+            "  step2 --> step3",
+            "  step3 --> step4",
+        ]
+        style("step4", "decision")
+
+        # the table: header row of column cards
+        hidden_rows = len(row_entity.matches) - len(rows)
+        hidden_columns = len(column_entity.matches) - len(columns)
+        corner = (f"<b>rows</b>: reference entity<br/>{text(row_entity.entity_type.name)} "
+                  f"{text(repr(row_entity.raw_text))}<br/><b>columns</b>: "
+                  f"{text(column_entity.entity_type.name)} {text(repr(column_entity.raw_text))}")
+        if hidden_rows or hidden_columns:
+            corner += f"<br/><i>{hidden_rows} rows and {hidden_columns} columns filtered out</i>"
+        lines.append(f'  corner["{corner}"]')
+        for j, column_match in enumerate(columns):
+            lines.append(f'  col{j}["{card(column_match)}"]')
+        lines.append(f'  candhead["<b>best candidate of the row</b><br/>weighted score'
+                     f'{"<br/>" + text(deciding) if deciding not in (None, "weighted_score") else ""}"]')
+        style("corner", "header")
+        style("candhead", "header")
+
+        for i, row_match in enumerate(rows):
+            lines.append(f'  row{i}["{card(row_match)}"]')
+            for j, j_all in enumerate(column_indices):
+                cell_id = f"cell{i}_{j}"
+                if i in ruled_out:
+                    lines.append(f'  {cell_id}[" "]')
+                    style(cell_id, "pruned")
+                    continue
+                scores, pruned = cells[i, j_all]
+                label = (f"child/parent {score(scores, 'child_parent_likelihood')}<br/>"
+                         f"weighted {score(scores, 'weighted_score')}{factor_line(scores)}")
+                if pruned:
+                    label = "✂ pruned<br/>" + label
+                    style(cell_id, "pruned")
+                elif best_column.get(i) == j_all:
+                    style(cell_id, "best")
+                lines.append(f'  {cell_id}["{label}"]')
+            candidate = row_candidates.get(i)
+            cand_id = f"cand{i}"
+            if i in ruled_out:
+                label = "entity type ruled out"
+                style(cand_id, "pruned")
+            elif candidate is None:
+                label = "✂ pruned"
+                style(cand_id, "pruned")
+            else:
+                companion = next(
+                    (e.linked_to for e in candidate.entities
+                     if e.address_entity_id == column_entity.address_entity_id), None)
+                label = f"weighted {score(candidate.scores, 'weighted_score')}"
+                if deciding == "weighted_score":
+                    label = f"<b>{label}</b>"
+                elif deciding is not None:
+                    label += f"<br/><b>{text(deciding)} {score(candidate.scores, deciding)}</b>"
+                label += ("<br/>with " + text(repr(companion.nfc_alt_name)) if companion is not None
+                          else f"<br/>without {text(repr(column_entity.raw_text))}")
+                if best_column.get(i) is not None and best_column[i] not in column_indices and companion is not None:
+                    label += " <i>(filtered out)</i>"
+            lines.append(f'  {cand_id}["{label}"]')
+            if linked is not None and is_row_of(linked, i):
+                style(f"row{i}", "chosen")
+                style(cand_id, "chosen")
+                chosen_column = column_of(linked)
+                if chosen_column is not None:
+                    style(f"cell{i}_{chosen_column}", "chosen")
+                    style(f"col{chosen_column}", "chosen")
+            elif runner_up is not None and is_row_of(runner_up, i):
+                style(f"row{i}", "runnerup")
+                style(cand_id, "runnerup")
+            elif linked is None and any(is_row_of(c, i) for c in address.likely_links or ()):
+                style(f"row{i}", "tied")
+                style(cand_id, "tied")
+
+        lines.append(
+            f'  legend["<b>green</b>: chosen combination · <b>blue outline</b>: best unpruned match of the row, '
+            f'taken by its candidate · <b>grey</b>: pruned · <b>orange</b>: deciding factor and runner-up · '
+            f'<b>yellow</b>: tied candidates · candidates may also link entities not shown"]:{width}')
+        style("legend", "header")
+
+        styles = {
+            "header": "fill:#eceff1,stroke:#90a4ae,color:#263238",
+            "pruned": "fill:#e0e0e0,stroke:#bdbdbd,color:#9e9e9e",
+            "best": "fill:#e3f2fd,stroke:#1e88e5,stroke-width:3px,color:#0d47a1",
+            "chosen": "fill:#c8e6c9,stroke:#2e7d32,stroke-width:4px,color:#1b5e20",
+            "runnerup": "fill:#fff3e0,stroke:#ef6c00,stroke-width:3px,color:#e65100",
+            "tied": "fill:#fff9c4,stroke:#f9a825,stroke-width:3px,color:#5d4037",
+            "decision": "fill:#fff3e0,stroke:#ef6c00,stroke-width:3px,color:#263238",
+        }
+        for name, definition in styles.items():
+            ids = [block_id for block_id, block_class in block_classes.items() if block_class == name]
+            if ids:
+                lines.append(f"  classDef {name} {definition}")
+                lines += [f"  class {block_id} {name}" for block_id in ids]
+        diagram = "\n".join(lines)
+        if show:
+            display(Markdown(f"```mermaid\n{diagram}\n```"))
+        return diagram
 
     @staticmethod
     def _most_likely_candidate(address) -> tuple[Optional[str], Optional[LinkedAddress]]:

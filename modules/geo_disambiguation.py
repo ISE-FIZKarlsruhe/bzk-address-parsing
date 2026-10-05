@@ -39,9 +39,9 @@ DISAMBIGUATION_FACTOR_PRIMARY_PRIORITY = [
     "entity_types_matching_preferred",
     "population_order_of_magnitude",
     "country_likelihood_rank", # general rank of country likelihood based on observation
+    "phonetic_score"
 ]
 DISAMBIGUATION_FACTOR_SECONDARY_PRIORITY = [
-    "phonetic_score",
     "entity_types_matching",
     "is_preferred_name",
     "population_count"
@@ -778,6 +778,11 @@ class Disambiguator:
             child.cleaned_alt_name, child_entity.iri, distance, parent.cleaned_alt_name, parent_entity.iri, score)
         return AnnotatedScore(score, f"{distance:.0f} km from the estimated geometry")
 
+    def _territorial_transition_likelihood(self, parent: MatchedName, child: MatchedName) -> float:
+        # TODO add a manual reference list, specially for historical countries
+        if parent.geographical_name.entity.country.iso_code in child.geographical_name.entity.country.neighboring_countries_iso_codes:
+            return 0.9
+
     def _score_parent_child_by_admin_codes(self, parent: MatchedName, child: MatchedName) -> AnnotatedScore:
         """
         How far down the administrative hierarchy (country, then admin codes
@@ -795,15 +800,27 @@ class Disambiguator:
                     parent.cleaned_alt_name, parent.geographical_name.entity.iri,
                     child.cleaned_alt_name, child.geographical_name.entity.iri
                 )
-                codes_in_common = 1 
+                codes_in_common = 1
             else:
-                logger.debug(
-                    "Country codes %r and %r differ between parent %r (%r) and child %r (%r)",
-                    parent_entity.country.iso_code, child_entity.country.iso_code,
-                    parent.cleaned_alt_name, parent.geographical_name.entity.iri,
-                    child.cleaned_alt_name, child.geographical_name.entity.iri
-                )
-                return AnnotatedScore(0, "Different countries")
+                territorial_transition = self._territorial_transition_likelihood(parent, child)
+                if territorial_transition > 0.0:
+                    logger.debug(
+                        "Country codes %r and %r differ between parent %r (%r) and child %r (%r)"
+                        " but it is possible that this is due a terrority transition (scored %.2f)",
+                        parent_entity.country.iso_code, child_entity.country.iso_code,
+                        parent.cleaned_alt_name, parent.geographical_name.entity.iri,
+                        child.cleaned_alt_name, child.geographical_name.entity.iri,
+                        territorial_transition
+                    )
+                    codes_in_common = territorial_transition
+                else:
+                    logger.debug(
+                        "Country codes %r and %r differ between parent %r (%r) and child %r (%r)",
+                        parent_entity.country.iso_code, child_entity.country.iso_code,
+                        parent.cleaned_alt_name, parent.geographical_name.entity.iri,
+                        child.cleaned_alt_name, child.geographical_name.entity.iri
+                    )
+                    return AnnotatedScore(0, "Different countries")
             for i, (parent_code, child_code) in enumerate(zip(parent_entity.admin_codes, child_entity.admin_codes)):
                 if _is_admin_code_null(parent_code) and any(
                     not _is_admin_code_null(code) for code in parent_entity.admin_codes[i + 1:]
