@@ -44,6 +44,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field, replace
+from functools import partial
 from pathlib import Path
 import time
 import logging.handlers
@@ -1070,6 +1071,10 @@ def _process_row_in_worker(row: dict) -> dict:
     return process_row(row, *_worker_steps)
 
 
+def _apply_in_worker(function: Callable, row: dict):
+    return function(row, *_worker_steps)
+
+
 class LinkingPool:
     """
     Links addresses in parallel worker processes. The linking steps are
@@ -1128,6 +1133,14 @@ class LinkingPool:
     def process_rows(self, rows: Iterable[dict]) -> Iterator[dict]:
         """process_row for each row."""
         return self._map(_process_row_in_worker, rows)
+
+    def map(self, function: Callable, rows: Iterable[dict]) -> Iterator:
+        """
+        function(row, camp_matcher, geo_db_searcher, disambiguator) for each
+        row, with the workers' linking steps; `function` must be picklable
+        (e.g. defined at module level).
+        """
+        return self._map(partial(_apply_in_worker, function), rows)
 
     def close(self) -> None:
         self._executor.shutdown(wait=True, cancel_futures=True)

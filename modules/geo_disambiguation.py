@@ -327,7 +327,8 @@ class Disambiguator:
             min_population_order_of_magnitude: int = 500_000,
             score_prune_thresholds : dict[str, float] = defaultdict(float),
             geo_db_path : str = "geo.duckdb",
-            geometry_parent_child_max_distance_km : float = GEOMETRY_PARENT_CHILD_MAX_DISTANCE_KM
+            geometry_parent_child_max_distance_km : float = GEOMETRY_PARENT_CHILD_MAX_DISTANCE_KM,
+            parent_child_max_distance_km_by_admin_level : dict[int, float] = PARENT_CHILD_MAX_DISTANCE_KM_BY_ADMIN_LEVEL
         ):
         self.significance_thresholds = significance_thresholds
         self.primary_priority = primary_priority
@@ -342,6 +343,7 @@ class Disambiguator:
         self.score_prune_thresholds = score_prune_thresholds
         self.geo_db_path = geo_db_path
         self.geometry_parent_child_max_distance_km = geometry_parent_child_max_distance_km
+        self.parent_child_max_distance_km_by_admin_level = parent_child_max_distance_km_by_admin_level
         # Read only connection to the geo duckdb, only needed to look up the
         # entity of a common parent branch (see _link_to_common_parent). Opened
         # lazily, and every use (and cache miss) goes through _geo_db_lock since
@@ -358,11 +360,11 @@ class Disambiguator:
             "Initialized with significance thresholds %s, primary priority %s, secondary priority %s, "
             "population rounding factor %d, "
             "min population order of magnitude %d, score prune thresholds %s, geo db %s, "
-            "geometry parent/child max distance %.0f km",
+            "geometry parent/child max distance %.0f km, parent/child max distance by admin level %s km",
             self.significance_thresholds, self.primary_priority, self.secondary_priority,
             self.population_rounding_factor,
             self.min_population_order_of_magnitude, dict(self.score_prune_thresholds), self.geo_db_path,
-            self.geometry_parent_child_max_distance_km)
+            self.geometry_parent_child_max_distance_km, self.parent_child_max_distance_km_by_admin_level)
 
     def __getstate__(self):
         # Neither the connection nor the lock can be pickled (e.g. when sent to
@@ -728,7 +730,8 @@ class Disambiguator:
         How close the child lies to the parent: 1 up to
         PARENT_CHILD_FULL_SCORE_DISTANCE_RATIO of the distance of the parent's
         admin level, decreasing linearly to 0 at that distance
-        (see PARENT_CHILD_MAX_DISTANCE_KM_BY_ADMIN_LEVEL and
+        (see parent_child_max_distance_km_by_admin_level, by default
+        PARENT_CHILD_MAX_DISTANCE_KM_BY_ADMIN_LEVEL, and
         CITY_MAX_DISTANCE_KM_PER_SQRT_POPULATION). None if either has no
         location.
         """
@@ -740,7 +743,7 @@ class Disambiguator:
         ):
             return None
         level = _parent_admin_level(parent_entity)
-        max_distance = PARENT_CHILD_MAX_DISTANCE_KM_BY_ADMIN_LEVEL[level]
+        max_distance = self.parent_child_max_distance_km_by_admin_level[level]
         if (
             CITY_MAX_DISTANCE_KM_PER_SQRT_POPULATION is not None and _is_populated_place(parent_entity)
             and parent_entity.population

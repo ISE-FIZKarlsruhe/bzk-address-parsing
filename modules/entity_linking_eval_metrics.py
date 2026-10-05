@@ -12,15 +12,17 @@ _METRIC_REGISTRY: dict[str, MetricFn] = {}
 
 
 def normalize_iri(iri: Optional[str]) -> Optional[str]:
-    """Normalize an IRI to a canonical form (https scheme, no trailing slash).
+    """Normalize an IRI to a canonical form (no surrounding whitespace, https scheme, no trailing slash).
 
     IRIs come from different sources that disagree on scheme and trailing
     slash (eg. predicted IRIs are "https://sws.geonames.org/759955" while
-    full_hierarchy entries are "http://sws.geonames.org/759955/"), so they
-    must be normalized before being compared.
+    full_hierarchy entries are "http://sws.geonames.org/759955/"), and
+    hand-annotated ones may carry stray whitespace, so they must be
+    normalized before being compared.
     """
     if iri is None:
         return None
+    iri = iri.strip()
     if iri.startswith("http://"):
         iri = "https://" + iri[len("http://"):]
     return iri.rstrip("/")
