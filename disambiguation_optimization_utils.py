@@ -43,7 +43,8 @@ logger = logging.getLogger("disambiguation_optimization")
 TRAIN_CARD_ID_PREFIX = "train_"
 
 # Columns of an evaluation, in the order of the objective (see rank): higher
-# f1, then more correctly linked addresses, then fewer incorrectly linked ones
+# precision, then more correctly linked addresses, then fewer incorrectly
+# linked ones
 OBJECTIVE_COLUMNS = ["precision", "correctly_linked", "incorrectly_linked"]
 OBJECTIVE_ASCENDING = [False, False, True]
 METRIC_COLUMNS = [*OBJECTIVE_COLUMNS, "partially_linked", "failed_to_link", "f1", "recall"]
@@ -632,6 +633,119 @@ def greedy_order_search(
     best_order = step_orders[best_step - 1]
     print(f"Best order (step {best_step}): {_order_name(best_order)}")
     return GreedyOrderSearch(summary, steps, order, base.with_order(best_order))
+
+
+@dataclass(frozen=True)
+class SequentialSearch:
+    """The result of a search changing one factor at a time (see optimize_significance_thresholds and move_factors_up)."""
+    # what was chosen for each factor, and the metrics it led to
+    summary: pd.DataFrame
+    # the configurations evaluated for each factor
+    steps: list[pd.DataFrame]
+    best_config: DisambiguationConfig
+
+
+def _priority(config: DisambiguationConfig) -> list[str]:
+    return [*config.primary_priority, *config.secondary_priority]
+
+
+def _objective_key(evaluation: pd.Series) -> tuple:
+    """Orders evaluations by the objective (see OBJECTIVE_COLUMNS), the greater the better."""
+    return tuple(
+        -evaluation[column] if ascending else evaluation[column]
+        for column, ascending in zip(OBJECTIVE_COLUMNS, OBJECTIVE_ASCENDING))
+
+
+def optimize_significance_thresholds(
+        evaluator: ConfigEvaluator, base: DisambiguationConfig, threshold_candidates: dict[str, Iterable[float]]
+    ) -> SequentialSearch:
+    """
+    Optimizes the significance thresholds of the factors of `base`, keeping
+    its order: greedily, from the first factor to the last, each factor
+    tries its threshold candidates (and its current threshold, kept among
+    ties) with the thresholds chosen for the factors before it.
+    """
+    config = base
+    steps = []
+    summary = []
+    for factor in _priority(base):
+        current = config.significance_thresholds[factor]
+        configs = {}
+        parameters = {}
+        for threshold in dict.fromkeys([current, *threshold_candidates[factor]]):
+            name = f"{factor} = {threshold:g}"
+            configs[name] = config.replace(significance_thresholds={**config.significance_thresholds, factor: threshold})
+            parameters[name] = {"threshold": threshold, "current": threshold == current}
+        result = _stage_result(evaluator, configs, pd.DataFrame.from_dict(parameters, orient="index"))
+        config = result.best_config
+        steps.append(result.evaluations)
+        best = result.evaluations.iloc[0]
+        summary.append({
+            "factor": factor, "previous threshold": current, "threshold": best["threshold"],
+            **{column: best[column] for column in METRIC_COLUMNS},
+        })
+        print(f"{factor}: {current:g} -> {best['threshold']:g}")
+    return SequentialSearch(pd.DataFrame(summary).set_index("factor"), steps, config)
+
+
+def move_factors_up(evaluator: ConfigEvaluator, base: DisambiguationConfig) -> SequentialSearch:
+    """
+    Mutates the order of the factors of `base` (primary then secondary,
+    see DisambiguationConfig): from the last factor to the first, each is
+    moved up one position at a time until the objective gets worse than at
+    the position before (ties go on moving up), and left at the last
+    position that was not worse. The boundary between primary and secondary
+    factors stays at the same position: a secondary factor moved above it
+    becomes primary, pushing the last primary factor down to secondary.
+
+    The positions above a factor are all evaluated at once, in parallel,
+    though only those up to the first worse one count.
+    """
+    n_primary = len(base.primary_priority)
+    def config_of(order):
+        return base.replace(primary_priority=tuple(order[:n_primary]), secondary_priority=tuple(order[n_primary:]))
+
+    order = _priority(base)
+    current = evaluator.evaluate({"current": base}).iloc[0]
+    steps = []
+    summary = []
+    for factor in reversed(_priority(base)):
+        start = order.index(factor)
+        orders = {}
+        for position in range(start - 1, -1, -1):
+            moved = [f for f in order if f != factor]
+            moved.insert(position, factor)
+            orders[f"{factor} at position {position + 1}"] = moved
+        chosen = None
+        if orders:
+            evaluations = evaluator.evaluate({name: config_of(o) for name, o in orders.items()})
+            evaluations.insert(0, "position", [o.index(factor) + 1 for o in orders.values()])
+            evaluations.insert(1, "worse than the position below", False)
+            previous = current
+            for name, evaluation in evaluations.iterrows():
+                if _objective_key(evaluation) < _objective_key(previous):
+                    evaluations.loc[name, "worse than the position below"] = True
+                    break
+                chosen, previous = name, evaluation
+            steps.append(evaluations)
+        else:
+            steps.append(pd.DataFrame())
+        if chosen is not None:
+            order = orders[chosen]
+            current = previous
+        summary.append({
+            "factor": factor, "from position": start + 1, "to position": order.index(factor) + 1,
+            **{column: current[column] for column in METRIC_COLUMNS},
+        })
+        print(f"{factor}: position {start + 1} -> {order.index(factor) + 1}")
+    return SequentialSearch(pd.DataFrame(summary).set_index("factor"), steps, config_of(order))
+
+
+def display_sequential_steps(search: SequentialSearch) -> None:
+    """The configurations a sequential search evaluated for each factor."""
+    for factor, evaluations in zip(search.summary.index, search.steps):
+        display(Markdown(f"**{factor}**"))
+        display(evaluations if len(evaluations) else Markdown("_already first_"))
 
 
 def compare_stages(evaluator: ConfigEvaluator, configs: dict[str, DisambiguationConfig]) -> pd.DataFrame:
