@@ -88,8 +88,38 @@ SEARCH_PRUNE_SCORE_THRESHOLD = 0.2
 # Minimum difference between two candidates' scores on a disambiguation factor
 # for that factor to decide between them (see geo_disambiguation._compare_scores).
 DEFAULT_SIGNIFICANCE_THRESHOLD = 0.05
+MIN_POPULATION_ORDER_OF_MAGNITUDE = 1_000
+PARENT_CHILD_MAX_DISTANCE_KM_BY_ADMIN_LEVEL = {
+    0: 200,
+    1: 200,
+    2: 67,
+    3: 27,
+    4: 13,
+    5: 10,
+}
+WEIGHTED_DISAMBIGUATION_FACTORS = {
+    'child_parent_likelihood': 1,
+    'phonetic_score': 2,
+    'fuzzy_similarity_score': 3,
+    'entity_types_matching_preferred': 2,
+}
+DISAMBIGUATION_FACTOR_PRIMARY_PRIORITY = [
+    'weighted_score',
+    'child_parent_likelihood',
+    'entity_types_matching_preferred',
+    'fuzzy_similarity_score',
+    'population_order_of_magnitude',
+    'country_likelihood_rank',
+    'phonetic_score',
+    'entity_types_matching',
+    'is_preferred_name',
+    'population_count',
+]
+DISAMBIGUATION_FACTOR_SECONDARY_PRIORITY = [
+]
 SIGNIFICANCE_THRESHOLDS = {
-
+    "fuzzy_similarity_score" : 0,
+    "population_order_of_magnitude" : 1
 }
 DISAMBIGUATION_POPULATION_ROUNDING_FACTOR = 1
 DISAMBIGUATION_SCORE_PRUNE_THRESHOLDS = {
@@ -1024,9 +1054,14 @@ def build_disambiguator(geo_db_path: str = "geo.duckdb") -> Disambiguator:
         significance_theresholds[k] = v
     return Disambiguator(
         significance_thresholds=significance_theresholds,
+        primary_priority=list(DISAMBIGUATION_FACTOR_PRIMARY_PRIORITY),
+        secondary_priority=list(DISAMBIGUATION_FACTOR_SECONDARY_PRIORITY),
+        score_weights=dict(WEIGHTED_DISAMBIGUATION_FACTORS),
         population_rounding_factor=DISAMBIGUATION_POPULATION_ROUNDING_FACTOR,
+        min_population_order_of_magnitude=MIN_POPULATION_ORDER_OF_MAGNITUDE,
         score_prune_thresholds=dict(DISAMBIGUATION_SCORE_PRUNE_THRESHOLDS),
         geo_db_path=geo_db_path,
+        parent_child_max_distance_km_by_admin_level=dict(PARENT_CHILD_MAX_DISTANCE_KM_BY_ADMIN_LEVEL),
     )
 
 
