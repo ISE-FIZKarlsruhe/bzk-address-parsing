@@ -2249,7 +2249,10 @@ class GeoDBSearch(LinkingStep):
         verbatim match (see _is_verbatim_match) restricts later searches when
         every verbatim match is in the same country; otherwise every country
         matched (verbatim or not) is only hinted at, along with its
-        neighboring countries.
+        neighboring countries. A historical country (e.g. Czechoslovakia)
+        never restricts, but hints at the current countries on its former
+        territory (see GeographicalEntity.successor_country_iso_codes) along
+        with its neighboring countries.
         """
         country_matches = [
             matched_name for matched_name in matched_names
@@ -2264,7 +2267,23 @@ class GeoDBSearch(LinkingStep):
             country = matched_name.geographical_name.entity.country
             hint_country_codes.add(country.iso_code)
             hint_country_codes.update(country.neighboring_countries_iso_codes or ())
+        for matched_name in matched_names:
+            hint_country_codes.update(self._historical_country_hints(matched_name))
         return [], hint_country_codes
+
+    @staticmethod
+    def _historical_country_hints(matched_name : MatchedName) -> set[str]:
+        """
+        For a match of a historical country, the current countries on its
+        former territory and its neighboring countries; empty for any other match.
+        """
+        entity = matched_name.geographical_name.entity
+        if not entity.successor_country_iso_codes:
+            return set()
+        hint_country_codes = set(entity.successor_country_iso_codes)
+        if entity.country is not None:
+            hint_country_codes.update(entity.country.neighboring_countries_iso_codes or ())
+        return hint_country_codes
 
     def apply(self, address):
         new_entities = []
@@ -2349,9 +2368,13 @@ class GeoDBSearch(LinkingStep):
                     entity.raw_text, len(authoritative_matches))
                 for matched_name in authoritative_matches:
                     if matched_name.geographical_name.entity.classification == "A.PCLH":
+                        historical_hint_country_codes = self._historical_country_hints(matched_name)
                         self.logger.debug(
-                            "Entity %r is an historical country; its country code %s will not be used to restrict later searches",
-                            entity.raw_text, matched_name.geographical_name.entity.all_country_iso_codes)
+                            "Entity %r is an historical country; its country code %s will not be used to restrict "
+                            "later searches, which are hinted towards countries %s instead",
+                            entity.raw_text, matched_name.geographical_name.entity.all_country_iso_codes,
+                            sorted(historical_hint_country_codes))
+                        hint_country_codes.update(historical_hint_country_codes)
                         continue
                     self.logger.debug("Entity %r adds country codes %s to later searches", 
                                       entity.raw_text, matched_name.geographical_name.entity.all_country_iso_codes)

@@ -307,12 +307,23 @@ def _describe_linked_address(linked_address : LinkedAddress) -> str:
 def _country_iso_codes(match : MatchedName) -> tuple[str, ...]:
     """
     The countries a match lies in: its country, or every country of the
-    geometry of a regional term spanning several (see RegionGeometry).
+    geometry of a regional term spanning several (see RegionGeometry), along
+    with, for a historical country, the current countries on its former
+    territory (see GeographicalEntity.successor_country_iso_codes).
     """
     entity = match.geographical_name.entity
     if is_regional_term_entity(entity) and entity.geometry is not None:
         return entity.geometry.country_iso_codes
-    return (entity.country.iso_code if entity.country is not None else None,)
+    return (entity.country.iso_code if entity.country is not None else None, *entity.successor_country_iso_codes)
+
+def _is_in_parent_country(parent_entity : GeographicalEntity, child_entity : GeographicalEntity) -> bool:
+    """
+    Whether the child lies in the parent's country or, for a historical
+    country parent (e.g. Czechoslovakia), in one of the current countries on
+    its former territory (see GeographicalEntity.successor_country_iso_codes).
+    """
+    child_iso_code = child_entity.country.iso_code
+    return parent_entity.country.iso_code == child_iso_code or child_iso_code in parent_entity.successor_country_iso_codes
 
 class Disambiguator:
     logger = ENTITY_LINKING_LOGGER.getChild("Disambiguator")
@@ -694,7 +705,7 @@ class Disambiguator:
         if min(parent_entity.possible_entity_types) > max(child_entity.possible_entity_types):
             # the parent cannot possibly outrank the child (see _score_parent_child_by_admin_codes)
             return self._score_parent_child_by_admin_codes(parent, child)
-        if parent_entity.country.iso_code != child_entity.country.iso_code:
+        if not _is_in_parent_country(parent_entity, child_entity):
             return AnnotatedScore(0, "Different countries")
         if not _admin_codes_match_up_to_parent(parent_entity, child_entity):
             # the codes contradict the child lying within the parent, however
@@ -782,9 +793,14 @@ class Disambiguator:
         return AnnotatedScore(score, f"{distance:.0f} km from the estimated geometry")
 
     def _territorial_transition_likelihood(self, parent: MatchedName, child: MatchedName) -> float:
-        # TODO add a manual reference list, specially for historical countries
-        if parent.geographical_name.entity.country.iso_code in child.geographical_name.entity.country.neighboring_countries_iso_codes:
+        # a historical country parent also borders what its successors border
+        parent_entity = parent.geographical_name.entity
+        parent_iso_codes = {parent_entity.country.iso_code, *parent_entity.successor_country_iso_codes}
+        if child.geographical_name.entity.country.iso_code in parent_iso_codes:
+            return 1.0
+        elif parent_iso_codes & set(child.geographical_name.entity.country.neighboring_countries_iso_codes or ()):
             return 0.9
+        return 0.0
 
     def _score_parent_child_by_admin_codes(self, parent: MatchedName, child: MatchedName) -> AnnotatedScore:
         """
@@ -796,10 +812,10 @@ class Disambiguator:
         logger = self.logger.getChild("parent_child_scoring")
         if min(parent_entity.possible_entity_types) <= max(child_entity.possible_entity_types):
             not_null_codes = 1
-            if parent_entity.country.iso_code == child_entity.country.iso_code:
+            if _is_in_parent_country(parent_entity, child_entity):
                 logger.debug(
                     "Country code %r matches between parent %r (%r) and child %r (%r)",
-                    parent_entity.country.iso_code,
+                    child_entity.country.iso_code,
                     parent.cleaned_alt_name, parent.geographical_name.entity.iri,
                     child.cleaned_alt_name, child.geographical_name.entity.iri
                 )

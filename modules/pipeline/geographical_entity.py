@@ -1,10 +1,24 @@
 from dataclasses import dataclass, field
 from enum import Enum
-from functools import cached_property
+from functools import cache, cached_property
+import json
+from pathlib import Path
 from typing import Optional, TYPE_CHECKING, NamedTuple
 import numpy as np
 import pandas as pd
 from urllib.parse import urlparse
+
+HISTORICAL_COUNTRY_SUCCESSORS_PATH = Path(__file__).parents[2] / "reference_data" / "historical_country_successors.json"
+
+
+@cache
+def historical_country_successors() -> dict[str, tuple[str, ...]]:
+    """
+    The iri of each historical country (e.g. Czechoslovakia) -> the ISO codes
+    of the current countries on its former territory (e.g. CZ, SK and UA).
+    """
+    with HISTORICAL_COUNTRY_SUCCESSORS_PATH.open("r", encoding="utf-8") as f:
+        return {iri: tuple(iso_codes) for iri, iso_codes in json.load(f).items()}
 
 @dataclass(frozen=True)
 class GeographicalEntityTypeProperties:
@@ -183,6 +197,14 @@ class GeographicalEntity:
             return [self.country.iso_code, *self.alternate_iso_country_codes]
         else:
             return list(self.alternate_iso_country_codes)
+
+    @property
+    def successor_country_iso_codes(self) -> tuple[str, ...]:
+        """
+        For a historical country, the current countries on its former
+        territory (see historical_country_successors); empty for any other entity.
+        """
+        return historical_country_successors().get(self.iri, ())
 
     @classmethod
     def from_dict(cls, data: dict) -> "GeographicalEntity":
