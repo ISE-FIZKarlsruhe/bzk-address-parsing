@@ -56,6 +56,7 @@ from typing import Callable, Iterable, Iterator, NamedTuple, Optional
 import pandas as pd
 from tqdm.auto import tqdm
 
+from modules import abbrev_list_expander
 from modules.address_tagging import tag_address
 from modules.camp_search import DEFAULT_CAMPS_REFERENCE_PATH, CampReferenceMatcher
 from modules.geo_db_search import FUZZY_DISTANCE_1_SEARCH_PHASE, PHONETIC_SEARCH_PHASE, REGIONAL_TERM_MATCHING_METHOD, _STOP_WORDS, _compiled_stop_words, GeoDBSearch, TantivySearchIndex, ascii_normalize, german_normalize
@@ -585,6 +586,18 @@ def _missed_words(raw_address: Optional[str], assigned_texts: list[str]) -> list
     return missed
 
 
+def _abbreviation_iri(text: str) -> Optional[str]:
+    """
+    The iri of the place an entity's whole text abbreviates (e.g. Bavaria for
+    "Bay."), from abbrev_list_expander, if any: such an entity is pre-linked
+    to it instead of searched for.
+    """
+    # entity texts of types not searched for may be left NaN by parsing
+    if not isinstance(text, str):
+        return None
+    return abbrev_list_expander.expand_abbreviations(text)[1]
+
+
 def _build_entities(
     entity_texts: dict[str, Optional[str]], above_city_text: Optional[str], pre_linked_iris: dict[str, str],
     missed_words: list[tuple[str, AddressSpan]] = (), raw_address: Optional[str] = None,
@@ -592,7 +605,7 @@ def _build_entities(
     entities = [
         RawEntity.with_parsed(
             entity_type=GeographicalEntityType[entity_type], raw_text=text,
-            pre_linked_iri=pre_linked_iris.get(entity_type)
+            pre_linked_iri=pre_linked_iris.get(entity_type) or _abbreviation_iri(text)
         )
         for entity_type, text in entity_texts.items()
         if text
@@ -612,7 +625,9 @@ def _build_entities(
             _normalize_for_dedup(entity.raw_text) == normalized_above_city for entity in entities
         )
         if not is_duplicate:
-            entities.append(RawEntity.with_parsed(entity_type=GeographicalEntityType.AboveCity, raw_text=above_city_text))
+            entities.append(RawEntity.with_parsed(
+                entity_type=GeographicalEntityType.AboveCity, raw_text=above_city_text,
+                pre_linked_iri=_abbreviation_iri(above_city_text)))
     if entity_texts.get("City"):
         # Words parsing left unassigned next to an identified City (e.g.
         # "Weinheim/Bergstr." parsed as just City="Weinheim") are most often
@@ -620,7 +635,8 @@ def _build_entities(
         # two-word addresses (ignoring stop words): City plus the missed word.
         for text, span in missed_words:
             entities.append(RawEntity.with_parsed(
-                entity_type=GeographicalEntityType.AboveCity, raw_text=text, span=span, is_missed_word=True))
+                entity_type=GeographicalEntityType.AboveCity, raw_text=text, span=span, is_missed_word=True,
+                pre_linked_iri=_abbreviation_iri(text)))
     return entities
 
 

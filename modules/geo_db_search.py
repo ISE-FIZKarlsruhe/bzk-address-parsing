@@ -1739,11 +1739,13 @@ _GEONAMES_IRI_REGEX = re.compile(r"^https?://sws\.geonames\.org/(\d+)/?$")
 
 def _normalize_iri(iri: str) -> str:
     """
-    Normalizes a non-geonames iri to the form used by the geo duckdb: https,
-    no trailing slash.
+    Normalizes a non-geonames iri to the form used by the geo duckdb: http
+    for wikidata iris, https for any other, no trailing slash.
     """
-    if iri.startswith("http://"):
-        iri = "https://" + iri[len("http://"):]
+    scheme = "http://" if "://www.wikidata.org/" in iri else "https://"
+    for prefix in ("http://", "https://"):
+        if iri.startswith(prefix):
+            iri = scheme + iri[len(prefix):]
     return iri.rstrip("/")
 
 
@@ -1884,14 +1886,16 @@ class GeoDBSearch(LinkingStep):
             self.logger.info("Cached %d regional terms to %s", len(entries), path)
         return _regional_terms_from_entries(self.connection, entries)
 
-    def _regional_term_match(self, entity : RawEntity) -> Optional[MatchedName]:
+    def _regional_term_match(self, entity : RawEntity, any_entity_type : bool = False) -> Optional[MatchedName]:
         """
         A match on the regional term the whole entity is (see RegionalTerms),
         if it is one and coarser than a city (e.g. AboveCity "Pfalz" or
         "Bergstr."). A City or Neighborhood is left to the search, its name
-        being a place in its own right.
+        being a place in its own right, unless any_entity_type.
         """
-        if entity.entity_type not in REGIONAL_TERM_ENTITY_TYPES or len(self.regional_terms) == 0:
+        if len(self.regional_terms) == 0:
+            return None
+        if not any_entity_type and entity.entity_type not in REGIONAL_TERM_ENTITY_TYPES:
             return None
         expanded_query, _ = abbrev_list_expander.expand_abbreviations(unicodedata.normalize("NFC", entity.raw_text))
         abbreviated = abbreviated_words(expanded_query)
@@ -2156,6 +2160,31 @@ class GeoDBSearch(LinkingStep):
             is_partial_word_match=False,
         )
 
+    def _with_regional_term_geometry(self, entity : RawEntity, match : MatchedName) -> MatchedName:
+        """
+        The pre-linked match of the entity, with the estimated geometry of the
+        regional term the entity also is, if any (e.g. East Prussia,
+        pre-linked from "Ostpreußen", has Poland as its only country, while
+        the places it qualifies lie in Poland and Russia). The geometry
+        widens the countries of later searches (see apply) and is what the
+        Disambiguator scores children against (see
+        Disambiguator._score_parent_child_by_geometry).
+        """
+        if match.geographical_name.entity.geometry is not None:
+            return match
+        regional_term_match = self._regional_term_match(entity, any_entity_type=True)
+        if regional_term_match is None:
+            return match
+        geometry = regional_term_match.geographical_name.entity.geometry
+        self.logger.debug(
+            "Pre-linked entity %r (%s) is also the regional term %r; attaching its geometry (countries %s)",
+            entity.raw_text, match.geographical_name.entity.iri, regional_term_match.cleaned_alt_name,
+            geometry.country_iso_codes)
+        geographical_name = dataclasses.replace(
+            match.geographical_name,
+            entity=dataclasses.replace(match.geographical_name.entity, geometry=geometry))
+        return dataclasses.replace(match, geographical_name=geographical_name)
+
     def _is_trusted_missed_word_match(self, index_result : IndexSearchResult, match : MatchedName) -> bool:
         """
         Whether a match is trusted for a missed word entity (see
@@ -2305,6 +2334,8 @@ class GeoDBSearch(LinkingStep):
                     "Entity %r (%s) is pre-linked to %s; resolving directly",
                     entity.raw_text, entity.entity_type, entity.pre_linked_iri)
                 pre_linked_match = self._pre_linked_match(entity)
+                if pre_linked_match is not None:
+                    pre_linked_match = self._with_regional_term_geometry(entity, pre_linked_match)
                 matched_names = [pre_linked_match] if pre_linked_match is not None else []
                 # A pre-linked entity is as authoritative as a resolved
                 # Country search match, regardless of its own entity type.
@@ -2376,9 +2407,15 @@ class GeoDBSearch(LinkingStep):
                             sorted(historical_hint_country_codes))
                         hint_country_codes.update(historical_hint_country_codes)
                         continue
-                    self.logger.debug("Entity %r adds country codes %s to later searches", 
-                                      entity.raw_text, matched_name.geographical_name.entity.all_country_iso_codes)
-                    country_codes.update(matched_name.geographical_name.entity.all_country_iso_codes)
+                    # along with the countries of its estimated geometry, if
+                    # any (see _with_regional_term_geometry)
+                    geometry = matched_name.geographical_name.entity.geometry
+                    entity_country_codes = list(dict.fromkeys([
+                        *matched_name.geographical_name.entity.all_country_iso_codes,
+                        *(geometry.country_iso_codes if geometry is not None else ())]))
+                    self.logger.debug("Entity %r adds country codes %s to later searches",
+                                      entity.raw_text, entity_country_codes)
+                    country_codes.update(entity_country_codes)
                     if matched_name.geographical_name.entity.admin_codes:
                         self.logger.debug("Entity %r adds admin codes %s to later searches", 
                                           entity.raw_text, matched_name.geographical_name.entity.admin_codes)

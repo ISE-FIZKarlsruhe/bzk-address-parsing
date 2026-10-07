@@ -309,12 +309,17 @@ def _country_iso_codes(match : MatchedName) -> tuple[str, ...]:
     The countries a match lies in: its country, or every country of the
     geometry of a regional term spanning several (see RegionGeometry), along
     with, for a historical country, the current countries on its former
-    territory (see GeographicalEntity.successor_country_iso_codes).
+    territory (see GeographicalEntity.successor_country_iso_codes), and for
+    an entity given the geometry of a regional term (see
+    GeoDBSearch._with_regional_term_geometry), the countries of the geometry.
     """
     entity = match.geographical_name.entity
     if is_regional_term_entity(entity) and entity.geometry is not None:
         return entity.geometry.country_iso_codes
-    return (entity.country.iso_code if entity.country is not None else None, *entity.successor_country_iso_codes)
+    iso_codes = (entity.country.iso_code if entity.country is not None else None, *entity.successor_country_iso_codes)
+    if entity.geometry is not None:
+        iso_codes = (*iso_codes, *(c for c in entity.geometry.country_iso_codes if c not in iso_codes))
+    return iso_codes
 
 def _is_in_parent_country(parent_entity : GeographicalEntity, child_entity : GeographicalEntity) -> bool:
     """
@@ -700,7 +705,16 @@ class Disambiguator:
             )
             return AnnotatedScore(1, "Informal relationship")
         geometry_score = self._score_parent_child_by_geometry(parent, child)
-        if geometry_score is not None and is_regional_term_entity(parent_entity):
+        if geometry_score is not None and (
+            is_regional_term_entity(parent_entity)
+            # a child outside the parent's country but within a country of
+            # its estimated geometry (e.g. Insterburg, now in Russia, for East
+            # Prussia, in Poland) is only described by the geometry
+            or (
+                not _is_in_parent_country(parent_entity, child_entity)
+                and child_entity.country.iso_code in parent_entity.geometry.country_iso_codes
+            )
+        ):
             return geometry_score
         if min(parent_entity.possible_entity_types) > max(child_entity.possible_entity_types):
             # the parent cannot possibly outrank the child (see _score_parent_child_by_admin_codes)

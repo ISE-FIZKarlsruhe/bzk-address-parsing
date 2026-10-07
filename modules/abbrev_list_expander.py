@@ -27,27 +27,27 @@ _ABBREV_END = r"(?:\.|\b)"
 ABBREV_EXPANSIONS = [
     (
         re.compile(r"\bWestpr" + _optional_suffix(["e", "u", "(?:ss?|ß)", "e", "n"]) + _ABBREV_END, re.IGNORECASE), 
-        Expansion("westpreußen", iri="https://sws.geonames.org/2847618/")
+        Expansion("westpreußen", iri="https://sws.geonames.org/3082436")
         ),
     (
         re.compile(r"\bOstpr" + _optional_suffix(["e", "u", "(?:ss?|ß)", "e", "n"]) + _ABBREV_END, re.IGNORECASE), 
-        Expansion("ostpreußen")
+        Expansion("ostpreußen", iri="https://sws.geonames.org/772636")
         ),
     (
         re.compile(r"\bF\.?F\.?M" + _ABBREV_END, re.IGNORECASE), 
-        Expansion("frankfurt am main")
+        Expansion("frankfurt am main", iri="https://sws.geonames.org/2925533")
         ),
     (
         re.compile(r"\bMfr" + _ABBREV_END, re.IGNORECASE), 
-        Expansion("mittelfranken")
+        Expansion("mittelfranken", iri="https://sws.geonames.org/2870736")
         ),
     (
         re.compile(r"\bUnterfr" + _ABBREV_END, re.IGNORECASE), 
-        Expansion("unterfranken")
+        Expansion("unterfranken", iri="https://sws.geonames.org/2819564")
         ),
     (
         re.compile(r"\b[JYI]ugs?l?" + _ABBREV_END, re.IGNORECASE),
-        Expansion("yugoslavia")
+        Expansion("yugoslavia", iri="https://sws.geonames.org/7500737")
         ),
     (
         re.compile(r"\bC\.?S\.?R" + _ABBREV_END, re.IGNORECASE),
@@ -55,11 +55,11 @@ ABBREV_EXPANSIONS = [
         ),
     (
         re.compile(r"\bO\.?S\.", re.IGNORECASE),
-        Expansion("oberschlesien")
+        Expansion("oberschlesien", iri="https://sws.geonames.org/3082777")
         ),
     (
         re.compile(r"\bOpf" + _ABBREV_END, re.IGNORECASE),
-        Expansion("oberpfalz")
+        Expansion("oberpfalz", iri="https://sws.geonames.org/2859444")
         ),
     
     # Meyers gazetteer abbreviations ( https://www.familysearch.org/en/wiki/Abbreviation_Table_for_Meyers_Orts_und_Verkehrs_Lexikon_Des_Deutschen_Reichs ).
@@ -84,11 +84,11 @@ ABBREV_EXPANSIONS = [
         ),
     (
         re.compile(r"\bEls" + _ABBREV_END, re.IGNORECASE),
-        Expansion("elsaß")
+        Expansion("elsaß", iri="https://sws.geonames.org/3038033")
         ),
     (
         re.compile(r"\bLothr?" + _ABBREV_END, re.IGNORECASE),
-        Expansion("lothringen")
+        Expansion("lothringen", iri="https://sws.geonames.org/2997551")
         ),
     (
         re.compile(r"\bHessen\s*-\s*N" + _ABBREV_END, re.IGNORECASE),
@@ -108,7 +108,7 @@ ABBREV_EXPANSIONS = [
         ),
     (
         re.compile(r"\bSchlesw(?:ig)?\.?\s*-\s*Holst" + _ABBREV_END, re.IGNORECASE),
-        Expansion("schleswig-holstein")
+        Expansion("schleswig-holstein", iri="https://sws.geonames.org/2838632")
         ),
     (
         re.compile(r"\bSchwarzb(?:urg)?\.?\s*-\s*Rud" + _ABBREV_END, re.IGNORECASE),
@@ -136,7 +136,7 @@ ABBREV_EXPANSIONS = [
         ),
     (
         re.compile(r"\bSa\."),
-        Expansion("sachsen")
+        Expansion("sachsen", iri="https://sws.geonames.org/2842566")
         ),
     (
         re.compile(r"\bReu(?:ss|ß)\s+[aä]\.?\s*L" + _ABBREV_END, re.IGNORECASE),
@@ -148,31 +148,31 @@ ABBREV_EXPANSIONS = [
         ),
     (
         re.compile(r"\bM\.?\s*-?\s*Franken\b", re.IGNORECASE),
-        Expansion("mittelfranken")
+        Expansion("mittelfranken", iri="https://sws.geonames.org/2870736")
         ),
     (
         re.compile(r"\bO\.?\s*-?\s*Franken\b", re.IGNORECASE),
-        Expansion("oberfranken")
+        Expansion("oberfranken", iri="https://sws.geonames.org/2860681")
         ),
     (
         re.compile(r"\bU\.?\s*-?\s*Franken\b", re.IGNORECASE),
-        Expansion("unterfranken")
+        Expansion("unterfranken", iri="https://sws.geonames.org/2819564")
         ),
     (
         re.compile(r"\bO\.?\s*-?\s*Pfalz\b", re.IGNORECASE),
-        Expansion("oberpfalz")
+        Expansion("oberpfalz", iri="https://sws.geonames.org/2859444")
         ),
     (
         re.compile(r"\bO\.?\s*-?\s*Bay" + _ABBREV_END, re.IGNORECASE),
-        Expansion("oberbayern")
+        Expansion("oberbayern", iri="https://sws.geonames.org/2861322")
         ),
     (
         re.compile(r"\bN(?:ie)?d\.?\s*-?\s*Bay" + _ABBREV_END, re.IGNORECASE),
-        Expansion("niederbayern")
+        Expansion("niederbayern", iri="https://sws.geonames.org/2863622")
         ),
     (
         re.compile(r"\bBay" + _ABBREV_END, re.IGNORECASE),
-        Expansion("bayern")
+        Expansion("bayern", iri="https://sws.geonames.org/2951839")
         ),
     (
         re.compile(r"\bAnh" + _ABBREV_END, re.IGNORECASE),
@@ -180,15 +180,15 @@ ABBREV_EXPANSIONS = [
         ),
     (
         re.compile(r"\bBrand(?:en)?b(?:g)?" + _ABBREV_END, re.IGNORECASE),
-        Expansion("brandenburg")
+        Expansion("brandenburg", iri="https://sws.geonames.org/2945356")
         ),
     (
         re.compile(r"\bBraunschw" + _ABBREV_END, re.IGNORECASE),
-        Expansion("braunschweig")
+        Expansion("braunschweig", iri="https://sws.geonames.org/2945023")
         ),
     (
         re.compile(r"\bHann" + _ABBREV_END, re.IGNORECASE),
-        Expansion("hannover")
+        Expansion("hannover", iri="https://sws.geonames.org/2910829")
         ),
     (
         re.compile(r"\bNeum\.", re.IGNORECASE),
@@ -212,19 +212,19 @@ ABBREV_EXPANSIONS = [
         ),
     (
         re.compile(r"\bRu(?:ss|ß)(?:l(?:and)?)?" + _ABBREV_END, re.IGNORECASE),
-        Expansion("russland")
+        Expansion("russland", iri="https://sws.geonames.org/2017370")
         ),
     (
         re.compile(r"\bSchles" + _ABBREV_END, re.IGNORECASE),
-        Expansion("schlesien")
+        Expansion("schlesien", iri="https://sws.geonames.org/3066138")
         ),
     (
         re.compile(r"\bTh[uü]r\.", re.IGNORECASE),
-        Expansion("thüringen")
+        Expansion("thüringen", iri="https://sws.geonames.org/2822542")
         ),
     (
         re.compile(r"\bWestf" + _ABBREV_END, re.IGNORECASE),
-        Expansion("westfalen")
+        Expansion("westfalen", iri="http://www.wikidata.org/entity/Q8614")
         ),
     (
         re.compile(r"\bW[uü]rtt?" + _ABBREV_END, re.IGNORECASE),
