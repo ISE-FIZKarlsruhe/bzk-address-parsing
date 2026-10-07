@@ -146,13 +146,25 @@ def regex_parse_addresses(addresses: pd.DataFrame) -> tuple[list[dict], list[boo
     return regex_rows, needs_llm_mask
 
 
+def is_not_input_address(address: str, example_address: str) -> bool:
+    """
+    Few-shot example filter (see prepare_llm) for the experiments: the LLM's
+    example pool (open_data/bzkopen_addresses_train.csv) overlaps the
+    evaluated addresses, which must not be shown to the LLM along with their
+    own labels.
+    """
+    return example_address != address
+
+
 async def _run_llm_fallback(addresses: list[str]) -> list[dict]:
     """
     Replicates parse_with_llms.py's LLM fallback: parses `addresses` with the
     same remote model/prompt/example-selection config, and renames its output
     columns the same way (entity names -> "{Entity}.text", metadata -> "llm_metadata.*").
+    Unlike parse_with_llms.py, few-shot examples exclude the address itself
+    (is_not_input_address).
     """
-    llm_parser, llm_config = prepare_llm()
+    llm_parser, llm_config = prepare_llm(example_filter=is_not_input_address)
     print(f"Using LLM parser {llm_config['model']} for {len(addresses)} addresses...")
     parsed_results = await llm_parser.parse_addresses(addresses)
     results = []

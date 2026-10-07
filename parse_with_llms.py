@@ -6,6 +6,7 @@ import argparse
 import json
 import logging
 from pathlib import Path
+from typing import Callable
 
 import pandas as pd
 import asyncio
@@ -36,10 +37,14 @@ def _rename_llm_output_columns(c : str) -> str:
     else:
         return c
 
-def prepare_llm() -> llm_parsers.RemoteAddressParsingModel:
+def prepare_llm(example_filter: Callable[[str, str], bool] | None = None) -> llm_parsers.RemoteAddressParsingModel:
+    """
+    The LLM address parser and its config. `example_filter(address, example_address)`,
+    if given, rejects few-shot examples for an address (see llm_parsers.FilteredExamples);
+    only meant for experiments, as production parsing uses every example.
+    """
     model_name="Qwen/Qwen3.5-9B"
     prompt_template = llm_parsers.JsonDictPromptTemplate(Path("prompts/optuna_best/best_qwen_prompt.txt").read_text())
-    supported_entities = ["HouseNumber", "StreetName", "Neighborhood", "City", "Country"]
     n_examples = 15
     embedding_model = "all-MiniLM-L6-v2"
     similarity_threshold = 0.35
@@ -66,6 +71,10 @@ def prepare_llm() -> llm_parsers.RemoteAddressParsingModel:
         num_examples=n_examples,
         pool_size=n_examples
     )
+    if example_filter is not None:
+        example_strategy = llm_parsers.FilteredExamples(
+            example_strategy, training_data['FullAddress'], example_filter
+        )
     model = llm_parsers.RemoteAddressParsingModel(
         model_name=model_name,
         example_strategy=example_strategy,
@@ -83,6 +92,8 @@ def prepare_llm() -> llm_parsers.RemoteAddressParsingModel:
             "embedding_model" : embedding_model,
         }
     }
+    if example_filter is not None:
+        config["example_strategy"]["example_filter"] = getattr(example_filter, "__name__", repr(example_filter))
     return model, config
 
 

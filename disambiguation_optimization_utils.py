@@ -720,11 +720,11 @@ def move_factors_up(evaluator: ConfigEvaluator, base: DisambiguationConfig) -> S
         if orders:
             evaluations = evaluator.evaluate({name: config_of(o) for name, o in orders.items()})
             evaluations.insert(0, "position", [o.index(factor) + 1 for o in orders.values()])
-            evaluations.insert(1, "worse than the position below", False)
+            evaluations.insert(1, "worse or same as the position below", False)
             previous = current
             for name, evaluation in evaluations.iterrows():
-                if _objective_key(evaluation) < _objective_key(previous):
-                    evaluations.loc[name, "worse than the position below"] = True
+                if _objective_key(evaluation) <= _objective_key(previous):
+                    evaluations.loc[name, "worse or same as the position below"] = True
                     break
                 chosen, previous = name, evaluation
             steps.append(evaluations)

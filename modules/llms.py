@@ -13,7 +13,7 @@ import sentence_transformers
 import openai
 import pandas as pd
 from collections import OrderedDict
-from typing import Any
+from typing import Any, Callable
 import re
 import itertools
 from io import StringIO
@@ -227,6 +227,66 @@ class HybridSimilarExamples(ExampleMatchingStrategy):
             else:
                 results.append(([], []))
 
+        return results
+
+    def find_examples(self, address: str):
+        return self.bulk_find_examples([address])[0]
+
+
+class FilteredExamples(ExampleMatchingStrategy):
+    """Wraps a strategy, dropping the examples whose address
+    `example_filter(address, example_address)` rejects (e.g. to keep an
+    evaluated address out of its own few-shot examples).
+
+    So that as many examples are still returned, an address with rejected
+    example addresses (out of `example_addresses`, the wrapped strategy's
+    example pool) gets as many more candidates from the wrapped strategy
+    (its `num_examples`, and `pool_size` when it has one), while the others
+    get exactly the wrapped strategy's examples. Rejected candidates stay in
+    the metadata, marked as not included and "filtered_out".
+
+    Made by Claude AI
+    """
+
+    def __init__(
+        self,
+        strategy: ExampleMatchingStrategy,
+        example_addresses: list[str],
+        example_filter: Callable[[str, str], bool],
+    ):
+        self.strategy = strategy
+        self.example_addresses = list(example_addresses)
+        self.example_filter = example_filter
+
+    def _num_rejected(self, address: str) -> int:
+        return sum(not self.example_filter(address, example) for example in self.example_addresses)
+
+    def _bulk_find_more_examples(self, addresses: list[str], extra: int):
+        """The wrapped strategy's examples for `addresses`, `extra` more candidates each."""
+        sizes = {attr: getattr(self.strategy, attr) for attr in ("num_examples", "pool_size") if hasattr(self.strategy, attr)}
+        for attr, size in sizes.items():
+            setattr(self.strategy, attr, size + extra)
+        try:
+            return self.strategy.bulk_find_examples(addresses)
+        finally:
+            for attr, size in sizes.items():
+                setattr(self.strategy, attr, size)
+
+    def bulk_find_examples(self, addresses: list[str]):
+        indices_by_extra = {}
+        for i, address in enumerate(addresses):
+            indices_by_extra.setdefault(self._num_rejected(address), []).append(i)
+        num_examples = self.strategy.num_examples
+        results = [None] * len(addresses)
+        for extra, indices in indices_by_extra.items():
+            bulk = self._bulk_find_more_examples([addresses[i] for i in indices], extra)
+            for i, (examples, metadatas) in zip(indices, bulk):
+                kept = [example for example in examples if self.example_filter(addresses[i], example[0])]
+                for metadata in metadatas or []:
+                    if not self.example_filter(addresses[i], metadata["address"]):
+                        metadata["included"] = False
+                        metadata["filtered_out"] = True
+                results[i] = (kept[:num_examples], metadatas)
         return results
 
     def find_examples(self, address: str):

@@ -88,17 +88,16 @@ SEARCH_PRUNE_SCORE_THRESHOLD = 0.2
 # Minimum difference between two candidates' scores on a disambiguation factor
 # for that factor to decide between them (see geo_disambiguation._compare_scores).
 DEFAULT_SIGNIFICANCE_THRESHOLD = 0.05
-MIN_POPULATION_ORDER_OF_MAGNITUDE = 1_000
+MIN_POPULATION_ORDER_OF_MAGNITUDE = 100_000
 PARENT_CHILD_MAX_DISTANCE_KM_BY_ADMIN_LEVEL = {
-    0: 200,
-    1: 200,
-    2: 67,
-    3: 27,
-    4: 13,
-    5: 10,
+    0: 100,
+    1: 100,
+    2: 34,
+    3: 14,
+    4: 6,
+    5: 5,
 }
 WEIGHTED_DISAMBIGUATION_FACTORS = {
-    'child_parent_likelihood': 1,
     'phonetic_score': 2,
     'fuzzy_similarity_score': 3,
     'entity_types_matching_preferred': 2,
@@ -106,9 +105,9 @@ WEIGHTED_DISAMBIGUATION_FACTORS = {
 DISAMBIGUATION_FACTOR_PRIMARY_PRIORITY = [
     'weighted_score',
     'child_parent_likelihood',
+    'population_order_of_magnitude',
     'entity_types_matching_preferred',
     'fuzzy_similarity_score',
-    'population_order_of_magnitude',
     'country_likelihood_rank',
     'phonetic_score',
     'entity_types_matching',
