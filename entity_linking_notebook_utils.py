@@ -13,9 +13,9 @@ import logging
 import pprint
 import sys
 import time
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Awaitable, Callable, Optional
 
 import colorlog
 import matplotlib.pyplot as plt
@@ -153,7 +153,7 @@ async def _run_llm_fallback(addresses: list[str]) -> list[dict]:
     columns the same way (entity names -> "{Entity}.text", metadata -> "llm_metadata.*").
     """
     llm_parser, llm_config = prepare_llm()
-    print(f"Using LLM parser {llm_config['model']} as fallback for {len(addresses)} addresses...")
+    print(f"Using LLM parser {llm_config['model']} for {len(addresses)} addresses...")
     parsed_results = await llm_parser.parse_addresses(addresses)
     results = []
     for parsed in parsed_results:
@@ -192,20 +192,116 @@ async def build_parsed_addresses(addresses: pd.DataFrame, regex_rows: list[dict]
     return pd.DataFrame(merged_rows)
 
 
-async def load_or_build_parsed_addresses(addresses: pd.DataFrame, cache_path: Path, overwrite: bool = False) -> pd.DataFrame:
-    """Parses `addresses` (regex + LLM fallback), or reads the result back from `cache_path` if already cached."""
-    regex_rows, needs_llm_mask = regex_parse_addresses(addresses)
+async def _load_or_build_cached_parsed_addresses(
+    build: Callable[[], Awaitable[pd.DataFrame]], method: str, cache_path: Path, overwrite: bool
+) -> pd.DataFrame:
+    """Awaits `build()` and caches its result to `cache_path`, or reads it back from there if already cached."""
     if overwrite or not cache_path.exists():
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         start = time.monotonic()
-        parsed_addresses = await build_parsed_addresses(addresses, regex_rows, needs_llm_mask)
+        parsed_addresses = await build()
         elapsed = time.monotonic() - start
-        print(f"Parsing {len(parsed_addresses)} addresses (regex + LLM fallback) took {format_time(elapsed)}")
+        print(f"Parsing {len(parsed_addresses)} addresses ({method}) took {format_time(elapsed)}")
         parsed_addresses.to_json(cache_path, orient="records", lines=True)
     else:
         print(f"Retrieving cached parsed addresses from {cache_path}...")
         parsed_addresses = pd.read_json(cache_path, orient="records", lines=True)
     return parsed_addresses
+
+
+async def load_or_build_parsed_addresses(addresses: pd.DataFrame, cache_path: Path, overwrite: bool = False) -> pd.DataFrame:
+    """Parses `addresses` (regex + LLM fallback), or reads the result back from `cache_path` if already cached."""
+    regex_rows, needs_llm_mask = regex_parse_addresses(addresses)
+    return await _load_or_build_cached_parsed_addresses(
+        lambda: build_parsed_addresses(addresses, regex_rows, needs_llm_mask),
+        "regex + LLM fallback", cache_path, overwrite)
+
+
+# ---------------------------------------------------------------------------
+# Parsing (LLM only)
+# ---------------------------------------------------------------------------
+
+async def build_llm_only_parsed_addresses(addresses: pd.DataFrame) -> pd.DataFrame:
+    """
+    Parses every non-empty address in `addresses` with the LLM alone (no regex
+    pass), returning rows in the same "{prefix}.*"-flattened format as
+    build_parsed_addresses. Empty addresses are not sent to the LLM and, as
+    with the regex parser, only carry an empty "{prefix}.raw".
+    """
+    raw_addresses = [
+        full_address if isinstance(full_address, str) else ""
+        for full_address in addresses["FullAddress"]
+    ]
+    llm_indices = [i for i, raw_address in enumerate(raw_addresses) if raw_address]
+    print(f"{len(llm_indices)}/{len(raw_addresses)} addresses are non-empty and will be parsed by the LLM.")
+    llm_results = await _run_llm_fallback([raw_addresses[i] for i in llm_indices]) if llm_indices else []
+    llm_results_by_index = dict(zip(llm_indices, llm_results))
+
+    rows = []
+    for i, row in enumerate(addresses.itertuples()):
+        prefix = PLACE_COLS_PREFIX[row.field]
+        record = {f"{prefix}.{k}": v for k, v in llm_results_by_index.get(i, {}).items()}
+        record[f"{prefix}.raw"] = raw_addresses[i]
+        record["card_id"] = row.card_id
+        record["address_id"] = row.address_id
+        record["field"] = row.field
+        record["prefix"] = prefix
+        rows.append(record)
+    return pd.DataFrame(rows)
+
+
+def _regex_parsed_address_ids(parsed_addresses: pd.DataFrame) -> set[str]:
+    """(str) address_id of the `parsed_addresses` rows fully parsed by the regex parser."""
+    return {
+        str(row["address_id"])
+        for row in parsed_addresses.to_dict(orient="records")
+        if row.get(f"{row['prefix']}.status") == "fully_parsed"
+    }
+
+
+def _without_missing(row: dict) -> dict:
+    """`row` without its missing values (columns of other prefixes or parsers, filled with NaN by the dataframe)."""
+    return {k: v for k, v in row.items() if isinstance(v, (list, tuple, dict)) or not pd.isna(v)}
+
+
+def merge_llm_only_parses(
+    addresses: pd.DataFrame, baseline_parsed: pd.DataFrame, llm_parsed: pd.DataFrame
+) -> pd.DataFrame:
+    """
+    The `baseline_parsed` (regex + LLM fallback) row of every address in
+    `addresses`, in the same order, except that rows the regex parser fully
+    parsed are replaced by their `llm_parsed` row.
+    """
+    regex_parsed_ids = _regex_parsed_address_ids(baseline_parsed)
+    baseline_by_id = {str(row["address_id"]): row for row in baseline_parsed.to_dict(orient="records")}
+    llm_by_id = {str(row["address_id"]): row for row in llm_parsed.to_dict(orient="records")}
+    rows = []
+    for address_id in addresses["address_id"].astype(str):
+        source = llm_by_id if address_id in regex_parsed_ids else baseline_by_id
+        rows.append(_without_missing(source[address_id]))
+    return pd.DataFrame(rows)
+
+
+async def load_or_build_llm_only_parsed_addresses(
+    addresses: pd.DataFrame, cache_path: Path, baseline_cache_path: Path, overwrite: bool = False
+) -> pd.DataFrame:
+    """
+    Parses `addresses` with the LLM only, reusing the LLM fallback parses of
+    the regex + LLM run (load_or_build_parsed_addresses, cached at
+    `baseline_cache_path`) so that the LLM's run-to-run variability doesn't
+    add differences between both experiments: only the addresses that run
+    regex parsed are parsed by the LLM here. These LLM parses are cached at
+    `cache_path`, or read back from there if already cached (a cache holding
+    every address also works, as only the regex parsed ones are used).
+    """
+    baseline_parsed = await load_or_build_parsed_addresses(addresses, baseline_cache_path)
+    regex_parsed_ids = _regex_parsed_address_ids(baseline_parsed)
+    regex_parsed_addresses = addresses[addresses["address_id"].astype(str).isin(regex_parsed_ids)]
+    print(f"Reusing the regex + LLM run parses of {len(addresses) - len(regex_parsed_addresses)}/{len(addresses)} addresses it did not regex parse.")
+    llm_parsed = await _load_or_build_cached_parsed_addresses(
+        lambda: build_llm_only_parsed_addresses(regex_parsed_addresses),
+        "LLM only, addresses regex parsed in the regex + LLM run", cache_path, overwrite)
+    return merge_llm_only_parses(addresses, baseline_parsed, llm_parsed)
 
 
 # ---------------------------------------------------------------------------
@@ -463,6 +559,175 @@ def save_result_table(df: pd.DataFrame, results_dir: Path, name: str) -> None:
         f"Saved {len(df)} rows to {(results_dir / name)}.jsonl\n\n"
         f"Saved {len(df)} rows to [{(results_dir / name)}.txt]({(results_dir / name)}.txt)"
     ))
+
+
+# ---------------------------------------------------------------------------
+# Comparison of the results tables of two runs
+# ---------------------------------------------------------------------------
+
+_RESULT_TABLE_NAMES = ["incorrectly_linked", "partially_linked", "failed_to_link"]
+
+LINK_STATUS_EMOJIS = {
+    LinkStatus.CORRECTLY_LINKED: "✅",
+    LinkStatus.PARTIALLY_LINKED: "⚠️",
+    LinkStatus.INCORRECTLY_LINKED: "❌",
+    LinkStatus.FAILED_TO_LINK: "❌",
+    LinkStatus.NOT_A_LOCATION: "❔",
+}
+
+
+def with_emoji(status: str) -> str:
+    """`status` prefixed with its LINK_STATUS_EMOJIS visual aid."""
+    return f"{LINK_STATUS_EMOJIS[status]} {status}" if status in LINK_STATUS_EMOJIS else status
+
+
+def load_result_tables(results_dir: Path) -> pd.DataFrame:
+    """Every row save_result_table wrote to `results_dir` (one table per link status), indexed by (str) address_id."""
+    tables = []
+    for name in _RESULT_TABLE_NAMES:
+        path = results_dir / f"{name}.jsonl"
+        if path.exists() and path.stat().st_size > 0:
+            tables.append(pd.read_json(path, orient="records", lines=True, dtype=False))
+    if not tables:
+        return pd.DataFrame(columns=["link_status", "pred_iri"], index=pd.Index([], name="address_id"))
+    results = pd.concat(tables, ignore_index=True)
+    results["address_id"] = results["address_id"].astype(str)
+    return results.set_index("address_id")
+
+
+def _link_results(results_dir: Path, indexed_gt: pd.DataFrame) -> pd.DataFrame:
+    """
+    link_status and pred_iri of every ground truth address, from the results
+    tables of `results_dir`. Addresses absent from the tables were correctly
+    linked (pred_iri is then the true iri) or are not a location.
+    """
+    results = load_result_tables(results_dir)
+    rows = {}
+    for address_id, true_row in indexed_gt.iterrows():
+        if address_id in results.index:
+            result = results.loc[address_id]
+            rows[address_id] = (result["link_status"], None if pd.isna(result["pred_iri"]) else result["pred_iri"])
+        elif pd.isna(true_row["iri"]):
+            rows[address_id] = (LinkStatus.NOT_A_LOCATION, None)
+        else:
+            rows[address_id] = (LinkStatus.CORRECTLY_LINKED, normalize_iri(true_row["iri"]))
+    return pd.DataFrame.from_dict(rows, orient="index", columns=["link_status", "pred_iri"])
+
+
+def link_status_transitions(
+    baseline_dir: Path, other_dir: Path, indexed_gt: pd.DataFrame, labels: tuple[str, str] = ("baseline", "other")
+) -> pd.DataFrame:
+    """Number of addresses per (baseline link status, other link status) pair, from the results tables of both runs."""
+    transitions = pd.crosstab(
+        _link_results(baseline_dir, indexed_gt)["link_status"].rename(labels[0]),
+        _link_results(other_dir, indexed_gt)["link_status"].rename(labels[1]),
+    )
+    transitions = transitions.reindex(index=_STATUS_ORDER, columns=_STATUS_ORDER, fill_value=0)
+    return transitions.rename(index=with_emoji, columns=with_emoji)
+
+
+def diff_link_results(
+    baseline_dir: Path, other_dir: Path, indexed_gt: pd.DataFrame, labels: tuple[str, str] = ("baseline", "other")
+) -> pd.DataFrame:
+    """
+    The addresses whose link status or predicted iri differs between the
+    results tables (save_result_table) of two runs, with both runs' values
+    labelled with `labels`, sorted by baseline then other link status.
+    """
+    baseline = _link_results(baseline_dir, indexed_gt)
+    other = _link_results(other_dir, indexed_gt)
+    differs = (baseline["link_status"] != other["link_status"]) | (baseline["pred_iri"].fillna("") != other["pred_iri"].fillna(""))
+    diff = pd.DataFrame({
+        "address_id": baseline.index,
+        "full_address": indexed_gt["FullAddress"],
+        f"link_status ({labels[0]})": baseline["link_status"],
+        f"link_status ({labels[1]})": other["link_status"],
+        "true_iri": [None if pd.isna(iri) else normalize_iri(iri) for iri in indexed_gt["iri"]],
+        f"pred_iri ({labels[0]})": baseline["pred_iri"],
+        f"pred_iri ({labels[1]})": other["pred_iri"],
+    })[differs]
+    status_rank = {status: i for i, status in enumerate(_STATUS_ORDER)}
+    diff = diff.sort_values(
+        [f"link_status ({labels[0]})", f"link_status ({labels[1]})"], key=lambda statuses: statuses.map(status_rank), kind="stable",
+    ).reset_index(drop=True)
+    for label in labels:
+        diff[f"link_status ({label})"] = diff[f"link_status ({label})"].map(with_emoji)
+    return diff
+
+
+def load_parsed_addresses(cache_path: Path) -> pd.DataFrame:
+    """The parsed addresses cached at `cache_path` by load_or_build_parsed_addresses (or its LLM-only variant)."""
+    return pd.read_json(cache_path, orient="records", lines=True)
+
+
+def _parsed_fields(row: dict) -> dict[str, Optional[str]]:
+    """
+    The fields the entity linking pipeline reads from a parsed row
+    (entity_linking.parse_field_entities, so after its regex parse fixes):
+    each entity type's text and, as "{EntityType}_iri", the geonames iri
+    pre-linked during parsing, in GeographicalEntityType order.
+    """
+    parsed = entity_linking.parse_field_entities(row, row["prefix"])
+    fields = {}
+    for entity_type in entity_linking.ENTITY_TYPE_COLUMNS:
+        fields[entity_type] = parsed.entity_texts.get(entity_type)
+        fields[f"{entity_type}_iri"] = parsed.pre_linked_iris.get(entity_type)
+    return fields
+
+
+def add_changed_parse_fields(
+    diff: pd.DataFrame,
+    baseline_parsed: pd.DataFrame,
+    other_parsed: pd.DataFrame,
+    labels: tuple[str, str] = ("baseline", "other"),
+) -> pd.DataFrame:
+    """
+    `diff` (see diff_link_results) with a "changed parse fields" column per
+    run, labelled with `labels`: an OrderedDict of the _parsed_fields that
+    differ between both runs' parses, each mapped to that run's value (None
+    where it has none). Only adds columns: the rows are still those whose
+    link status or pred_iri differ.
+    """
+    diff_ids = set(diff["address_id"].astype(str))
+    rows_by_run = [
+        {str(row["address_id"]): row for row in parsed.to_dict(orient="records") if str(row["address_id"]) in diff_ids}
+        for parsed in (baseline_parsed, other_parsed)
+    ]
+    changed = {label: [] for label in labels}
+    for address_id in diff["address_id"].astype(str):
+        fields = [_parsed_fields(_without_missing(rows[address_id])) for rows in rows_by_run]
+        changed_fields = [f for f in fields[0] if fields[0][f] != fields[1][f]]
+        for label, run_fields in zip(labels, fields):
+            changed[label].append(OrderedDict((f, run_fields[f]) for f in changed_fields))
+    diff = diff.copy()
+    position = diff.columns.get_loc("full_address") + 1
+    for offset, label in enumerate(labels):
+        diff.insert(position + offset, f"changed parse fields ({label})", changed[label])
+    return diff
+
+
+def check_differences_were_regex_parsed(diff: pd.DataFrame, baseline_parsed_addresses_path: Path) -> pd.DataFrame:
+    """
+    Sanity check that every address of `diff` (see diff_link_results) was
+    regex parsed in the baseline run, as addresses the baseline already sent
+    to the LLM fallback should get the same parse with LLM-only parsing.
+    Prints the outcome and returns the offending addresses with their
+    baseline parsing method (empty if the check passes).
+    """
+    parsed = load_parsed_addresses(baseline_parsed_addresses_path)
+    parsing_methods = pd.Series(
+        _parsing_methods(parsed.to_dict(orient="records")), index=parsed["address_id"].astype(str),
+    )
+    baseline_methods = diff["address_id"].astype(str).map(parsing_methods)
+    # Filtered after assigning: assigning a Series to an empty (fully filtered)
+    # dataframe would expand it to the Series' index.
+    offending = diff.assign(baseline_parsing_method=baseline_methods)[
+        baseline_methods != _PARSING_METHOD_NAMES["fully_parsed"]]
+    if offending.empty:
+        print(f"✅ All {len(diff)} differing addresses were regex parsed in the baseline run.")
+    else:
+        print(f"❌ {len(offending)}/{len(diff)} differing addresses were not regex parsed in the baseline run:")
+    return offending
 
 
 def build_unmatched_entities_df(addresses: pd.DataFrame, outcomes: list[entity_linking.LinkingOutcome]) -> pd.DataFrame:

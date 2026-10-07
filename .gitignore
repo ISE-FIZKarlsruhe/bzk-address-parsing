@@ -19,4 +19,4 @@ geo.duckdb
 *credentials*.json
 !example_api_credentials.json
 # Human-readable result tables written by entity_linking.ipynb
-experiments_data/entity_linking/results/*.txt
+experiments_data/entity_linking/results*/*.txt
