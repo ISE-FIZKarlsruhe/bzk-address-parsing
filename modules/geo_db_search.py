@@ -197,14 +197,16 @@ def preferred_name_by_entity_iri_select(schema : str = "") -> str:
 _STRIP_PERIODS_ABBREV_REGEX = re.compile(r'((?<=\W\w)|(?<=^\w))\.')
 _STRIP_PUNCTUATION_REGEX = re.compile(r'[^\w\s]')
 _DEDUPE_WHITESPACE_REGEX = re.compile(r'\s+')
-# Punctuation that still separates words in phonetic keys, left for
-# ascii_normalize to replace by spaces (e.g. "Beer-Sheva", "Frankfurt/Main",
-# "St.Gallen"); any other punctuation is removed before phonetic encoding
-_PHONETIC_WORD_SEPARATORS = frozenset("./-")
+# Punctuation that still separates words, left for ascii_normalize to replace
+# by spaces (e.g. "Beer-Sheva", "Frankfurt/Main", "St.Gallen"); any other
+# punctuation is removed before phonetic encoding and fuzzy scoring, and before
+# stop word removal, so that e.g. "Giv‘at" is not split into "Giv" and the
+# stop word "at"
+_WORD_SEPARATOR_PUNCTUATION = frozenset("./-")
 
-class _PhoneticPunctuationRemovalTable(dict):
+class _NonWordSeparatorPunctuationRemovalTable(dict):
     r"""
-    str.translate table removing punctuation other than _PHONETIC_WORD_SEPARATORS,
+    str.translate table removing punctuation other than _WORD_SEPARATOR_PUNCTUATION,
     so that e.g. apostrophes marking glottal stops in transliterations do not split
     a word in two ("Be'er Sheva`" -> "Beer Sheva" rather than "Be er Sheva").
     A character counts as punctuation when its ascii transliteration consists only
@@ -216,14 +218,14 @@ class _PhoneticPunctuationRemovalTable(dict):
     def __missing__(self, codepoint : int) -> Optional[int]:
         transliteration = unidecode.unidecode(chr(codepoint))
         is_punctuation = transliteration != "" and all(c in string.punctuation for c in transliteration)
-        if is_punctuation and not all(c in _PHONETIC_WORD_SEPARATORS for c in transliteration):
+        if is_punctuation and not all(c in _WORD_SEPARATOR_PUNCTUATION for c in transliteration):
             value = None
         else:
             value = codepoint
         self[codepoint] = value
         return value
 
-_PHONETIC_PUNCTUATION_REMOVAL_TABLE = _PhoneticPunctuationRemovalTable()
+_NON_WORD_SEPARATOR_PUNCTUATION_REMOVAL_TABLE = _NonWordSeparatorPunctuationRemovalTable()
 
 # Most addresses are in german, so german stop words take priority, but a few
 # common spanish and english ones are included too since some addresses use
@@ -264,8 +266,8 @@ def _remove_stop_words(normalized_string : str) -> str:
     return result
 
 def normalize_for_phonetics(nfc_string : str):
-    result = _remove_stop_words(nfc_string)
-    result = result.translate(_PHONETIC_PUNCTUATION_REMOVAL_TABLE)
+    result = nfc_string.translate(_NON_WORD_SEPARATOR_PUNCTUATION_REMOVAL_TABLE)
+    result = _remove_stop_words(result)
     result = ascii_normalize(result, preserve_german_diacritics=True)
     return result
 
@@ -305,6 +307,7 @@ def normalize_for_scoring(name : str) -> str:
     Casing is also preserved.
     """
     nfc = unicodedata.normalize('NFC', name)
+    nfc = nfc.translate(_NON_WORD_SEPARATOR_PUNCTUATION_REMOVAL_TABLE)
     nfc = _remove_stop_words(nfc)
     if all(c in _GERMAN_DIACRITICS or c.isascii() for c in nfc):
         return nfc
@@ -532,7 +535,8 @@ def search_normalized_similarity_and_distance(nfc_query : str, nfc_alt_name : st
     best = None
     for normalize in (ascii_normalize, german_normalize):
         edit_distance, similarity = similarity_and_distance(
-            normalize(_remove_stop_words(nfc_query)), normalize(_remove_stop_words(nfc_alt_name)), 10)
+            normalize(_remove_stop_words(nfc_query.translate(_NON_WORD_SEPARATOR_PUNCTUATION_REMOVAL_TABLE))),
+            normalize(_remove_stop_words(nfc_alt_name.translate(_NON_WORD_SEPARATOR_PUNCTUATION_REMOVAL_TABLE))), 10)
         if best is None or similarity > best[1]:
             best = (edit_distance, similarity)
     return best
