@@ -45,6 +45,7 @@ from sklearn.cluster import DBSCAN
 from modules import abbrev_list_expander, phonetics_fuzzy_scoring
 from abc import ABC, abstractmethod
 from modules.pipeline.storage.encoding_util import decode_from_dict, encode_as_dict
+import sys
 
 # Common parent of the entity linking loggers (GeoDBSearch, TantivySearchIndex,
 # CampReferenceMatcher, Disambiguator), which leave their own level unset so
@@ -536,7 +537,7 @@ def search_normalized_similarity_and_distance(nfc_query : str, nfc_alt_name : st
     for normalize in (ascii_normalize, german_normalize):
         edit_distance, similarity = similarity_and_distance(
             normalize(_remove_stop_words(nfc_query.translate(_NON_WORD_SEPARATOR_PUNCTUATION_REMOVAL_TABLE))),
-            normalize(_remove_stop_words(nfc_alt_name.translate(_NON_WORD_SEPARATOR_PUNCTUATION_REMOVAL_TABLE))), 10)
+            normalize(_remove_stop_words(nfc_alt_name.translate(_NON_WORD_SEPARATOR_PUNCTUATION_REMOVAL_TABLE))), sys.maxsize)
         if best is None or similarity > best[1]:
             best = (edit_distance, similarity)
     return best
@@ -567,7 +568,7 @@ def score_name_similarity(
         method = "abbreviation prefix"
     elif query_letters < STRICT_SCORING_MAX_QUERY_LETTERS:
         edit_distance, fuzzy_score = similarity_and_distance(
-            normalize_for_scoring(nfc_query), normalize_for_scoring(nfc_alt_name), 10,
+            normalize_for_scoring(nfc_query), normalize_for_scoring(nfc_alt_name), sys.maxsize,
             distance_function=levenshtein_for_scoring)
         method = "strict edit distance"
     else:
@@ -580,7 +581,7 @@ def score_name_similarity(
     query_phonetic_key = phonetics_for_scoring(normalize_for_phonetics(nfc_query))
     alt_name_phonetic_key = phonetics_for_scoring(normalize_for_phonetics(nfc_alt_name))
     phonetic_dist, phonetic_score = similarity_and_distance_with_onset_penalty(
-        query_phonetic_key, alt_name_phonetic_key, 10)
+        query_phonetic_key, alt_name_phonetic_key, sys.maxsize)
     logger.debug(
         "Computed phonetic distance %d and score %.3f for query phonetic key %r vs alt name phonetic key %r",
         phonetic_dist, phonetic_score, query_phonetic_key, alt_name_phonetic_key
@@ -1813,6 +1814,8 @@ class GeoDBSearch(LinkingStep):
         self._pre_linked_lock = threading.Lock()
         # set by initialize (see build_regional_terms)
         self.regional_terms = RegionalTerms({})
+        # set by initialize: the neighboring countries of each country, by iso code
+        self.neighboring_countries : dict[str, tuple[str, ...]] = {}
 
     def initialize(self):
         self.logger.info(
@@ -1840,6 +1843,11 @@ class GeoDBSearch(LinkingStep):
         self.search_index.populate_index(row_retriever(POP_LANGUAGE_FILTERED_NAMES_SELECT), skip_if_exists=True)
         self._load_pre_linked_cache()
         self.regional_terms = self._load_or_build_regional_terms()
+        self.neighboring_countries = {
+            iso_code: tuple(neighbors or ())
+            for iso_code, neighbors in self.connection.execute(
+                "SELECT iso_code, neighboring_countries_iso_codes FROM geo_db.country_data").fetchall()
+        }
         if isinstance(self.search_index, TantivySearchIndex):
             self.search_index.regional_terms = self.regional_terms
         return super().initialize()
@@ -2215,12 +2223,13 @@ class GeoDBSearch(LinkingStep):
                 entity.raw_text, match.nfc_alt_name, match.geographical_name.entity.iri,
                 entity.entity_type, match.geographical_name.entity.possible_entity_types)
             return False
-        # only a match in a country established by an authoritative entity of
-        # the address (see apply) may settle the search, so that the matches
-        # of later phases remain available to the Disambiguator otherwise
+        # only a match in a country named by an authoritative entity of the
+        # address (see apply), not merely neighboring it, may settle the
+        # search, so that the matches of later phases remain available to the
+        # Disambiguator otherwise
         if match.geographical_name.entity.country.iso_code not in country_codes:
             self.logger.debug(
-                "Not settling search for %r on %r (%s): country %s is not among the authoritative country codes %s",
+                "Not settling search for %r on %r (%s): country %s is not among the named country codes %s",
                 entity.raw_text, match.nfc_alt_name, match.geographical_name.entity.iri,
                 match.geographical_name.entity.country.iso_code, sorted(country_codes))
             return False
@@ -2304,6 +2313,14 @@ class GeoDBSearch(LinkingStep):
             hint_country_codes.update(self._historical_country_hints(matched_name))
         return [], hint_country_codes
 
+    def _with_neighboring_countries(self, country_iso_codes : Iterable[str]) -> list[str]:
+        """The given countries followed by their neighboring countries, without duplicates."""
+        country_iso_codes = list(country_iso_codes)
+        return list(dict.fromkeys([
+            *country_iso_codes,
+            *(neighbor for iso_code in country_iso_codes for neighbor in self.neighboring_countries.get(iso_code, ())),
+        ]))
+
     @staticmethod
     def _historical_country_hints(matched_name : MatchedName) -> set[str]:
         """
@@ -2321,8 +2338,11 @@ class GeoDBSearch(LinkingStep):
     def apply(self, address):
         new_entities = []
         # countries later searches are restricted to (see _search_entity),
-        # and countries they are only hinted towards
+        # including the neighbors of those named, the named ones alone (which
+        # may settle a search, see _settle_for_search_match), and countries
+        # later searches are only hinted towards
         country_codes = set()
+        named_country_codes = set()
         hint_country_codes = set()
         admin_codes = set()
         self.logger.debug("Searching entities of address %s (%r)", address.id, address.full_address)
@@ -2370,7 +2390,7 @@ class GeoDBSearch(LinkingStep):
                                 matched_name.is_abbreviation_match, matched_name.is_phonetic_match,
                                 matched_name.is_partial_word_match)
                             matched_names.append(matched_name)
-                            if self._settle_for_search_match(entity, matched_name, country_codes):
+                            if self._settle_for_search_match(entity, matched_name, named_country_codes):
                                 settle_here = True
                     return settle_here
 
@@ -2417,7 +2437,11 @@ class GeoDBSearch(LinkingStep):
                     entity_country_codes = list(dict.fromkeys([
                         *matched_name.geographical_name.entity.all_country_iso_codes,
                         *(geometry.country_iso_codes if geometry is not None else ())]))
-                    self.logger.debug("Entity %r adds country codes %s to later searches",
+                    named_country_codes.update(entity_country_codes)
+                    # along with their neighboring countries, to tolerate border
+                    # changes even when the exact country is named
+                    entity_country_codes = self._with_neighboring_countries(entity_country_codes)
+                    self.logger.debug("Entity %r adds country codes %s (with their neighbors) to later searches",
                                       entity.raw_text, entity_country_codes)
                     country_codes.update(entity_country_codes)
                     if matched_name.geographical_name.entity.admin_codes:

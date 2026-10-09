@@ -101,14 +101,14 @@ PARENT_CHILD_MAX_DISTANCE_KM_BY_ADMIN_LEVEL = {
 WEIGHTED_DISAMBIGUATION_FACTORS = {
     'phonetic_score': 2,
     'fuzzy_similarity_score': 3,
-    'entity_types_matching_preferred': 2,
+    'entity_types_matching_preferred': 1,
 }
 DISAMBIGUATION_FACTOR_PRIMARY_PRIORITY = [
     'weighted_score',
     'child_parent_likelihood',
     'population_order_of_magnitude',
-    'entity_types_matching_preferred',
     'fuzzy_similarity_score',
+    'entity_types_matching_preferred',
     'country_likelihood_rank',
     'phonetic_score',
     'entity_types_matching',

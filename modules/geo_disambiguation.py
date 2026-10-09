@@ -321,6 +321,21 @@ def _country_iso_codes(match : MatchedName) -> tuple[str, ...]:
         iso_codes = (*iso_codes, *(c for c in entity.geometry.country_iso_codes if c not in iso_codes))
     return iso_codes
 
+def _are_same_or_neighboring_countries(a : MatchedName, b : MatchedName) -> bool:
+    """
+    Whether two matches lie in a common country (see _country_iso_codes) or
+    in neighboring countries, tolerating border changes.
+    """
+    a_iso_codes = set(_country_iso_codes(a))
+    b_iso_codes = set(_country_iso_codes(b))
+    if a_iso_codes & b_iso_codes:
+        return True
+    for match, other_iso_codes in ((a, b_iso_codes), (b, a_iso_codes)):
+        country = match.geographical_name.entity.country
+        if country is not None and other_iso_codes & set(country.neighboring_countries_iso_codes or ()):
+            return True
+    return False
+
 def _is_in_parent_country(parent_entity : GeographicalEntity, child_entity : GeographicalEntity) -> bool:
     """
     Whether the child lies in the parent's country or, for a historical
@@ -720,7 +735,28 @@ class Disambiguator:
             # the parent cannot possibly outrank the child (see _score_parent_child_by_admin_codes)
             return self._score_parent_child_by_admin_codes(parent, child)
         if not _is_in_parent_country(parent_entity, child_entity):
-            return AnnotatedScore(0, "Different countries")
+            territorial_transition = self._territorial_transition_likelihood(parent, child)
+            if territorial_transition == 0.0:
+                return AnnotatedScore(0, "Different countries")
+            # a child in a neighboring country (e.g. after a border change)
+            # scores as it would within the parent's country, scaled by the
+            # territorial transition likelihood; admin codes are not comparable
+            # across countries, so only a country parent or the distance
+            # describe it
+            if _parent_admin_level(parent_entity) == 0 and _is_admin_division(parent_entity):
+                in_country_score = AnnotatedScore(1, "Within the neighboring country")
+            else:
+                in_country_score = self._score_parent_child_by_distance(parent, child)
+                if in_country_score is None:
+                    return AnnotatedScore(0, "Different countries")
+            logger.debug(
+                "Child %r (%r) lies in %s, neighboring parent %r (%r) country %s; scaling score %.2f by %.2f",
+                child.cleaned_alt_name, child_entity.iri, child_entity.country.iso_code,
+                parent.cleaned_alt_name, parent_entity.iri, parent_entity.country.iso_code,
+                in_country_score.score, territorial_transition)
+            return AnnotatedScore(
+                in_country_score.score * territorial_transition,
+                f"{in_country_score.comment} (neighboring country)")
         if not _admin_codes_match_up_to_parent(parent_entity, child_entity):
             # the codes contradict the child lying within the parent, however
             # close they are; a far away child is even less likely within it
@@ -936,7 +972,7 @@ class Disambiguator:
         """
         if self._is_entity_type_ruled_out(other_entity, other_match.match):
             return True
-        if not (set(_country_iso_codes(reference_match)) & set(_country_iso_codes(other_match.match))):
+        if not _are_same_or_neighboring_countries(reference_match, other_match.match):
             self.logger.debug(
                 "Pruned %r (%s) for %r: country %s differs from reference %r country %s",
                 other_match.match.nfc_alt_name, other_match.match.geographical_name.entity.iri, other_entity.raw_text,
