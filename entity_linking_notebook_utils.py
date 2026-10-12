@@ -565,7 +565,9 @@ def _aligned_table(df: pd.DataFrame) -> str:
 def save_result_table(df: pd.DataFrame, results_dir: Path, name: str) -> None:
     """Writes `df` to `{results_dir}/{name}.jsonl` and as an aligned table to `{results_dir}/{name}.txt`."""
     results_dir.mkdir(parents=True, exist_ok=True)
-    df.to_json(results_dir / f"{name}.jsonl", orient="records", lines=True, force_ascii=False)
+    # pandas always escapes "/" as \/ (breaking clickable URLs); in its JSON output \/ can only be an escaped slash
+    jsonl = df.to_json(orient="records", lines=True, force_ascii=False).replace("\\/", "/")
+    (results_dir / f"{name}.jsonl").write_text(jsonl, encoding="utf-8")
     (results_dir / f"{name}.txt").write_text(_aligned_table(df), encoding="utf-8")
     display(Markdown(
         f"Saved {len(df)} rows to {(results_dir / name)}.jsonl\n\n"
