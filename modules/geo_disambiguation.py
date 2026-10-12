@@ -17,7 +17,7 @@ import dataclasses
 import duckdb
 import logging
 import threading
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from modules.pipeline.linked_data import AnnotatedScore
 from modules.pipeline.storage.frozendict import FrozenDict
 import itertools
@@ -345,6 +345,10 @@ def _is_in_parent_country(parent_entity : GeographicalEntity, child_entity : Geo
     child_iso_code = child_entity.country.iso_code
     return parent_entity.country.iso_code == child_iso_code or child_iso_code in parent_entity.successor_country_iso_codes
 
+# Admin divisions (branches below the country, see Disambiguator._branch_entity)
+# whose entity a Disambiguator keeps cached
+ADMIN_DIVISION_CACHE_SIZE = 100
+
 class Disambiguator:
     logger = ENTITY_LINKING_LOGGER.getChild("Disambiguator")
 
@@ -376,17 +380,22 @@ class Disambiguator:
         self.geometry_parent_child_max_distance_km = geometry_parent_child_max_distance_km
         self.parent_child_max_distance_km_by_admin_level = parent_child_max_distance_km_by_admin_level
         # Read only connection to the geo duckdb, only needed to look up the
-        # entity of a common parent branch (see _link_to_common_parent). Opened
-        # lazily, and every use (and cache miss) goes through _geo_db_lock since
-        # the Disambiguator is shared across worker threads while a duckdb
-        # connection is not safe to use from several threads at once. Lookups
-        # are few (bounded by the distinct branches) and cached, so serializing
-        # them costs little.
-        self._geo_db_connection : Optional[duckdb.DuckDBPyConnection] = None
-        # duckdb settings of the connection (see __setstate__)
-        self._geo_db_connection_settings : dict = {}
+        # entity of a common parent branch (see _link_to_common_parent), kept
+        # open until close: opened by each copy as it is made (see
+        # __setstate__), or by the original on first use, so that configuring
+        # one (e.g. to send copies to worker processes) opens none. Every use
+        # goes through _geo_db_lock since the Disambiguator is shared across
+        # worker threads while a duckdb connection is not safe to use from
+        # several threads at once; lookups are cached and only hit an index
+        # (see _branch_entity), so serializing them costs little.
         self._geo_db_lock = threading.Lock()
-        self._common_parent_cache : dict[GeographicalBranch, Optional[GeographicalName]] = {}
+        self._admin_division_cache_lock = threading.Lock()
+        self._geo_db_connection : Optional[duckdb.DuckDBPyConnection] = None
+        # The entity of each branch looked up, the countries separately: they
+        # are few, so all of them are kept, while the branches below them are
+        # many more, so only the most recently used are (see _branch_entity)
+        self._country_cache : dict[str, Optional[GeographicalName]] = {}
+        self._admin_division_cache : OrderedDict[GeographicalBranch, Optional[GeographicalName]] = OrderedDict()
         self.logger.info(
             "Initialized with significance thresholds %s, primary priority %s, secondary priority %s, "
             "population rounding factor %d, "
@@ -397,20 +406,38 @@ class Disambiguator:
             self.min_population_order_of_magnitude, dict(self.score_prune_thresholds), self.geo_db_path,
             self.geometry_parent_child_max_distance_km, self.parent_child_max_distance_km_by_admin_level)
 
+    def _connect(self, **settings):
+        self.logger.debug("Opening read only connection to geo db %s", self.geo_db_path)
+        connection = duckdb.connect(self.geo_db_path, read_only=True)
+        for name, value in settings.items():
+            connection.execute(f"SET {name} = {value}")
+        if not connection.execute(
+                "SELECT count(*) FROM duckdb_tables() WHERE table_name = 'admin_divisions'").fetchone()[0]:
+            connection.close()
+            raise RuntimeError(
+                f"The geo db {self.geo_db_path} has no admin_divisions table; build it with "
+                "`python -m modules.build_geonames_db --admin-divisions-only`")
+        self._geo_db_connection = connection
+
     def __getstate__(self):
         # Neither the connection nor the lock can be pickled (e.g. when sent to
-        # a worker process); each copy opens its own connection when needed.
+        # a worker process); each copy opens its own connection, starting
+        # with empty caches.
         state = self.__dict__.copy()
         state["_geo_db_connection"] = None
         state["_geo_db_lock"] = None
+        state["_admin_division_cache_lock"] = None
+        state["_country_cache"] = {}
+        state["_admin_division_cache"] = OrderedDict()
         return state
 
     def __setstate__(self, state):
         self.__dict__.update(state)
         self._geo_db_lock = threading.Lock()
+        self._admin_division_cache_lock = threading.Lock()
         # a copy (e.g. in a worker process, see entity_linking.LinkingPool)
         # runs alongside many others: single threaded, without a progress bar
-        self._geo_db_connection_settings = {"threads": 1, "enable_progress_bar": False}
+        self._connect(threads=1, enable_progress_bar=False)
 
     def close(self):
         with self._geo_db_lock:
@@ -418,64 +445,60 @@ class Disambiguator:
                 self._geo_db_connection.close()
                 self._geo_db_connection = None
 
-    def _find_branch_entity(self, branch : GeographicalBranch) -> Optional[GeographicalName]:
+    def _look_up_branch_entity(self, branch : GeographicalBranch) -> Optional[GeographicalName]:
         """
-        Look up the entity representing a branch of the geographical hierarchy:
-        the country itself if the branch has no admin codes, otherwise the
-        (preferably current, not historical) ADM{n} division with exactly the
-        branch's n admin codes. If there is no such division, the branch is
-        walked up until one is found. Results are cached. Must be called while
-        holding _geo_db_lock.
+        The entity representing a branch of the geographical hierarchy, as
+        found in the geo duckdb's admin_divisions table (see
+        build_geonames_db._CREATE_ADMIN_DIVISIONS_SQL): the country itself if
+        the branch has no admin codes, otherwise its ADM{n} division. If there
+        is no such division, the branch is walked up until one is found.
         """
-        if branch in self._common_parent_cache:
-            return self._common_parent_cache[branch]
-        if self._geo_db_connection is None:
-            self.logger.debug("Opening read only connection to geo db %s", self.geo_db_path)
-            self._geo_db_connection = duckdb.connect(self.geo_db_path, read_only=True)
-            for name, value in self._geo_db_connection_settings.items():
-                self._geo_db_connection.execute(f"SET {name} = {value}")
-        connection = self._geo_db_connection
-        level = len(branch.admin_codes)
-        if level == 0:
+        branch_key = "|".join((branch.country_iso_code, *branch.admin_codes))
+        with self._geo_db_lock:
+            if self._geo_db_connection is None:
+                self._connect()
+            connection = self._geo_db_connection
             row = connection.execute(
-                "SELECT iri FROM geographical_entities WHERE iso_country_code = ? AND classification LIKE 'A.PCL%' "
-                "ORDER BY classification = 'A.PCLI' DESC, classification LIKE '%H' ASC, population DESC NULLS LAST "
-                "LIMIT 1",
-                [branch.country_iso_code]
+                "SELECT * EXCLUDE (branch_key, admin_level) FROM admin_divisions WHERE branch_key = ?",
+                [branch_key]
             ).fetchone()
-        else:
-            code_conditions = " AND ".join(f"admin_codes.admin{i + 1}_code = ?" for i in range(level))
-            null_next_code = (
-                f" AND coalesce(ltrim(admin_codes.admin{level + 1}_code, '0'), '') = ''" if level < 5 else "")
-            row = connection.execute(
-                "SELECT iri FROM geographical_entities WHERE iso_country_code = ? "
-                f"AND classification IN ('A.ADM{level}', 'A.ADM{level}H') AND {code_conditions}{null_next_code} "
-                f"ORDER BY classification = 'A.ADM{level}' DESC, population DESC NULLS LAST LIMIT 1",
-                [branch.country_iso_code, *branch.admin_codes]
-            ).fetchone()
-        geographical_name = None
+            columns = [description[0] for description in connection.description]
         if row is not None:
-            name_row = connection.execute(preferred_name_by_entity_iri_select(), [row[0]]).fetchone()
-            if name_row is not None:
-                columns = [description[0] for description in connection.description]
-                geographical_name = decode_from_dict(dict(zip(columns, name_row)), GeographicalName)
-        if geographical_name is None and level > 0:
+            geographical_name = decode_from_dict(dict(zip(columns, row)), GeographicalName)
+        elif len(branch.admin_codes) > 0:
             self.logger.debug("No entity found for branch %s; walking up the branch", branch)
-            geographical_name = self._find_branch_entity(
+            geographical_name = self._branch_entity(
                 GeographicalBranch(branch.country_iso_code, branch.admin_codes[:-1]))
+        else:
+            geographical_name = None
         self.logger.debug(
             "Branch %s resolved to %s", branch,
             geographical_name.entity.iri if geographical_name is not None else None)
-        self._common_parent_cache[branch] = geographical_name
         return geographical_name
 
     def _branch_entity(self, branch : GeographicalBranch) -> Optional[GeographicalName]:
-        # Checked without the lock first: reading a dict is thread safe, and
-        # cache hits are by far the most common case.
-        if branch in self._common_parent_cache:
-            return self._common_parent_cache[branch]
-        with self._geo_db_lock:
-            return self._find_branch_entity(branch)
+        """_look_up_branch_entity, cached (see _country_cache and _admin_division_cache)."""
+        if len(branch.admin_codes) == 0:
+            # Checked without the lock: reading a dict is thread safe, and
+            # cache hits are by far the most common case. Two threads missing
+            # the same country both look it up, harmlessly.
+            if branch.country_iso_code not in self._country_cache:
+                self._country_cache[branch.country_iso_code] = self._look_up_branch_entity(branch)
+            return self._country_cache[branch.country_iso_code]
+        # Even a hit reorders the cache, which must then hold the lock
+        with self._admin_division_cache_lock:
+            if branch in self._admin_division_cache:
+                self._admin_division_cache.move_to_end(branch)
+                return self._admin_division_cache[branch]
+        # looked up without holding the cache's lock, the lookup itself
+        # possibly walking up to (and caching) the branch's parents
+        geographical_name = self._look_up_branch_entity(branch)
+        with self._admin_division_cache_lock:
+            self._admin_division_cache[branch] = geographical_name
+            self._admin_division_cache.move_to_end(branch)
+            while len(self._admin_division_cache) > ADMIN_DIVISION_CACHE_SIZE:
+                self._admin_division_cache.popitem(last=False)
+        return geographical_name
 
     def _common_branch(self, candidates : list[LinkedAddress]) -> Optional[GeographicalBranch]:
         """

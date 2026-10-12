@@ -159,6 +159,50 @@ FROM geographical_names
     JOIN geographical_entities_with_countries USING (iri);
 """
 
+# The admin division (or country) at each branch of the geonames administrative
+# hierarchy, keyed by "{iso_country_code}|{admin1_code}|...|{adminN_code}" (just
+# the iso code for a country), with its preferred name as selected by
+# geo_db_search.preferred_name_by_entity_iri_select, for the disambiguator to
+# look up the entity common to its candidates (see
+# geo_disambiguation.Disambiguator._branch_entity) with a single indexed
+# lookup rather than by scanning geographical_entities and geographical_names.
+# A branch's division is its ADM{N} entity (ADM{N}H only lacking one, then by
+# population) whose admin code below N is null; a country's, its PCLI entity
+# (other PCL* only lacking one, current before historical, then by population).
+_CREATE_ADMIN_DIVISIONS_SQL = """
+CREATE OR REPLACE TABLE admin_divisions AS
+WITH divisions AS (
+    SELECT
+        iri, iso_country_code, classification, population,
+        CASE WHEN classification LIKE 'A.PCL%' THEN 0
+            ELSE CAST(substr(classification, 6, 1) AS INTEGER) END AS admin_level,
+        [admin_codes.admin1_code, admin_codes.admin2_code, admin_codes.admin3_code,
+         admin_codes.admin4_code, admin_codes.admin5_code] AS codes
+    FROM geographical_entities
+    WHERE coalesce(iso_country_code, '') <> '' AND (
+        classification LIKE 'A.PCL%'
+        OR classification IN ('A.ADM1', 'A.ADM1H', 'A.ADM2', 'A.ADM2H', 'A.ADM3', 'A.ADM3H',
+                              'A.ADM4', 'A.ADM4H', 'A.ADM5', 'A.ADM5H'))
+),
+best_divisions AS (
+    SELECT array_to_string(list_prepend(iso_country_code, codes[1:admin_level]), '|') AS branch_key, admin_level, iri
+    FROM divisions
+    WHERE (admin_level = 0 OR (
+            list_bool_and(list_transform(codes[1:admin_level], c -> coalesce(ltrim(c, '0'), '') <> ''))
+            AND (admin_level = 5 OR coalesce(ltrim(codes[admin_level + 1], '0'), '') = '')))
+    QUALIFY row_number() OVER (
+        PARTITION BY branch_key
+        ORDER BY classification = 'A.PCLI' DESC, classification LIKE '%H' ASC, population DESC NULLS LAST, iri
+    ) = 1
+)
+SELECT d.branch_key, d.admin_level, n.* EXCLUDE (iri), e AS entity
+FROM best_divisions d
+    JOIN geographical_names n ON n.iri = d.iri
+    JOIN geographical_entities_with_countries e ON e.iri = d.iri
+QUALIFY row_number() OVER (PARTITION BY d.branch_key ORDER BY n.is_preferred_name DESC NULLS LAST, n.name_id) = 1;
+CREATE UNIQUE INDEX admin_divisions_branch_key_idx ON admin_divisions (branch_key);
+"""
+
 # =================================================================================
 # Generic utility functions
 # =================================================================================
@@ -942,6 +986,11 @@ def populate_wikidata_entities(con, load_wikidata_dumps=False):
             
     
 
+def populate_admin_divisions(con: duckdb.DuckDBPyConnection):
+    """(Re)builds the admin_divisions table (see _CREATE_ADMIN_DIVISIONS_SQL)."""
+    print("Building admin divisions table...")
+    con.execute(_CREATE_ADMIN_DIVISIONS_SQL)
+
 def cleanup_dump_files():
     """
     Removes the downloaded dump files to free up disk space after the database has been built.
@@ -993,6 +1042,7 @@ def init_duckdb(cleanup=True, update_sources : Optional[list[str]] = None, load_
         populate_names_from_gnd(con)
     if "wikidata" in update_sources:
         populate_wikidata_entities(con, load_wikidata_dumps=load_wikidata_dumps)
+    populate_admin_divisions(con)
     if cleanup:
         cleanup_dump_files()
     end = time.monotonic()
@@ -1051,6 +1101,11 @@ def main(args=None):
         help="Repopulate the database from the given source (geonames, gnd, wikidata). Can be specified multiple times.",
     )
     parser.add_argument(
+        "--admin-divisions-only",
+        action="store_true",
+        help="Only (re)build the admin divisions table of an existing database",
+    )
+    parser.add_argument(
         "--cleanup",
         action="store_true",
         help="Remove downloaded dump files after building the database",
@@ -1067,6 +1122,10 @@ def main(args=None):
 
     if args.compact_only:
         compact_db()
+        return
+    if args.admin_divisions_only:
+        with duckdb.connect(DUCK_DB_PATH) as con:
+            populate_admin_divisions(con)
         return
     if args.rebuild and duckdb_path.exists():
         print(f"Moving existing database at {DUCK_DB_PATH}...")
