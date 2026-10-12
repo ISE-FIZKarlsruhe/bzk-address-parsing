@@ -7,6 +7,8 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+import json
+import os
 import re
 
 import pandas as pd
@@ -17,6 +19,7 @@ from modules.pipeline.geographical_entity import GeographicalEntityType
 from modules.pipeline.linked_data import AddressProcessingData, BZKFieldName
 
 DEFAULT_CAMPS_REFERENCE_PATH = Path("reference_data/wikidata_camps_and_ghettos.csv")
+DEFAULT_CAMPS_INDEX_PATH = Path("cache/camp_index.json")
 
 GEONAMES_INVALID_IDS = {
     "11862441", # Geonames no longer recognizes this id although it is on wikidata
@@ -62,10 +65,58 @@ class CampReferenceMatcher:
     """
     logger = ENTITY_LINKING_LOGGER.getChild("CampReferenceMatcher")
 
-    def __init__(self, csv_path: Path | str = DEFAULT_CAMPS_REFERENCE_PATH):
+    def __init__(
+            self, csv_path: Path | str = DEFAULT_CAMPS_REFERENCE_PATH,
+            index_path: Path | str = DEFAULT_CAMPS_INDEX_PATH):
         self.csv_path = Path(csv_path)
+        # where initialize writes the index built from csv_path, for copies to
+        # load it from (see __setstate__)
+        self.index_path = Path(index_path)
         self._index: dict[str, CampMatch] = {}
         self._keys_by_length: dict[int, list[str]] = defaultdict(list)
+
+    def __getstate__(self):
+        # The index is rather large, so it is not pickled along (e.g. when
+        # sent to a worker process); each copy loads it from index_path instead.
+        state = self.__dict__.copy()
+        del state["_index"], state["_keys_by_length"]
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._load_index()
+
+    def _save_index(self):
+        self.index_path.parent.mkdir(parents=True, exist_ok=True)
+        raw_index = {
+            key: {
+                "iri": match.iri, "label": match.label, "wikidata_iri": match.wikidata_iri,
+                "tags": sorted(match.tags), "gnd_iri": match.gnd_iri,
+            }
+            for key, match in self._index.items()
+        }
+        # written to a temporary file first, so that an interrupted write
+        # does not leave a truncated index behind
+        temporary_path = self.index_path.with_suffix(f".json.{os.getpid()}.tmp")
+        with temporary_path.open("w", encoding="utf-8") as f:
+            json.dump(raw_index, f, ensure_ascii=False)
+        temporary_path.replace(self.index_path)
+
+    def _load_index(self):
+        with self.index_path.open("r", encoding="utf-8") as f:
+            raw_index = json.load(f)
+        self._index = {
+            key: CampMatch(
+                iri=data["iri"], label=data["label"], wikidata_iri=data["wikidata_iri"],
+                tags=frozenset(data["tags"]), gnd_iri=data["gnd_iri"])
+            for key, data in raw_index.items()
+        }
+        self._index_keys_by_length()
+
+    def _index_keys_by_length(self):
+        self._keys_by_length = defaultdict(list)
+        for key in self._index:
+            self._keys_by_length[len(key)].append(key)
 
     # Preferred languages for the human-readable label kept in CampMatch.label,
     # when a normalized key is shared by several label translations of the
@@ -157,11 +208,11 @@ class CampReferenceMatcher:
                         continue
                     self._index[key] = match
 
-        for key in self._index:
-            self._keys_by_length[len(key)].append(key)
+        self._index_keys_by_length()
+        self._save_index()
         self.logger.info(
-            "Indexed %d keys for %d places (%d places with a resolved geonames id, %d ambiguous keys dropped)",
-            len(self._index), len(places), len(resolved_geoname), len(ambiguous_keys))
+            "Indexed %d keys for %d places (%d places with a resolved geonames id, %d ambiguous keys dropped), saved to %s",
+            len(self._index), len(places), len(resolved_geoname), len(ambiguous_keys), self.index_path)
 
     @staticmethod
     def _propagate_geoname_ids(parent_of: dict[str, set[str]], own_geoname: dict[str, str]) -> dict[str, str]:

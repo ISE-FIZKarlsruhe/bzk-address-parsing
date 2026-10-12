@@ -9,7 +9,6 @@ import duckdb
 import modules.build_geonames_db as build_geonames_db
 from typing import Collection, Iterable, NamedTuple, Optional, Literal, Callable, TYPE_CHECKING
 import contextlib
-import functools
 import threading
 import enum
 import dataclasses
@@ -922,10 +921,13 @@ def build_regional_terms(connection : duckdb.DuckDBPyConnection, search_index : 
     return entries
 
 
-def _regional_terms_from_entries(
-        connection : duckdb.DuckDBPyConnection, entries : dict[str, dict]
-    ) -> RegionalTerms:
-    """The regional terms described by entries (see build_regional_terms)."""
+def _regional_terms_geo_data(connection : duckdb.DuckDBPyConnection, entries : dict[str, dict]) -> dict:
+    """
+    What the regional terms described by entries (see build_regional_terms)
+    need from the geo database: the data of their countries and the names
+    of the German states among them, in a form that can be written to JSON
+    (see _regional_terms_from_entries).
+    """
     country_data = {}
     countries_sql = ", ".join(
         f"'{country}'" for country in sorted({c for entry in entries.values() for c in entry["countries"]}))
@@ -933,8 +935,23 @@ def _regional_terms_from_entries(
             SELECT DISTINCT entity.country FROM geo_db.geographical_names_with_entities
             WHERE entity.country.iso_code IN ({countries_sql}) AND entity.classification = 'A.PCLI'
         """).fetchall():
-        country_data[country["iso_code"]] = CountryData(**country)
-    state_names : dict[str, GeographicalName] = {}
+        country_data[country["iso_code"]] = country
+    state_names = {}
+    for state_iri in sorted({entry["state_iri"] for entry in entries.values() if entry["state_iri"] is not None}):
+        row = connection.execute(preferred_name_by_entity_iri_select("geo_db."), [state_iri]).fetchone()
+        columns = [description[0] for description in connection.description]
+        state_names[state_iri] = encode_as_dict(decode_from_dict(dict(zip(columns, row)), GeographicalName))
+    return {"country_data": country_data, "state_names": state_names}
+
+
+def _regional_terms_from_entries(entries : dict[str, dict], geo_data : dict) -> RegionalTerms:
+    """
+    The regional terms described by entries (see build_regional_terms), with
+    what they need from the geo database (see _regional_terms_geo_data).
+    """
+    country_data = {iso_code: CountryData(**country) for iso_code, country in geo_data["country_data"].items()}
+    state_names = {
+        state_iri: decode_from_dict(data, GeographicalName) for state_iri, data in geo_data["state_names"].items()}
     terms = {}
     for term, entry in entries.items():
         geometry = RegionGeometry(
@@ -942,12 +959,7 @@ def _regional_terms_from_entries(
             country_iso_codes=tuple(entry["countries"]),
         )
         if entry["state_iri"] is not None:
-            state_iri = entry["state_iri"]
-            if state_iri not in state_names:
-                row = connection.execute(preferred_name_by_entity_iri_select("geo_db."), [state_iri]).fetchone()
-                columns = [description[0] for description in connection.description]
-                state_names[state_iri] = decode_from_dict(dict(zip(columns, row)), GeographicalName)
-            state_name = state_names[state_iri]
+            state_name = state_names[entry["state_iri"]]
             geographical_name = dataclasses.replace(
                 state_name, entity=dataclasses.replace(state_name.entity, geometry=geometry))
         else:
@@ -1069,20 +1081,6 @@ class GeoSearchIndex(ABC):
         ) -> IndexSearchResult:
         pass
 
-def _serialized_searcher_access(method):
-    """
-    Serializes calls to a TantivySearchIndex method using a tantivy searcher,
-    which cannot be used from several threads at once, under the index's
-    _searcher_lock. Everything else about a search (query building, scoring
-    and the GeoDBSearch logic around it) runs concurrently.
-    """
-    @functools.wraps(method)
-    def wrapper(self : "TantivySearchIndex", *args, **kwargs):
-        with self._searcher_lock:
-            return method(self, *args, **kwargs)
-    return wrapper
-
-
 class TantivySearchIndex(GeoSearchIndex):
     index_descriptor = "tantivy"
     logger = ENTITY_LINKING_LOGGER.getChild("TantivySearchIndex")
@@ -1123,8 +1121,6 @@ class TantivySearchIndex(GeoSearchIndex):
         self.schema = self.create_schema()
         self.index = tantivy.Index(self.schema, path=str(self.index_path))
         self.index.config_reader(num_warmers=self.read_threads)
-        # see _serialized_searcher_access
-        self._searcher_lock = threading.Lock()
         self.index.register_tokenizer(
             "whitespace",
             tantivy.TextAnalyzerBuilder(
@@ -1133,14 +1129,16 @@ class TantivySearchIndex(GeoSearchIndex):
         )
 
     def __getstate__(self):
-        # The index object only refers to the index on disk, and neither it
-        # nor the lock can be pickled (e.g. when sent to a worker process);
-        # each copy reopens the index instead. A copy is only ever searched
-        # from a single thread, hence a single warmer.
+        # The index object only refers to the index on disk, and cannot be
+        # pickled (e.g. when sent to a worker process); each copy reopens
+        # the index instead. A copy is only ever searched from a single
+        # thread, hence a single warmer. The regional terms are left to the
+        # GeoDBSearch owning the copy to load (see GeoDBSearch.__setstate__).
         state = self.__dict__.copy()
-        for attribute in ("schema", "index", "_searcher_lock"):
+        for attribute in ("schema", "index"):
             del state[attribute]
         state["read_threads"] = 1
+        state["regional_terms"] = RegionalTerms({})
         return state
 
     def __setstate__(self, state):
@@ -1368,7 +1366,6 @@ class TantivySearchIndex(GeoSearchIndex):
             query_words, candidate_words, unmatched_query, unmatched_candidate)
         return True
 
-    @_serialized_searcher_access
     def _partial_word_match(
             self,
             query_strings : list[str],
@@ -1518,7 +1515,6 @@ class TantivySearchIndex(GeoSearchIndex):
             return tantivy.Query.disjunction_max_query(disjuction)
 
 
-    @_serialized_searcher_access
     def _search_inner(
             self,
             limit : int,
@@ -1806,6 +1802,8 @@ class GeoDBSearch(LinkingStep):
         self.geo_db_path = geo_db_path
         self.cache_dir = Path(cache_dir)
         self._pre_linked_cache_path = self.cache_dir / "pre_linked_entities.json"
+        self._regional_terms_path = self.cache_dir / "regional_terms.json"
+        self._regional_terms_geo_data_path = self.cache_dir / "regional_terms_geo_data.json"
         self._pre_linked_cache : dict[str, Optional[GeographicalName]] = {}
         # apply runs concurrently from several threads, while the duckdb
         # connection is not safe to use from several threads at once; cache
@@ -1875,7 +1873,7 @@ class GeoDBSearch(LinkingStep):
         """
         if not isinstance(self.search_index, TantivySearchIndex):
             return RegionalTerms({})
-        path = self.cache_dir / "regional_terms.json"
+        path = self._regional_terms_path
         parameters = self._regional_terms_cache_parameters()
         entries = None
         if path.exists():
@@ -1896,7 +1894,16 @@ class GeoDBSearch(LinkingStep):
                 json.dump({"parameters": parameters, "terms": entries}, f, ensure_ascii=False)
             temporary_path.replace(path)
             self.logger.info("Cached %d regional terms to %s", len(entries), path)
-        return _regional_terms_from_entries(self.connection, entries)
+        # written anew every time, since it depends on the geo database
+        # rather than on the cache parameters; copies load it rather than
+        # querying the geo database themselves, which takes a while from
+        # their single threaded connection (see __setstate__)
+        geo_data = _regional_terms_geo_data(self.connection, entries)
+        temporary_path = self._regional_terms_geo_data_path.with_suffix(f".json.{os.getpid()}.tmp")
+        with temporary_path.open("w", encoding="utf-8") as f:
+            json.dump(geo_data, f, ensure_ascii=False)
+        temporary_path.replace(self._regional_terms_geo_data_path)
+        return _regional_terms_from_entries(entries, geo_data)
 
     def _regional_term_match(self, entity : RawEntity, any_entity_type : bool = False) -> Optional[MatchedName]:
         """
@@ -1956,10 +1963,13 @@ class GeoDBSearch(LinkingStep):
         # Neither the connection nor the lock can be pickled (e.g. when sent
         # to a worker process); each copy opens its own connection instead,
         # single threaded and without a progress bar since it only serves the
-        # lookups of _retrieve_pre_linked, alongside many other copies. Everything initialize built (e.g. the regional
-        # terms) is copied as is.
+        # lookups of _retrieve_pre_linked, alongside many other copies. The
+        # rather large tables initialize loaded from the cache files (the
+        # regional terms and pre-linked entities) are loaded from those again
+        # by each copy rather than pickled along; everything else initialize
+        # built is copied as is.
         state = self.__dict__.copy()
-        for attribute in ("connection", "_pre_linked_lock"):
+        for attribute in ("connection", "_pre_linked_lock", "regional_terms", "_pre_linked_cache"):
             state.pop(attribute, None)
         return state
 
@@ -1972,6 +1982,21 @@ class GeoDBSearch(LinkingStep):
                 f"Cannot copy a GeoDBSearch whose search cache db is a file ({self.search_cache_db_path}); "
                 "use ':memory:'")
         self._connect(threads=1, enable_progress_bar=False)
+        self._pre_linked_cache = {}
+        self._load_pre_linked_cache()
+        self.regional_terms = self._load_regional_terms()
+        if isinstance(self.search_index, TantivySearchIndex):
+            self.search_index.regional_terms = self.regional_terms
+
+    def _load_regional_terms(self) -> RegionalTerms:
+        """The regional terms cached by the original's initialize (see _load_or_build_regional_terms)."""
+        if not isinstance(self.search_index, TantivySearchIndex):
+            return RegionalTerms({})
+        with self._regional_terms_path.open("r", encoding="utf-8") as f:
+            entries = json.load(f)["terms"]
+        with self._regional_terms_geo_data_path.open("r", encoding="utf-8") as f:
+            geo_data = json.load(f)
+        return _regional_terms_from_entries(entries, geo_data)
 
     def _load_pre_linked_cache(self):
         if not self._pre_linked_cache_path.exists():

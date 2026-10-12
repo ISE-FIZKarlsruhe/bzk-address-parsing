@@ -1084,7 +1084,7 @@ def build_disambiguator(geo_db_path: str = "geo.duckdb") -> Disambiguator:
 # keep processing matches and disambiguating while others search, but few
 # enough not to compete over the cores the searches likely use (8 linked
 # about 3x faster than 1, while 32 were slower than 8)
-DEFAULT_NUM_WORKERS = min(8, os.process_cpu_count() or 4)
+DEFAULT_NUM_WORKERS = os.process_cpu_count() or 4
 
 # Tasks submitted to a LinkingPool ahead of the result it yields next, per
 # worker: enough to keep every worker busy while an address that takes long
@@ -1125,15 +1125,27 @@ def _apply_in_worker(function: Callable, row: dict):
     return function(row, *_worker_steps)
 
 
+def _wait_for_all_workers(barrier) -> None:
+    """
+    Task holding a worker until every other worker runs one too, so that
+    one such task per worker has every worker started and initialized (see
+    LinkingPool.__init__).
+    """
+    barrier.wait()
+
+
 class LinkingPool:
     """
     Links addresses in parallel worker processes. The linking steps are
     initialized once by the caller, in the main process, and each worker gets
-    a copy of them: the data they hold (e.g. the regional terms, the camp
-    reference) as is, while the tantivy index and the duckdb connections,
-    which only refer to files on disk, are reopened by each copy (see their
-    __getstate__). Each worker then links one address at a time, its log
-    records being forwarded to the loggers of the main process.
+    a copy of them: the smaller data they hold as is, while the larger tables
+    (e.g. the regional terms, the camp reference index) are loaded by each
+    copy from the cache files the original's initialize wrote, and the
+    tantivy index and the duckdb connections, which only refer to files on
+    disk, are reopened by each copy (see their __getstate__). Each worker
+    then links one address at a time, its log records being forwarded to the
+    loggers of the main process. Creating the pool waits for every worker to
+    be initialized, so that linking time does not include it.
 
     Workers are spawned rather than forked, the main process holding threads
     (tantivy's, duckdb's) a fork would not carry over. The steps are copied
@@ -1160,6 +1172,14 @@ class LinkingPool:
         self._executor = ProcessPoolExecutor(
             max_workers=num_workers, mp_context=context, initializer=_initialize_worker,
             initargs=(pickled_steps, self._log_queue, logging.getLogger().getEffectiveLevel()))
+        # workers are otherwise only started as tasks arrive, and initialized
+        # while the first addresses wait on them
+        with context.Manager() as manager:
+            barrier = manager.Barrier(num_workers)
+            waiting = [self._executor.submit(_wait_for_all_workers, barrier) for _ in range(num_workers)]
+            for future in waiting:
+                future.result()
+        logger.info("Started %d linking worker processes", num_workers)
 
     def _map(self, function: Callable, items: Iterable) -> Iterator:
         """
