@@ -919,8 +919,9 @@ def partial_link_classification_counts(
         else classification_name(classifications.get(normalize_iri(outcome.iri)))
         for outcome in partial_outcomes
     ]
-    counts = pd.Series(names, dtype=object).value_counts()
-    return counts.sort_index(key=lambda index: [_CLASSIFICATION_NAME_ORDER.index(n) for n in index])
+    name_series = pd.Series(names, dtype=object, index=[outcome.address.id for outcome in partial_outcomes])
+    counts = name_series.value_counts()
+    return name_series, counts.sort_index(key=lambda index: [_CLASSIFICATION_NAME_ORDER.index(n) for n in index])
 
 
 class FailedToLinkReason:

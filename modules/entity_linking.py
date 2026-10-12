@@ -746,7 +746,7 @@ def link_field(
     camp_matcher: CampReferenceMatcher,
     geo_db_searcher: GeoDBSearch,
     disambiguator: Disambiguator,
-    keep_address: bool = False,
+    keep_address: bool = True,
 ) -> LinkingOutcome:
     """
     Run the full linking pipeline for a single address field of a single row.
