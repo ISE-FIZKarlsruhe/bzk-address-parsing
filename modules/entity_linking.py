@@ -794,12 +794,15 @@ def _link_field(
         nonlocal start
         return time.monotonic() - start
     row, raw_address, entity_texts, pre_linked_iris, entities = parse_field_entities(row, prefix)
+    card_id = row.get("card_id", row.get("filename"))
+    bzk_field_name = FIELD_PREFIXES[prefix]
+    address_id = str(row.get("address_id", f"{card_id}/{bzk_field_name.name}"))
     address = AddressProcessingData(
-        card_id=row.get("card_id"),
-        id=str(row.get("address_id", row.get("filename"))),
+        card_id=card_id,
+        id=address_id,
         full_address=raw_address,
-        bzk_field_name=FIELD_PREFIXES[prefix],
-        entities=entities,
+        bzk_field_name=bzk_field_name,
+        entities=entities
     )
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug(
@@ -1007,7 +1010,7 @@ def apply_outcome_to_row(row: dict, prefix: str, outcome: LinkingOutcome) -> dic
         updates[f"{prefix}.weighted_score_contribution.{criterion}"] = contribution
     for entity_metadata in outcome.linked_entities:
         entity_prefix = f"{prefix}.{entity_metadata.entity_type}"
-        updates[f"{entity_prefix}_iri"] = entity_metadata.iri
+        updates[f"{entity_prefix}.iri"] = entity_metadata.iri
         if entity_metadata.country is not None:
             updates[f"{entity_prefix}.country"] = entity_metadata.country
         for key, value in entity_metadata.matching.items():
@@ -1035,7 +1038,7 @@ def process_row(
     """
     output_row = dict(row)
     for prefix in prefixes_in_row(row):
-        outcome = link_field(row, prefix, camp_matcher, geo_db_searcher, disambiguator)
+        outcome = link_field(row, prefix, camp_matcher, geo_db_searcher, disambiguator, keep_address=False)
         output_row.update(apply_outcome_to_row(row, prefix, outcome))
     return output_row
 
@@ -1233,12 +1236,87 @@ class LinkingPool:
 
 def _iter_input_rows(input_path: Path, file_pattern: str) -> Iterable[dict]:
     files = sorted(input_path.glob(file_pattern)) if input_path.is_dir() else [input_path]
+    logger.info("%s files discovered", len(files))
     for file in files:
+        row_count = 0
+        logger.info("Initiating processing of file %s", file)
         with file.open("r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if line:
                     yield json.loads(line)
+                    row_count += 1
+        logger.info(
+            "Processing of the %d rows in file %s completed", 
+            row_count, file
+        )
+
+
+class Stats:
+    def __init__(self):
+        self.status_counts = {
+            "location_unspecified" : 0,
+            "unlinked" : 0,
+            "linked" : 0
+        }
+        self.search_status_counts = defaultdict(int)
+        self.disambiguation_status_counts = defaultdict(int)
+        self.tag_counts = defaultdict(int)
+        self.observed_addresses = 0
+
+    def observe_row(self, row : dict):
+        for prefix in prefixes_in_row(row):
+            tags = row[f"{prefix}.tags"]
+            iri = row[f"{prefix}.iri"]
+            if iri is None:
+                if "location_unspecified" in tags:
+                    status = "location_unspecified"
+                else:
+                    status = "unlinked"
+            else:
+                status = "linked"
+            self.status_counts[status] += 1
+            self.observed_addresses += 1
+            self.search_status_counts[ row[f"{prefix}.search_status"]] += 1
+            for tag in tags:
+                self.tag_counts[tag] += 1
+            self.disambiguation_status_counts[row[f"{prefix}.disambiguation_status"]] += 1
+
+    def summary(self) -> str:
+        tables = [
+            self._format_table("Status", self.status_counts),
+            self._format_table("Search status", self.search_status_counts),
+            self._format_table("Disambiguation status", self.disambiguation_status_counts),
+            self._format_table("Tag", self.tag_counts),
+        ]
+        lines = [f"Observed addresses: {self.observed_addresses:,}", ""]
+        for i in range(0, len(tables), 2):
+            pair = tables[i:i + 2]
+            widths = [max(len(line) for line in table) for table in pair]
+            height = max(len(table) for table in pair)
+            for j in range(height):
+                cells = [
+                    (table[j] if j < len(table) else "").ljust(width)
+                    for table, width in zip(pair, widths)
+                ]
+                lines.append("    ".join(cells).rstrip())
+            lines.append("")
+        return "\n".join(lines).rstrip()
+
+    def _format_table(self, title: str, counts: dict) -> list[str]:
+        total = self.observed_addresses
+        rows = [
+            (str(key), f"{count:,}", f"{count / total:.1%}" if total else "-")
+            for key, count in sorted(counts.items(), key=lambda kv: -kv[1])
+        ]
+        key_width = max([len(title)] + [len(r[0]) for r in rows])
+        count_width = max([len("Count"), len("9,999,999")] + [len(r[1]) for r in rows])
+        pct_width = max([len("%"), len("100.0%")] + [len(r[2]) for r in rows])
+        header = f"{title:<{key_width}}  {'Count':>{count_width}}  {'%':>{pct_width}}"
+        lines = [header, "-" * len(header)]
+        for key, count, pct in rows:
+            lines.append(f"{key:<{key_width}}  {count:>{count_width}}  {pct:>{pct_width}}")
+        return lines
 
 
 def main(argv=None):

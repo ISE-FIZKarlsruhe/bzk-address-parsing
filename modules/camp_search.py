@@ -362,8 +362,6 @@ class CampReferenceMatcher:
                 address.id)
             return None
         
-        # However there were people that were born in concentraion camps and ghettos and therefore that 
-        # hypothesis should be considered as well. The current address is not relevant for this case.
         queries = [address.full_address]
         for entity in address.entities:
             if entity.entity_type == GeographicalEntityType.City:
@@ -398,26 +396,26 @@ class CampReferenceMatcher:
             self.logger.debug("Phase 'fuzzy' for %r retrieved %s", query, match)
             if match is not None:
                 return match
-        
-        if len(address.entities) == 0 or "concentration_camp" in tags or "ghetto" in tags:
-            # substring match is expensive and therefore should only be used 
-            # if there are no parsed entities that can be matched or if the address
-            # is already tagged as a concentration camp or ghetto.
             
-            # Full addresses often carry more than just the place name (e.g.
-            # a street or a surrounding region), so also accept a reference
-            # name appearing as a whole-word substring of the query.
-            self.logger.debug(
-                "Phase 'substring' for %r: keys %s, min key length %d (entities: %d, tags: %s)",
-                address.full_address, keys, self._SUBSTRING_MIN_KEY_LENGTH, len(address.entities), tags)
-            match = self._substring_match(keys, address.full_address)
-            self.logger.debug("Phase 'substring' for %r retrieved %s", address.full_address, match)
-            if match is not None:
-                return match
-        else:
-            self.logger.debug(
-                "Phase 'substring' for %r skipped: address has parsed entities and no camp/ghetto tag",
-                address.full_address)
+            if len(address.entities) == 0 or "concentration_camp" in tags or "ghetto" in tags:
+                # substring match is expensive and therefore should only be used 
+                # if there are no parsed entities that can be matched or if the address
+                # is already tagged as a concentration camp or ghetto.
+                
+                # Full addresses often carry more than just the place name (e.g.
+                # a street or a surrounding region), so also accept a reference
+                # name appearing as a whole-word substring of the query.
+                self.logger.debug(
+                    "Phase 'substring' for %r: keys %s, min key length %d (entities: %d, tags: %s)",
+                    address.full_address, keys, self._SUBSTRING_MIN_KEY_LENGTH, len(address.entities), tags)
+                match = self._substring_match(keys, address.full_address)
+                self.logger.debug("Phase 'substring' for %r retrieved %s", address.full_address, match)
+                if match is not None:
+                    return match
+            else:
+                self.logger.debug(
+                    "Phase 'substring' for %r skipped: address has parsed entities and no camp/ghetto tag",
+                    address.full_address)
         return None
 
     def _fuzzy_match(self, keys: set[str], full_address: str) -> Optional[CampMatch]:
