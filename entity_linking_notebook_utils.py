@@ -33,7 +33,7 @@ from modules.entity_linking import SearchStatus
 from modules.entity_linking_eval_metrics import eval_entity_linking, normalize_iri
 from modules.geo_disambiguation import Disambiguator
 from modules.pipeline.linked_data import LinkedAddress, MatchedEntity
-from modules.regex_patterns import regex_parse
+from modules.regex_patterns import GLOBAL_REGEX_LIST, regex_parse
 from modules.utils import format_time
 from parse_with_llms import _rename_llm_output_columns, prepare_llm
 from parse_with_regex import PLACE_COLS_PREFIX, flatten_dict
@@ -391,7 +391,12 @@ def link_status(pred_iri: Optional[str], true_row: pd.Series) -> str:
     pred_iri = normalize_iri(pred_iri)
     true_iri = None if pd.isna(true_row["iri"]) else normalize_iri(true_row["iri"])
     if pred_iri is None:
-        return LinkStatus.FAILED_TO_LINK if true_iri is not None else LinkStatus.NOT_A_LOCATION
+        if true_iri is not None:
+            return LinkStatus.FAILED_TO_LINK
+        else:
+            # Sanity check
+            assert len({"location_unspecified", "not_an_address"} & set(true_row["tags"])) > 0, f"Sanity check failed for address {true_row["address_id"]}"
+            return LinkStatus.NOT_A_LOCATION
     if pred_iri == true_iri:
         return LinkStatus.CORRECTLY_LINKED
     hierarchy = true_row["full_hierarchy"]
@@ -744,6 +749,118 @@ def check_differences_were_regex_parsed(diff: pd.DataFrame, baseline_parsed_addr
     return offending
 
 
+# Preference order used to decide which of two runs linked an address better
+# (unlike _STATUS_ORDER, failing to link is preferred over linking incorrectly).
+_LINK_STATUS_PREFERENCE = [
+    LinkStatus.CORRECTLY_LINKED,
+    LinkStatus.PARTIALLY_LINKED,
+    LinkStatus.FAILED_TO_LINK,
+    LinkStatus.INCORRECTLY_LINKED,
+]
+
+
+def regex_patterns(parsed: pd.DataFrame) -> pd.Series:
+    """
+    The regex pattern each address of `parsed` was parsed with (its
+    "{prefix}.global_regex" column, else its "{prefix}.*.special_regex"
+    columns joined with " | "), indexed by (str) address_id. None for
+    addresses not regex parsed.
+    """
+    patterns = {}
+    for row in parsed.to_dict(orient="records"):
+        prefix = row["prefix"]
+        pattern = row.get(f"{prefix}.global_regex")
+        if pd.isna(pattern):
+            special = [
+                str(value) for column, value in row.items()
+                if column.startswith(f"{prefix}.") and column.endswith(".special_regex") and not pd.isna(value)
+            ]
+            pattern = " | ".join(special) if special else None
+        patterns[str(row["address_id"])] = pattern
+    return pd.Series(patterns, name="regex_pattern")
+
+
+def improved_link_results(
+    diff: pd.DataFrame, baseline_parsed: pd.DataFrame, labels: tuple[str, str] = ("baseline", "other"),
+) -> pd.DataFrame:
+    """
+    The rows of `diff` (see diff_link_results) where the second run's link
+    status is better than the first's according to _LINK_STATUS_PREFERENCE,
+    with the regex pattern the first run parsed the address with as a
+    "regex_pattern" column.
+    """
+    rank = {with_emoji(status): i for i, status in enumerate(_LINK_STATUS_PREFERENCE)}
+    baseline_rank = diff[f"link_status ({labels[0]})"].map(rank)
+    other_rank = diff[f"link_status ({labels[1]})"].map(rank)
+    improved = diff[other_rank < baseline_rank].copy()
+    improved.insert(
+        improved.columns.get_loc("full_address") + 1, "regex_pattern",
+        improved["address_id"].astype(str).map(regex_patterns(baseline_parsed)),
+    )
+    return improved.reset_index(drop=True)
+
+
+def whole_address_regex_patterns() -> pd.Series:
+    """
+    Every whole address pattern of regex_patterns.GLOBAL_REGEX_LIST, as
+    stored in the "{prefix}.global_regex" column by regex_parse.
+    """
+    return pd.Series([regex.pattern.replace('\n', ' ') for regex in GLOBAL_REGEX_LIST], name="regex_pattern")
+
+
+def regex_pattern_link_status_counts(
+    patterns: pd.Series, results_dir: Path, indexed_gt: pd.DataFrame, baseline_parsed: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    Number of addresses per (regex pattern, link status) in the results
+    tables of `results_dir`, over all addresses parsed with one of `patterns`
+    (excluding those that are not a location). One row per pattern, one
+    column per link status in _LINK_STATUS_PREFERENCE order.
+    """
+    results = _link_results(results_dir, indexed_gt)
+    results["regex_pattern"] = regex_patterns(baseline_parsed).reindex(results.index)
+    results = results[results["regex_pattern"].isin(set(patterns.dropna()))]
+    counts = pd.crosstab(results["regex_pattern"], results["link_status"])
+    counts = counts.reindex(columns=_LINK_STATUS_PREFERENCE, fill_value=0)
+    return counts.loc[counts.sum(axis=1).sort_values().index]
+
+
+def plot_regex_pattern_link_status_counts(
+    counts: pd.DataFrame, title: str, llm_counts: Optional[pd.DataFrame] = None, max_label_length: int = 80,
+) -> None:
+    """
+    Stacked horizontal bar chart of regex_pattern_link_status_counts, the
+    most frequent pattern on top. With `llm_counts` (regex_pattern_link_status_counts
+    of the LLM run, so of the same rows), each pattern's bar is followed by
+    the bar of those rows' statuses when parsed via LLM.
+    """
+    bars = []  # (label, counts row), top to bottom
+    for pattern in reversed(counts.index):
+        label = pattern if len(pattern) <= max_label_length else pattern[:max_label_length - 1] + "…"
+        bars.append((label, counts.loc[pattern]))
+        if llm_counts is not None:
+            llm_row = llm_counts.reindex(index=[pattern], columns=counts.columns, fill_value=0).iloc[0]
+            bars.append((f"LLM on rows parsed with {pattern[:10]}", llm_row))
+    fig, ax = plt.subplots(figsize=(12, max(1.5, 0.15 * len(bars) + 1.5)))
+    positions = range(len(bars))
+    left = pd.Series(0, index=positions)
+    for status in counts.columns:
+        widths = pd.Series([row[status] for _, row in bars], index=positions)
+        ax.barh(positions, widths, left=left, color=CATEGORY_COLORS[status], label=status)
+        left = left + widths
+    ax.set_yticks(list(positions), [label for label, _ in bars])
+    ax.invert_yaxis()
+    ax.set_xlabel("Number of addresses")
+    ax.set_title(title)
+    # Outside the axes, so that it does not hide the bars
+    ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1), borderaxespad=0)
+    for label in ax.get_yticklabels():
+        label.set_fontfamily("monospace")
+        label.set_fontsize(8)
+    fig.tight_layout()
+    plt.show()
+
+
 def build_unmatched_entities_df(addresses: pd.DataFrame, outcomes: list[entity_linking.LinkingOutcome]) -> pd.DataFrame:
     # LinkingOutcome only carries metadata for entities that made it into the
     # winning/likely candidate, not for every individual entity GeoDBSearch tried
@@ -832,13 +949,55 @@ def print_linking_status_legend() -> None:
     print(" - 'Not a location' means the predicted raw value does not contain any location that can be linked (e.g. Deportation)")
 
 
-def plot_linking_status_pie(counts: pd.Series, title: str) -> None:
+def _link_status_colors(labels) -> list:
+    """CATEGORY_COLORS of each of `labels`, with pastel colors for labels not in it."""
     colors = dict(CATEGORY_COLORS)
     pastel_colors = iter(plt.get_cmap("Pastel1").colors + plt.get_cmap("Pastel2").colors)
-    for label in counts.index:
+    for label in labels:
         if label not in colors:
             colors[label] = next(pastel_colors)
-    counts.plot(kind='pie', title=title, autopct='%1.1f%%', ylabel='', figsize=(6, 6), colors=[colors[label] for label in counts.index]).figure.tight_layout()
+    return [colors[label] for label in labels]
+
+
+def _percent_and_count(total: int) -> Callable[[float], str]:
+    """Pie autopct showing each slice's proportion and absolute count."""
+    return lambda percent: f"{percent:.1f}%\n({round(percent * total / 100)})"
+
+
+def plot_linking_status_pie(counts: pd.Series, title: str, ax=None) -> None:
+    ax = counts.plot(
+        kind='pie', title=title, autopct=_percent_and_count(counts.sum()), ylabel='', ax=ax,
+        figsize=None if ax is not None else (6, 6), colors=_link_status_colors(counts.index),
+    )
+    ax.figure.tight_layout()
+
+
+def regex_parseable_linking_status_counts(
+    baseline_parsed: pd.DataFrame, baseline_dir: Path, other_dir: Path, indexed_gt: pd.DataFrame,
+    labels: tuple[str, str] = ("baseline", "other"),
+) -> dict[str, pd.Series]:
+    """
+    Number of addresses per link_status in the results tables of both runs,
+    restricted to the addresses `baseline_parsed` regex parsed (excluding
+    those that are not a location), keyed by `labels`.
+    """
+    methods = pd.Series(_parsing_methods(baseline_parsed.to_dict(orient="records")), index=baseline_parsed["address_id"].astype(str))
+    regex_ids = methods.index[methods == _PARSING_METHOD_NAMES["fully_parsed"]]
+    counts = {}
+    for label, results_dir in zip(labels, (baseline_dir, other_dir)):
+        statuses = _link_results(results_dir, indexed_gt)["link_status"]
+        run_counts = statuses[statuses.index.isin(regex_ids)].value_counts().drop(LinkStatus.NOT_A_LOCATION, errors="ignore")
+        counts[label] = run_counts.sort_index(key=lambda index: [_STATUS_ORDER.index(c) for c in index])
+    return counts
+
+
+def plot_linking_status_pies(counts: dict[str, pd.Series], title: str) -> None:
+    """Side by side plot_linking_status_pie of each of `counts`, titled by its key."""
+    fig, axes = plt.subplots(1, len(counts), figsize=(6 * len(counts), 6))
+    for ax, (label, run_counts) in zip(axes, counts.items()):
+        plot_linking_status_pie(run_counts, title=f"{label} ({run_counts.sum()} addresses)", ax=ax)
+    fig.suptitle(title)
+    fig.tight_layout()
 
 
 # Human readable names for the classification of a linked entity (geonames
