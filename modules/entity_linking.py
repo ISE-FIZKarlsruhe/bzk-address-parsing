@@ -850,6 +850,13 @@ def _link_field(
             "Address %s: matched camp/ghetto %r -> %s (wikidata %s, tags %s); skipping search",
             address.id, camp_match.label, camp_match.iri, camp_match.wikidata_iri, sorted(camp_match.tags))
         camp_tags = set(camp_match.tags)
+        if not camp_tags & {"concentration_camp", "ghetto"}:
+            # Sanity check: every indexed camp/ghetto carries one of these
+            # (see camp_search._HIGHER_CLASS_TAGS).
+            logger.warning(
+                "Address %s: camp/ghetto match %r -> %s (wikidata %s) has neither a "
+                "concentration_camp nor a ghetto tag (tags %s)",
+                address.id, camp_match.label, camp_match.iri, camp_match.wikidata_iri, sorted(camp_match.tags))
         camp_tags.update(extra_tags)
         camp_tags = tuple(sorted(camp_tags))
         return LinkingOutcome(

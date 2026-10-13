@@ -436,6 +436,34 @@ def build_disambiguated_addresses_df(addresses: pd.DataFrame, outcomes: list[ent
     return pd.DataFrame(disambiguated_addresses)
 
 
+CAMP_AND_GHETTO_TAGS = {"concentration_camp", "concentration-camp", "ghetto"}
+
+
+def build_camps_and_ghettos_df(
+    addresses: pd.DataFrame, outcomes: list[entity_linking.LinkingOutcome], ground_truth: pd.DataFrame
+) -> pd.DataFrame:
+    """Addresses tagged as a concentration camp or ghetto in the ground truth, with the iri they were linked to."""
+    rows = []
+    for row, outcome, (_, true_row) in zip(addresses.itertuples(), outcomes, ground_truth.iterrows()):
+        tags = set(true_row["tags"] or [])
+        pred_tags = set(outcome.tags)
+        if not (tags | pred_tags) & CAMP_AND_GHETTO_TAGS:
+            continue
+        rows.append(dict(
+            address_id=row.address_id,
+            bzk_field_name=row.field,
+            full_address=row.FullAddress,
+            gt_tags=", ".join(sorted(tags)),
+            pred_iri=outcome.iri,
+            true_iri=true_row["iri"],
+            link_status=with_emoji(link_status(outcome.iri, true_row)),
+            entity_type=outcome.entity_type,
+            search_status=outcome.search_status,
+            pred_tags=", ".join(outcome.tags or ()),
+        ))
+    return pd.DataFrame(rows)
+
+
 def build_recovered_missed_words_df(
     parsed_rows: list[dict], outcomes: list[entity_linking.LinkingOutcome]
 ) -> pd.DataFrame:

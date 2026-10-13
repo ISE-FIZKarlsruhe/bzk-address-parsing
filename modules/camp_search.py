@@ -324,12 +324,43 @@ class CampReferenceMatcher:
             return True
         return GHETTO_TERM_PATTERN.search(full_address) is not None
 
-    def match(self, address: AddressProcessingData, tags : list[str]) -> Optional[CampMatch]:
+    def _skip_search(self, address: AddressProcessingData, tags : list[str]) -> bool:
         if address.bzk_field_name.is_current_address():
             self.logger.debug(
                 "Skipping camp search for address %s: field %s is a current address",
                 address.id, address.bzk_field_name)
-            return None # People cannot currently reside in a concentration camp or ghetto
+             # People cannot currently reside in a concentration camp or ghetto
+            return True
+        elif address.bzk_field_name == BZKFieldName.VICTIM_DEATH_PLACE:
+            self.logger.debug(
+                "Proceeding to camp search for address %s even without explicit camp or ghetto tag: address is a death place",
+                address.id)
+            return False
+        elif address.bzk_field_name.is_birthplace():
+            # Birth places however are treated differently. 
+            # Some people were born in the camps and ghettos and these people could show as presecutees and/or applicants
+            if "concentration_camp" in tags:
+                self.logger.debug(
+                    "Proceeding to camp search for address %s: birthplace is explicitly marked as a concentration camp",
+                    address.id)
+                return False
+            elif "ghetto" in tags:
+                self.logger.debug(
+                    "Proceeding to camp search for address %s: birthplace is explicitly marked as a ghetto",
+                    address.id)
+                return False
+        else:
+            self.logger.warning("Unrecognized field %r for address %s", address.bzk_field_name, address.id)
+        
+        return True
+
+
+    def match(self, address: AddressProcessingData, tags : list[str]) -> Optional[CampMatch]:
+        if self._skip_search(address, tags):
+            self.logger.debug(
+                "Skipping camp search for address %s",
+                address.id)
+            return None
         
         # However there were people that were born in concentraion camps and ghettos and therefore that 
         # hypothesis should be considered as well. The current address is not relevant for this case.
