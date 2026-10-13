@@ -1084,7 +1084,7 @@ def build_disambiguator(geo_db_path: str = "geo.duckdb") -> Disambiguator:
 # keep processing matches and disambiguating while others search, but few
 # enough not to compete over the cores the searches likely use (8 linked
 # about 3x faster than 1, while 32 were slower than 8)
-DEFAULT_NUM_WORKERS = os.process_cpu_count() or 4
+DEFAULT_NUM_WORKERS = ((os.process_cpu_count() or 6) * 3) // 4
 
 # Tasks submitted to a LinkingPool ahead of the result it yields next, per
 # worker: enough to keep every worker busy while an address that takes long

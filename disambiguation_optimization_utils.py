@@ -447,7 +447,7 @@ def _weights_config(base: DisambiguationConfig, weights: dict[str, float]) -> tu
     return name, base.replace(score_weights={factor: weight for factor, weight in weights.items() if weight != 0})
 
 
-def optimize_score_weights(evaluator: ConfigEvaluator, base: DisambiguationConfig) -> tuple[StageResult, StageResult]:
+def optimize_score_weights(evaluator: ConfigEvaluator, base: DisambiguationConfig, factors : list[str]) -> tuple[StageResult, StageResult]:
     """
     Optimizes the weights of the factors of the weighted score of `base`
     (see Disambiguator.weighted_score_contributions), in two rounds:
@@ -461,7 +461,6 @@ def optimize_score_weights(evaluator: ConfigEvaluator, base: DisambiguationConfi
     Returns the result of each round; the best configuration of the second
     is the best of both (it includes the best of the first).
     """
-    factors = list(base.score_weights)
     configs = {"current": base}
     parameters = {"current": dict(base.score_weights)}
     def add(weights):
@@ -564,69 +563,49 @@ def _greedy_step(
 
 
 def greedy_order_search(
-        evaluator: ConfigEvaluator, base: DisambiguationConfig, threshold_candidates: dict[str, Iterable[float]]
+        evaluator: ConfigEvaluator, base: DisambiguationConfig, factors: Iterable[str]
     ) -> GreedyOrderSearch:
     """
-    Orders the factors of `threshold_candidates` (see
-    DisambiguationConfig.with_order) by a greedy search:
+    Orders `factors` (see DisambiguationConfig.with_order) by a greedy search,
+    each factor keeping its significance threshold in `base`:
 
     1. which factor alone decides best;
-    2. then, the first being set, which factor decides best after it, and
-       with which of its threshold candidates for the first;
-    3. and so on, each step adding a factor at the end and setting the
-       threshold of the one before, until every factor is ordered;
-    4. finally, which threshold candidate is best for the last factor.
+    2. then, the first being set, which factor decides best after it;
+    3. and so on, each step adding a factor at the end, until every factor
+       is ordered.
 
-    The factor just added is given a threshold of 0 until the next step sets
-    it: candidates it does not tell apart otherwise only go on to the
-    comparison with no threshold. Among orders tied on the objective, a step
-    keeps the first, factors and thresholds being tried in the order of
-    `threshold_candidates`.
+    Among orders tied on the objective, a step keeps the first, factors being
+    tried in the order of `factors`.
 
     The best configuration is that of the best order of any step, preferring
     the longest among ties: leaving the last factors out leaves candidates
     they would tell apart tied (linked to their common parent, or left
     unlinked).
     """
-    factors = list(threshold_candidates)
+    factors = list(factors)
+    thresholds = base.significance_thresholds
     order : list[tuple[str, float]] = []
     steps = []
     summary = []
     step_orders = []
 
-    def record(result, added_factor, previous_factor):
+    for _ in factors:
+        candidates = {}
+        for factor in factors:
+            if any(factor == f for f, _ in order):
+                continue
+            candidate = [*order, (factor, thresholds[factor])]
+            candidates[_order_name(candidate)] = ({"added factor": factor}, candidate)
+        result, order = _greedy_step(evaluator, base, candidates)
         best = result.evaluations.iloc[0]
         steps.append(result.evaluations)
         step_orders.append(order)
         summary.append({
             "step": len(steps),
-            "added factor": added_factor,
-            "threshold set on": previous_factor,
-            "threshold": best["threshold"],
+            "added factor": best["added factor"],
             "configurations evaluated": len(result.evaluations),
             **{column: best[column] for column in METRIC_COLUMNS},
         })
-
-    for _ in factors:
-        previous = order[-1][0] if order else None
-        candidates = {}
-        for factor in factors:
-            if any(factor == f for f, _ in order):
-                continue
-            for threshold in (threshold_candidates[previous] if previous else [None]):
-                candidate = [*order[:-1], (previous, threshold)] if previous else []
-                candidate.append((factor, 0.0))
-                candidates[_order_name(candidate)] = ({"added factor": factor, "threshold": threshold}, candidate)
-        result, order = _greedy_step(evaluator, base, candidates)
-        record(result, result.evaluations.iloc[0]["added factor"], previous)
-
-    last = order[-1][0]
-    candidates = {}
-    for threshold in threshold_candidates[last]:
-        candidate = [*order[:-1], (last, threshold)]
-        candidates[_order_name(candidate)] = ({"added factor": None, "threshold": threshold}, candidate)
-    result, order = _greedy_step(evaluator, base, candidates)
-    record(result, None, last)
 
     summary = pd.DataFrame(summary).set_index("step")
     best_step = rank(summary.iloc[::-1]).index[0]
@@ -759,11 +738,6 @@ def compare_stages(evaluator: ConfigEvaluator, configs: dict[str, Disambiguation
 
 def display_greedy_steps(search: GreedyOrderSearch, top: int = 5) -> None:
     """The `top` orders of each step of a greedy order search."""
-    for i, (evaluations, (_, row)) in enumerate(zip(search.steps, search.summary.iterrows()), start=1):
-        if row["added factor"] is None:
-            display(Markdown(f"**Step {i}**: threshold of the last factor, {row['threshold set on']}"))
-        else:
-            display(Markdown(
-                f"**Step {i}**: factor added after {row['threshold set on']}, and the threshold of the latter"
-                if row["threshold set on"] is not None else f"**Step {i}**: the single best factor"))
+    for i, evaluations in enumerate(search.steps, start=1):
+        display(Markdown(f"**Step {i}**: the single best factor" if i == 1 else f"**Step {i}**: factor added at position {i}"))
         display(evaluations.head(top))

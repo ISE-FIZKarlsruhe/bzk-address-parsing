@@ -158,6 +158,14 @@ MIN_OTHER_MATCH_FUZZY_SCORE = 0.5
 # code (2/3) is not enough
 MIN_NEIGHBORHOOD_CHILD_PARENT_LIKELIHOOD = 0.74
 
+# Child/parent likelihood below which a match re-typed above the reference
+# entity is pruned (see Disambiguator._is_retyped_above_reference)
+MIN_RETYPED_CHILD_PARENT_LIKELIHOOD = MIN_NEIGHBORHOOD_CHILD_PARENT_LIKELIHOOD
+# Fuzzy similarity score below which a match is not re-typed above the
+# reference entity: a weak match (e.g. "N" as an abbreviation of "NH") is
+# too likely to happen to be a parent of the reference match by chance
+MIN_RETYPED_FUZZY_SCORE = 0.9
+
 # Countries outside of Europe that are still likely for an address (see
 # _is_weak_unlikely_country_match)
 LIKELY_NON_EUROPEAN_COUNTRIES = ("IL", "US")
@@ -982,7 +990,30 @@ class Disambiguator:
             entity.entity_type, match.geographical_name.entity.possible_entity_types)
         return True
 
-    def _prune_match(self, reference_match : MatchedName, other_entity : MatchedEntity, other_match : ScoredMatch) -> bool:
+    def _is_retyped_above_reference(
+            self, reference_entity : MatchedEntity, other_entity : MatchedEntity, match : MatchedName
+        ) -> bool:
+        """
+        Whether the match, of an entity type ruled out for the other entity
+        (see is_entity_type_ruled_out), may only be coarser than the reference
+        entity although the other entity was parsed as finer than it. Such a
+        match hints at a misparsed entity (e.g. the state "Florida" parsed as
+        a Neighborhood in "Miami, Florida") and is scored as a parent of the
+        reference match rather than as its child.
+        """
+        match_entity_types = match.geographical_name.entity.possible_entity_types
+        return (
+            reference_entity.entity_type < other_entity.entity_type
+            and len(match_entity_types) > 0
+            and max(match_entity_types) < reference_entity.entity_type
+            and is_entity_type_ruled_out(other_entity.entity_type, match_entity_types)
+            and match.fuzzy_score >= MIN_RETYPED_FUZZY_SCORE
+        )
+
+    def _prune_match(
+            self, reference_match : MatchedName, other_entity : MatchedEntity, other_match : ScoredMatch,
+            retyped : bool = False
+        ) -> bool:
         """
         Prune a match if it is unlikely to be the correct match for the given address and entity.
 
@@ -990,10 +1021,21 @@ class Disambiguator:
             reference_match (MatchedName): The reference match.
             other_entity (MatchedEntity): The other entity.
             other_match (ScoredMatch): The other match.
+            retyped (bool): Whether the match is re-typed above the reference
+                entity (see _is_retyped_above_reference), which exempts it
+                from the entity type check as long as it is likely a parent of
+                the reference match.
         Returns:
             bool: True if the match should be pruned, False otherwise.
         """
-        if self._is_entity_type_ruled_out(other_entity, other_match.match):
+        if retyped:
+            if other_match.scores["child_parent_likelihood"].score < MIN_RETYPED_CHILD_PARENT_LIKELIHOOD:
+                self.logger.debug(
+                    "Pruned %r (%s) re-typed above the reference for %r: child/parent likelihood %s below %.2f",
+                    other_match.match.nfc_alt_name, other_match.match.geographical_name.entity.iri, other_entity.raw_text,
+                    other_match.scores["child_parent_likelihood"], MIN_RETYPED_CHILD_PARENT_LIKELIHOOD)
+                return True
+        elif self._is_entity_type_ruled_out(other_entity, other_match.match):
             return True
         if not _are_same_or_neighboring_countries(reference_match, other_match.match):
             self.logger.debug(
@@ -1071,6 +1113,7 @@ class Disambiguator:
                     other_entity.entity_type.name
                 )
                 best_other_match_scored = ScoredMatch(None, {})
+                best_other_match_retyped = False
                 for other_match in other_entity.matches:
                     self.logger.debug(
                         "Scoring potential cross match %r (%r) of type %r against reference entity %r (%s)",
@@ -1079,7 +1122,12 @@ class Disambiguator:
                         match.nfc_alt_name, match.geographical_name.entity.iri,
                     )
                     scored_match = self._score_individual_match(other_entity, other_match, bzk_field)
-                    if entity.entity_type < other_entity.entity_type:
+                    retyped = self._is_retyped_above_reference(entity, other_entity, other_match)
+                    if retyped:
+                        scored_match.scores["entity_types_matching_preferred"] = AnnotatedScore(
+                            1.0, "Re-typed above the reference entity")
+                        scored_match.scores["child_parent_likelihood"] = self._score_parent_child(other_match, match)
+                    elif entity.entity_type < other_entity.entity_type:
                         scored_match.scores["child_parent_likelihood"] = self._score_parent_child(match, other_match)
                     else:
                         scored_match.scores["child_parent_likelihood"] = self._score_parent_child(other_match, match)
@@ -1089,7 +1137,7 @@ class Disambiguator:
                         other_match.nfc_alt_name, other_match.geographical_name.entity.iri,
                         scored_match.scores
                     )
-                    if self._prune_match(match, other_entity, scored_match):
+                    if self._prune_match(match, other_entity, scored_match, retyped):
                         self.logger.debug(
                             "Pruning entity %r (%r)",
                             other_match.nfc_alt_name, other_match.geographical_name.entity.iri
@@ -1098,13 +1146,18 @@ class Disambiguator:
                     old_scores = best_other_match_scored.scores
                     if best_other_match_scored.match == None or _score_dict_to_tuple(scored_match, self.priority) > _score_dict_to_tuple(old_scores, self.priority):
                         best_other_match_scored = ScoredMatch(other_match, scored_match.scores)
+                        best_other_match_retyped = retyped
                         self.logger.debug(
                             "Best match for entity %r set to %r (%r)",
                             other_entity.entity_type.name,
                             best_other_match_scored.match.nfc_alt_name, best_other_match_scored.match.geographical_name.entity.iri
                         )
-                        if other_entity.entity_type > finest_entity.entity_type:
-                            finest_entity = other_entity
+                # a match re-typed above the reference is coarser than it
+                if (
+                    best_other_match_scored.match is not None and not best_other_match_retyped
+                    and other_entity.entity_type > finest_entity.entity_type
+                ):
+                    finest_entity = other_entity
                 if best_other_match_scored.match is None:
                     self.logger.debug("No match for entity %r", other_entity.entity_type.name)
                 else:
