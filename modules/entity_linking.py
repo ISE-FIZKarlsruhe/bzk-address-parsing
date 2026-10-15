@@ -38,8 +38,8 @@ linked in parallel by worker processes, each with its own copy of the steps
 """
 
 import argparse
-from collections import defaultdict, deque
-from concurrent.futures import ProcessPoolExecutor
+from collections import Counter, defaultdict, deque
+from concurrent.futures import BrokenExecutor, ProcessPoolExecutor
 import json
 import logging
 import re
@@ -53,8 +53,9 @@ import os
 import pickle
 from typing import Callable, Iterable, Iterator, NamedTuple, Optional
 
+import duckdb
 import pandas as pd
-from tqdm.auto import tqdm
+from tqdm.contrib.logging import tqdm_logging_redirect
 
 from modules import abbrev_list_expander
 from modules.address_tagging import tag_address
@@ -153,6 +154,9 @@ class SearchStatus:
     # matched as a regional term (see geo_db_search.RegionalTerms), e.g. a
     # German state named as a whole
     GEO_DB_REGIONAL_TERM_MATCH = "GEO_DB_REGIONAL_TERM_MATCH"
+    # Linking the address raised an exception (see process_row); such
+    # addresses are linked again when resuming a run (see main).
+    EXCEPTION = "EXCEPTION"
 
 
 class DisambiguationStatus:
@@ -177,6 +181,8 @@ class DisambiguationStatus:
 
     AMBIGUOUS = "AMBIGUOUS"
     NO_CANDIDATES = "NO_CANDIDATES"
+    # Linking the address raised an exception (see SearchStatus.EXCEPTION).
+    EXCEPTION = "EXCEPTION"
 
 
 # Disambiguation factors (see geo_disambiguation.DISAMBIGUATION_FACTOR_PRIORITY) that reflect the entity's own type
@@ -1034,13 +1040,55 @@ def process_row(
 ) -> dict:
     """
     Link every address field present in `row` and return `row` augmented with
-    the new "{prefix}.*" linking columns for each of them.
+    the new "{prefix}.*" linking columns for each of them. An address field
+    whose linking raises an exception is logged and gets the columns of
+    exception_columns instead, so that one address cannot stop a whole run.
     """
     output_row = dict(row)
     for prefix in prefixes_in_row(row):
-        outcome = link_field(row, prefix, camp_matcher, geo_db_searcher, disambiguator, keep_address=False)
-        output_row.update(apply_outcome_to_row(row, prefix, outcome))
+        try:
+            outcome = link_field(row, prefix, camp_matcher, geo_db_searcher, disambiguator, keep_address=False)
+            output_row.update(apply_outcome_to_row(row, prefix, outcome))
+        except Exception as exception:
+            if is_interruption(exception):
+                raise
+            logger.exception("Linking %s of %s raised an exception", prefix, _row_label(row))
+            output_row.update(exception_columns(row, prefix, exception))
     return output_row
+
+
+def _row_label(row: dict):
+    """Names a row in log messages."""
+    return row.get("filename", row.get("card_id"))
+
+
+def is_interruption(exception: BaseException) -> bool:
+    """
+    Whether `exception` stems from the run being interrupted (Ctrl+C reaching
+    a duckdb query) rather than from linking an address.
+    """
+    return isinstance(exception, duckdb.InterruptException)
+
+
+def exception_columns(row: dict, prefix: str, exception: BaseException) -> dict:
+    """The "{prefix}.*" columns of an address field whose linking raised `exception`."""
+    return {
+        f"{prefix}.iri": None,
+        f"{prefix}.entity_type": None,
+        f"{prefix}.tags": [],
+        f"{prefix}.parsing_status": _clean_optional_str(row.get(f"{prefix}.status")),
+        f"{prefix}.search_status": SearchStatus.EXCEPTION,
+        f"{prefix}.disambiguation_status": DisambiguationStatus.EXCEPTION,
+        f"{prefix}.exception": f"{type(exception).__name__}: {exception}",
+    }
+
+
+def is_exception_row(row: dict) -> bool:
+    """Whether linking any address field of an output row raised an exception."""
+    return any(
+        row.get(f"{prefix}.search_status") == SearchStatus.EXCEPTION
+        for prefix in prefixes_in_row(row)
+    )
 
 
 def _default_significance_threshold() -> float:
@@ -1191,36 +1239,47 @@ class LinkingPool:
                 future.result()
         logger.info("Started %d linking worker processes", num_workers)
 
-    def _map(self, function: Callable, items: Iterable) -> Iterator:
+    def _map(self, function: Callable, items: Iterable, on_error: Optional[Callable] = None) -> Iterator:
         """
         `function` applied to every item by the workers, yielding the results
         in the order of `items`, which may be a lazy iterable too large to hold
-        in memory (see LINKING_POOL_TASKS_IN_FLIGHT_PER_WORKER).
+        in memory (see LINKING_POOL_TASKS_IN_FLIGHT_PER_WORKER). With
+        `on_error`, an item whose task raised an exception (e.g. its result
+        could not be sent back) yields on_error(item, exception) instead,
+        unless the pool itself broke (e.g. a worker was killed).
         """
+        def result(item, future):
+            try:
+                return future.result()
+            except Exception as exception:
+                if on_error is None or isinstance(exception, BrokenExecutor):
+                    raise
+                return on_error(item, exception)
+
         max_in_flight = self.num_workers * LINKING_POOL_TASKS_IN_FLIGHT_PER_WORKER
         pending = deque()
         for item in items:
-            pending.append(self._executor.submit(function, item))
+            pending.append((item, self._executor.submit(function, item)))
             if len(pending) >= max_in_flight:
-                yield pending.popleft().result()
+                yield result(*pending.popleft())
         while pending:
-            yield pending.popleft().result()
+            yield result(*pending.popleft())
 
-    def link_fields(self, rows: Iterable[dict]) -> Iterator["LinkingOutcome"]:
+    def link_fields(self, rows: Iterable[dict], on_error: Optional[Callable] = None) -> Iterator["LinkingOutcome"]:
         """link_field for each row, of the address field named by its "prefix"."""
-        return self._map(_link_field_in_worker, rows)
+        return self._map(_link_field_in_worker, rows, on_error)
 
-    def process_rows(self, rows: Iterable[dict]) -> Iterator[dict]:
+    def process_rows(self, rows: Iterable[dict], on_error: Optional[Callable] = None) -> Iterator[dict]:
         """process_row for each row."""
-        return self._map(_process_row_in_worker, rows)
+        return self._map(_process_row_in_worker, rows, on_error)
 
-    def map(self, function: Callable, rows: Iterable[dict]) -> Iterator:
+    def map(self, function: Callable, rows: Iterable[dict], on_error: Optional[Callable] = None) -> Iterator:
         """
         function(row, camp_matcher, geo_db_searcher, disambiguator) for each
         row, with the workers' linking steps; `function` must be picklable
         (e.g. defined at module level).
         """
-        return self._map(partial(_apply_in_worker, function), rows)
+        return self._map(partial(_apply_in_worker, function), rows, on_error)
 
     def close(self) -> None:
         self._executor.shutdown(wait=True, cancel_futures=True)
@@ -1234,30 +1293,13 @@ class LinkingPool:
         self.close()
 
 
-def _iter_input_rows(input_path: Path, file_pattern: str) -> Iterable[dict]:
-    files = sorted(input_path.glob(file_pattern)) if input_path.is_dir() else [input_path]
-    logger.info("%s files discovered", len(files))
-    for file in files:
-        row_count = 0
-        logger.info("Initiating processing of file %s", file)
-        with file.open("r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    yield json.loads(line)
-                    row_count += 1
-        logger.info(
-            "Processing of the %d rows in file %s completed", 
-            row_count, file
-        )
-
-
 class Stats:
     def __init__(self):
         self.status_counts = {
             "location_unspecified" : 0,
             "unlinked" : 0,
-            "linked" : 0
+            "linked" : 0,
+            "exception" : 0
         }
         self.search_status_counts = defaultdict(int)
         self.disambiguation_status_counts = defaultdict(int)
@@ -1266,9 +1308,14 @@ class Stats:
 
     def observe_row(self, row : dict):
         for prefix in prefixes_in_row(row):
+            raw_addr = row[f"{prefix}.raw"]
+            if raw_addr is None or raw_addr == "":
+                continue
             tags = row[f"{prefix}.tags"]
             iri = row[f"{prefix}.iri"]
-            if iri is None:
+            if row[f"{prefix}.search_status"] == SearchStatus.EXCEPTION:
+                status = "exception"
+            elif iri is None:
                 if "location_unspecified" in tags:
                     status = "location_unspecified"
                 else:
@@ -1319,37 +1366,275 @@ class Stats:
         return lines
 
 
+
+
+# The log file main writes in its output directory
+LOG_FILE_NAME = "entity_linking.log"
+
+# How often main logs the Stats summary of the rows linked so far
+DEFAULT_STATS_INTERVAL_SECONDS = 30
+
+
+def _row_key(row: dict) -> str:
+    """
+    Identifies an input row among those of its file, also once linked (which
+    only adds columns to it), for resuming a run: its ids and raw addresses.
+    """
+    return json.dumps(
+        [row.get("filename"), row.get("card_id"), row.get("address_id")]
+        + [row.get(f"{prefix}.raw") for prefix in FIELD_PREFIXES],
+        ensure_ascii=False)
+
+
+def _read_jsonl(path: Path, log_invalid: bool) -> Iterator[dict]:
+    """The records of a jsonl file, skipping the lines that are not valid json."""
+    with path.open("r", encoding="utf-8") as f:
+        for line_number, line in enumerate(f, start=1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                yield json.loads(line)
+            except json.JSONDecodeError as e:
+                if log_invalid:
+                    logger.error("Skipping invalid json at line %d of %s: %s", line_number, path, e)
+
+
+def _load_linked_keys(output_path: Path, rewrite: bool, stats: Optional[Stats] = None) -> Counter:
+    """
+    The _row_key of the rows a previous run already linked into
+    `output_path`, leaving out those whose linking raised an exception, so
+    they are linked again, and invalid lines, e.g. one a run interrupted
+    while writing left truncated. With `rewrite`, the file is rewritten
+    without them, so that resuming appends neither after a truncated line nor
+    a second copy of a row linked again; `stats`, if given, observes the rows kept.
+    """
+    linked_keys = Counter()
+    if not output_path.exists():
+        return linked_keys
+    kept_lines = []
+    invalid_lines = exception_rows = 0
+    needs_rewrite = False
+    with output_path.open("r", encoding="utf-8") as f:
+        for line in f:
+            if not line.strip():
+                needs_rewrite = True
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                invalid_lines += 1
+                continue
+            if is_exception_row(row):
+                exception_rows += 1
+                continue
+            linked_keys[_row_key(row)] += 1
+            if stats is not None:
+                stats.observe_row(row)
+            if not line.endswith("\n"):
+                line += "\n"
+                needs_rewrite = True
+            kept_lines.append(line)
+    if rewrite and (needs_rewrite or invalid_lines or exception_rows):
+        if invalid_lines:
+            logger.warning("Dropping %d invalid line(s) from %s", invalid_lines, output_path)
+        if exception_rows:
+            logger.info("Dropping %d row(s) of %s whose linking raised an exception, to link them again",
+                        exception_rows, output_path)
+        temporary_path = output_path.with_name(output_path.name + ".tmp")
+        with temporary_path.open("w", encoding="utf-8") as f:
+            f.writelines(kept_lines)
+        os.replace(temporary_path, output_path)
+    return linked_keys
+
+
+@dataclass
+class _InputFile:
+    path: Path
+    output_path: Path
+    rows: int
+    # rows not yet linked by a previous run
+    pending_rows: int
+
+
+def _discover_input_files(input_path: Path, output_dir: Path, file_pattern: str) -> list[_InputFile]:
+    """
+    The input files, each with the output file mirroring its path under
+    `output_dir` and the rows left to link in it.
+    """
+    if input_path.is_dir():
+        resolved_output_dir = output_dir.resolve()
+        paths = sorted(
+            path for path in input_path.rglob(file_pattern)
+            if path.is_file() and not path.resolve().is_relative_to(resolved_output_dir))
+        relative_paths = [path.relative_to(input_path) for path in paths]
+    else:
+        paths = [input_path]
+        relative_paths = [Path(input_path.name)]
+    input_files = []
+    for path, relative_path in zip(paths, relative_paths):
+        output_path = output_dir / relative_path
+        try:
+            linked_keys = _load_linked_keys(output_path, rewrite=False)
+            rows = pending_rows = 0
+            for row in _read_jsonl(path, log_invalid=False):
+                rows += 1
+                key = _row_key(row)
+                if linked_keys[key] > 0:
+                    linked_keys[key] -= 1
+                else:
+                    pending_rows += 1
+        except Exception:
+            logger.exception("Skipping input file %s, which could not be read", path)
+            continue
+        input_files.append(_InputFile(path, output_path, rows, pending_rows))
+    return input_files
+
+
+def _iter_pending_rows(input_files: list[_InputFile], stats: Stats, destinations: deque) -> Iterator[dict]:
+    """
+    The rows of the input files not yet linked by a previous run, appending
+    the _InputFile of each to `destinations` as it is yielded. Their output
+    files are first cleaned (see _load_linked_keys), the rows they already
+    hold being observed by `stats`.
+    """
+    for input_file in input_files:
+        try:
+            input_file.output_path.parent.mkdir(parents=True, exist_ok=True)
+            linked_keys = _load_linked_keys(input_file.output_path, rewrite=True, stats=stats)
+            if input_file.pending_rows == 0:
+                continue
+            for row in _read_jsonl(input_file.path, log_invalid=True):
+                key = _row_key(row)
+                if linked_keys[key] > 0:
+                    linked_keys[key] -= 1
+                    continue
+                destinations.append(input_file)
+                yield row
+        except Exception:
+            logger.exception("Error reading input file %s, skipping its remaining rows", input_file.path)
+
+
+def _exception_row(row: dict, exception: BaseException) -> dict:
+    """The output row of an input row whose linking failed outside of process_row."""
+    if is_interruption(exception):
+        raise exception
+    logger.error("Linking the row of %s failed in its worker process", _row_label(row), exc_info=exception)
+    output_row = dict(row)
+    for prefix in prefixes_in_row(row):
+        output_row.update(exception_columns(row, prefix, exception))
+    return output_row
+
+
+def _linking_config() -> dict:
+    """The module level settings of the linking steps, logged at the start of a run."""
+    return {
+        "SEARCH_PRUNE_SCORE_THRESHOLD": SEARCH_PRUNE_SCORE_THRESHOLD,
+        "DEFAULT_SIGNIFICANCE_THRESHOLD": DEFAULT_SIGNIFICANCE_THRESHOLD,
+        "SIGNIFICANCE_THRESHOLDS": SIGNIFICANCE_THRESHOLDS,
+        "MIN_POPULATION_ORDER_OF_MAGNITUDE": MIN_POPULATION_ORDER_OF_MAGNITUDE,
+        "PARENT_CHILD_MAX_DISTANCE_KM_BY_ADMIN_LEVEL": PARENT_CHILD_MAX_DISTANCE_KM_BY_ADMIN_LEVEL,
+        "WEIGHTED_DISAMBIGUATION_FACTORS": WEIGHTED_DISAMBIGUATION_FACTORS,
+        "DISAMBIGUATION_FACTOR_PRIMARY_PRIORITY": DISAMBIGUATION_FACTOR_PRIMARY_PRIORITY,
+        "DISAMBIGUATION_FACTOR_SECONDARY_PRIORITY": DISAMBIGUATION_FACTOR_SECONDARY_PRIORITY,
+        "DISAMBIGUATION_POPULATION_ROUNDING_FACTOR": DISAMBIGUATION_POPULATION_ROUNDING_FACTOR,
+        "DISAMBIGUATION_SCORE_PRUNE_THRESHOLDS": DISAMBIGUATION_SCORE_PRUNE_THRESHOLDS,
+    }
+
+
 def main(argv=None):
     arg_parser = argparse.ArgumentParser()
     arg_parser.add_argument("input_path", type=str, help="A parsed-address jsonl file, or a directory of jsonl files")
-    arg_parser.add_argument("output_path", type=str)
-    arg_parser.add_argument("-P", "--file-pattern", type=str, default="*.jsonl")
+    arg_parser.add_argument(
+        "output_dir", type=str,
+        help="Directory the linked files are written to, mirroring their paths in input_path, along with "
+             f"{LOG_FILE_NAME}; a run interrupted in it is resumed")
+    arg_parser.add_argument("-P", "--file-pattern", type=str, default="*.jsonl",
+                            help="Pattern of the input files, searched recursively when input_path is a directory")
     arg_parser.add_argument("--search-cache-db", type=str, default=":memory:")
     arg_parser.add_argument("--search-index-path", type=str, default=".geo_db_search_index/tantivy_index")
     arg_parser.add_argument("--geo-db-path", type=str, default="geo.duckdb")
     arg_parser.add_argument("--camps-reference", type=str, default=str(DEFAULT_CAMPS_REFERENCE_PATH))
     arg_parser.add_argument("--num-workers", type=int, default=DEFAULT_NUM_WORKERS)
+    arg_parser.add_argument("--stats-interval", type=float, default=DEFAULT_STATS_INTERVAL_SECONDS,
+                            help="Seconds between logs of the statistics of the rows linked so far")
     args = arg_parser.parse_args(argv)
 
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+    input_path = Path(args.input_path)
+    assert input_path.exists(), f"{input_path} does not exist"
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        handlers=[logging.FileHandler(output_dir / LOG_FILE_NAME, mode="a"), logging.StreamHandler()],
+        force=True,
+    )
+
+    logger.info("Starting entity linking run with arguments:\n%s", json.dumps(vars(args), indent=2))
+    logger.info("Linking config:\n%s", json.dumps(_linking_config(), indent=2, default=str))
+
+    discovery_start = time.monotonic()
+    input_files = _discover_input_files(input_path, output_dir, args.file_pattern)
+    total_rows = sum(input_file.rows for input_file in input_files)
+    pending_rows = sum(input_file.pending_rows for input_file in input_files)
+    logger.info(
+        "Discovered %d input files with %d rows in %.1fs: %d rows already linked, %d rows to link",
+        len(input_files), total_rows, time.monotonic() - discovery_start, total_rows - pending_rows, pending_rows)
+    if pending_rows == 0:
+        logger.info("Nothing left to link")
+        return
 
     camp_matcher = build_camp_matcher(args.camps_reference)
     geo_db_searcher = build_geo_db_searcher(args.search_index_path, args.search_cache_db, args.geo_db_path)
     disambiguator = build_disambiguator(args.geo_db_path)
 
-    input_path = Path(args.input_path)
-    output_path = Path(args.output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
+    # Rows of previous runs included, from the output files
+    stats = Stats()
+    destinations = deque()
+    exception_rows = 0
+    current_file: Optional[_InputFile] = None
+    out_f = None
     try:
         with LinkingPool(camp_matcher, geo_db_searcher, disambiguator, args.num_workers) as linking_pool, \
-                output_path.open("w", encoding="utf-8") as out_f:
-            output_rows = linking_pool.process_rows(_iter_input_rows(input_path, args.file_pattern))
-            for output_row in tqdm(output_rows, desc="Linking addresses"):
+                tqdm_logging_redirect(total=pending_rows, desc="Linking rows") as progress_bar:
+            output_rows = linking_pool.process_rows(
+                _iter_pending_rows(input_files, stats, destinations), on_error=_exception_row)
+            last_stats_time = time.monotonic()
+            for output_row in output_rows:
+                input_file = destinations.popleft()
+                if input_file is not current_file:
+                    if out_f is not None:
+                        out_f.close()
+                        logger.info("Finished linking %s", current_file.path)
+                    current_file = input_file
+                    logger.info(
+                        "Linking %d of the %d rows of %s into %s",
+                        input_file.pending_rows, input_file.rows, input_file.path, input_file.output_path)
+                    out_f = input_file.output_path.open("a", encoding="utf-8")
                 out_f.write(json.dumps(output_row, ensure_ascii=False) + "\n")
+                stats.observe_row(output_row)
+                if is_exception_row(output_row):
+                    exception_rows += 1
+                progress_bar.update(1)
+                if time.monotonic() - last_stats_time >= args.stats_interval:
+                    out_f.flush()
+                    logger.info(
+                        "Statistics so far (%d rows with exceptions this run):\n%s",
+                        exception_rows, stats.summary())
+                    last_stats_time = time.monotonic()
+            if current_file is not None:
+                logger.info("Finished linking %s", current_file.path)
     finally:
+        if out_f is not None:
+            out_f.close()
         geo_db_searcher.finalize()
         disambiguator.close()
+        logger.info("Final statistics (%d rows with exceptions this run):\n%s", exception_rows, stats.summary())
+    if exception_rows:
+        logger.warning("%d rows had exceptions; run again on the same output directory to retry them", exception_rows)
+    logger.info("Entity linking complete")
 
 
 if __name__ == "__main__":
