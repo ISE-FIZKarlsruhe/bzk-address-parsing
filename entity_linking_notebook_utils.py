@@ -16,6 +16,7 @@ import time
 from collections import OrderedDict, defaultdict
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
+import scipy.stats
 
 import colorlog
 import matplotlib.pyplot as plt
@@ -408,7 +409,6 @@ def link_status(pred_iri: Optional[str], true_row: pd.Series) -> str:
 def link_statuses(outcomes: list[entity_linking.LinkingOutcome], ground_truth: pd.DataFrame) -> list[str]:
     """link_status of every outcome, row-aligned with `ground_truth`."""
     return [link_status(outcome.iri, true_row) for outcome, (_, true_row) in zip(outcomes, ground_truth.iterrows())]
-
 
 # ---------------------------------------------------------------------------
 # Results tables
@@ -987,18 +987,68 @@ def _link_status_colors(labels) -> list:
     return [colors[label] for label in labels]
 
 
-def _percent_and_count(total: int) -> Callable[[float], str]:
+def _percent_and_count(total: int, keep_count:bool=True) -> Callable[[float], str]:
     """Pie autopct showing each slice's proportion and absolute count."""
-    return lambda percent: f"{percent:.1f}%\n({round(percent * total / 100)})"
+    if keep_count:
+        return lambda percent: f"{percent:.1f}%\n({round(percent * total / 100)})"
+    else:
+        return lambda percent: f"{percent:.1f}%"
 
 
-def plot_linking_status_pie(counts: pd.Series, title: str, ax=None) -> None:
+def plot_linking_status_pie(counts: pd.Series, title: str, ax=None, keep_count:bool=True) -> None:
     ax = counts.plot(
-        kind='pie', title=title, autopct=_percent_and_count(counts.sum()), ylabel='', ax=ax,
+        kind='pie', title=title, autopct=_percent_and_count(counts.sum(), keep_count=keep_count), ylabel='', ax=ax,
         figsize=None if ax is not None else (6, 6), colors=_link_status_colors(counts.index),
     )
     ax.figure.tight_layout()
 
+def confidence_interval(
+        correct_count : int, total_count : int, 
+        prior_a = 0.5, prior_b = 0.5,
+        confidence : float = 0.95
+    ) -> tuple[float, float]:
+    
+    tail_size = (1.0 - confidence) / 2.0
+    quantiles = [tail_size, 1.0 - tail_size]
+
+    posterior_a = correct_count + prior_a
+    posterior_b = total_count - correct_count + prior_b
+
+    bounds = scipy.stats.beta.ppf(quantiles, posterior_a, posterior_b)
+    return tuple(bounds)
+
+
+def confidence_intervals(
+        category_counts : pd.Series, 
+        beta_prior_params : tuple[float, float] = (0.5, 0.5),
+        confidence : float = 0.95
+    ) -> pd.DataFrame:
+    total_count = category_counts.sum()
+    a, b = beta_prior_params
+
+    rows = []
+    for count in category_counts.values:
+        correct_count = count
+        bounds = confidence_interval(
+            correct_count, total_count,
+            prior_a=a, prior_b=b, confidence=confidence
+        )
+        rows.append(bounds)
+    
+    return pd.DataFrame(
+        rows,
+        index=category_counts.index,
+        columns=["Lower bound", "Upper bound"]
+    )
+
+def display_linking_status_confidence_intervals(
+        counts: pd.Series,
+        title: str,
+        confidence = 0.95
+    ):
+    df = confidence_intervals(counts, confidence=confidence)
+    styled = df.style.format("{:.1%}").set_caption(f"Confidence intervals of {confidence*100:.0f}% {title}")
+    display(styled)
 
 def regex_parseable_linking_status_counts(
     baseline_parsed: pd.DataFrame, baseline_dir: Path, other_dir: Path, indexed_gt: pd.DataFrame,
