@@ -995,10 +995,12 @@ def _percent_and_count(total: int, keep_count:bool=True) -> Callable[[float], st
         return lambda percent: f"{percent:.1f}%"
 
 
-def plot_linking_status_pie(counts: pd.Series, title: str, ax=None, keep_count:bool=True) -> None:
+def plot_linking_status_pie(
+        counts: pd.Series, title: str, ax=None, keep_count:bool=True, slice_labels:bool=True) -> None:
     ax = counts.plot(
         kind='pie', title=title, autopct=_percent_and_count(counts.sum(), keep_count=keep_count), ylabel='', ax=ax,
         figsize=None if ax is not None else (6, 6), colors=_link_status_colors(counts.index),
+        labels=None if slice_labels else [''] * len(counts),
     )
     ax.figure.tight_layout()
 
@@ -1069,13 +1071,20 @@ def regex_parseable_linking_status_counts(
     return counts
 
 
-def plot_linking_status_pies(counts: dict[str, pd.Series], title: str) -> None:
-    """Side by side plot_linking_status_pie of each of `counts`, titled by its key."""
+def plot_linking_status_pies(counts: dict[str, pd.Series], title: str, keep_count : bool = True) -> None:
+    """Side by side plot_linking_status_pie of each of `counts`, titled by its key, with a single legend below."""
     fig, axes = plt.subplots(1, len(counts), figsize=(6 * len(counts), 6))
     for ax, (label, run_counts) in zip(axes, counts.items()):
-        plot_linking_status_pie(run_counts, title=f"{label} ({run_counts.sum()} addresses)", ax=ax)
+        plot_linking_status_pie(run_counts, title=f"{label} ({run_counts.sum()} addresses)",
+                                 ax=ax, slice_labels=False, keep_count=keep_count)
+    statuses = sorted(
+        set().union(*(run_counts.index for run_counts in counts.values())),
+        key=lambda status: _STATUS_ORDER.index(status) if status in _STATUS_ORDER else len(_STATUS_ORDER),
+    )
+    handles = [Patch(color=color) for color in _link_status_colors(statuses)]
+    fig.legend(handles, statuses, loc="lower center", ncol=len(statuses), frameon=False)
     fig.suptitle(title)
-    fig.tight_layout()
+    fig.tight_layout(rect=(0, 0.06, 1, 1))
 
 
 # Human readable names for the classification of a linked entity (geonames
